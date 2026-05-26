@@ -18,6 +18,8 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
+            "overlay_video_recorder_node = sam_benchmark_ros.overlay_video_recorder_node:main",
+            "result_recorder_node = sam_benchmark_ros.result_recorder_node:main",
             "sam_backend_node = sam_benchmark_ros.sam_backend_node:main",
             "video_stream_node = sam_benchmark_ros.video_stream_node:main",
         ],

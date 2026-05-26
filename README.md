@@ -86,5 +86,6 @@ source install/setup.bash
 ros2 run sam_benchmark_ros sam_backend_node --ros-args -p backend:=sam3
 ```
 
-The ROS wrapper intentionally publishes JSON summaries first. Full mask
-transport should be added after the backend and latency profile are stable.
+The ROS wrapper publishes result JSON, optional overlay images, per-frame CSV
+records, aggregate summaries, and overlay MP4 demos through separate recorder
+nodes. Use `docs/thor_setup.md` for the current command sequence.

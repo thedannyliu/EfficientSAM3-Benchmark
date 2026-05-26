@@ -535,7 +535,8 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p fps:=15.0
 ```
 
-Terminal B, start null backend first:
+Terminal B, start null backend first. Set `overlay_topic` when you want an
+overlay image stream:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -547,10 +548,39 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p device:=cpu \
   -p prompt:=monitor \
   -p image_topic:=/image \
-  -p result_topic:=/sam/result_json
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay
 ```
 
-Terminal C, inspect topics:
+Terminal C, record per-frame ROS benchmark rows and a summary:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p result_topic:=/sam/result_json \
+  -p csv_output:=../results/ros/null-test1-ros.csv \
+  -p summary_output:=../results/ros/null-test1-ros-summary.csv \
+  -p max_messages:=300
+```
+
+Terminal D, record the overlay image stream as an MP4:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=../overlays/ros/null-test1-ros.mp4 \
+  -p fps:=15.0 \
+  -p max_frames:=300
+```
+
+Optional inspection:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -565,31 +595,59 @@ When `backend:=null` works, switch Terminal B to SAM3 or EfficientSAM3.
 
 ## 14. ROS EfficientSAM3
 
-The current ROS wrapper exposes `backend`, `checkpoint_path`, `device`, `prompt`,
-and topic parameters. It does not yet expose `backbone_type`, `model_name`, or
-text-encoder parameters. For the current working EfficientViT-S checkpoint,
-that is fine because the defaults are:
+For the current working EfficientViT-S checkpoint, use:
 
 ```text
+backend=efficientsam3
 backbone_type=efficientvit
 model_name=b0
 ```
 
-Run:
+Terminal B command:
 
 ```bash
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=efficientsam3 \
   -p checkpoint_path:=../checkpoints/effsam3/efficient_sam3_efficientvit_s_sa_1b_1p.pt \
   -p device:=cuda \
+  -p backbone_type:=efficientvit \
+  -p model_name:=b0 \
   -p prompt:=monitor \
   -p image_topic:=/image \
-  -p result_topic:=/sam/result_json
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay
 ```
 
-The ROS node currently publishes JSON summaries only. It does not write overlay
-videos and does not publish full mask images yet. Use non-ROS `profile_video`
-for the authoritative latency CSV and overlay MP4 benchmark.
+For SAM3-LiteText with the legacy 77-size positional table, use `backend:=sam3`
+and pass the text encoder parameters explicitly:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p checkpoint_path:=../checkpoints/sam3_litetext/sam3_litetext_l_legacy77.pt \
+  -p device:=cuda \
+  -p text_encoder_type:=MobileCLIP2-L \
+  -p text_encoder_context_length:=16 \
+  -p text_encoder_pos_embed_table_size:=77 \
+  -p interpolate_pos_embed:=true \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay
+```
+
+Replace the LiteText checkpoint path with the local filename you downloaded.
+
+ROS benchmark outputs:
+
+```text
+../results/ros/*-ros.csv          per-frame latency/profile rows
+../results/ros/*-ros-summary.csv  aggregate latency/FPS summary
+../overlays/ros/*-ros.mp4         overlay demo video
+```
+
+Use non-ROS `profile_video` for the most controlled offline benchmark. Use the
+ROS pipeline to measure transport, callback, and deployment behavior.
 
 ## 15. Camera Test
 
