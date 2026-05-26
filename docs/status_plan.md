@@ -17,12 +17,18 @@ Last updated: 2026-05-26.
 - Shared backend API in `sam_backend/`.
 - Video profiling CLI: `sam_backend/profile_video.py`.
 - EfficientSAM3 variant runner: `sam_backend/variant_runner.py`.
+- ROS-free Thor pipeline smoke runner: `sam_backend/thor_pipeline_smoke.py`.
 - CSV profiling fields include total latency, image encoder time, text encoder time, grounding time, CUDA memory, mask count, scores, and parameter counts.
 - Overlay demo video export writes masks/boxes to MP4.
 - PACE setup and Slurm scripts:
   - `scripts/setup_pace_venv.sh`
+  - `scripts/run_pace_thor_pipeline_smoke.sh`
   - `scripts/pace_l40s_profile_sam3.sbatch`
   - `scripts/pace_l40s_profile_efficientsam3.sbatch`
+
+PACE does not provide system ROS 2 on the login node. A separate experimental
+conda/robostack environment is described by `environment-ros-jazzy.yml`; the
+ROS-free smoke runner is the reliable PACE check for video-to-backend plumbing.
 
 ## Active PACE Jobs
 

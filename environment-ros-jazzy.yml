@@ -1,0 +1,16 @@
+name: esam3-ros-jazzy
+channels:
+  - robostack-jazzy
+  - conda-forge
+dependencies:
+  - python=3.12
+  - ros-jazzy-ros-base
+  - ros-jazzy-cv-bridge
+  - ros-jazzy-sensor-msgs
+  - ros-jazzy-std-msgs
+  - colcon-common-extensions
+  - numpy
+  - opencv
+  - pip
+  - pip:
+      - -e .
