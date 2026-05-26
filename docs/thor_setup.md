@@ -520,9 +520,20 @@ It may show:
 That is acceptable when `scripts/source_thor_ros_env.sh` has been sourced,
 because it adds the venv site-packages and EfficientSAM3 source to `PYTHONPATH`.
 
-## 13. ROS Video Pipeline
+## 13. ROS Video Pipeline from a Real Video File
 
-Terminal A, publish video frames:
+This section uses a recorded video file as the ROS image source. Do not switch
+to a real camera until this video-file pipeline works end to end.
+
+The data path is:
+
+```text
+videos/test1.mov -> /image -> sam_backend_node -> /sam/result_json
+                                      \
+                                       -> /sam/overlay
+```
+
+### Terminal A: publish video frames
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -535,8 +546,19 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p fps:=15.0
 ```
 
-Terminal B, start null backend first. Set `overlay_topic` when you want an
-overlay image stream:
+Check that the video is actually being loaded and published:
+
+```bash
+ros2 topic hz /image
+```
+
+You should see a nonzero rate. It may be lower than the requested `15.0` FPS if
+the backend or system load is high.
+
+### Terminal B: run one segmentation backend
+
+Start with the null backend. It does not run a model, but it confirms ROS
+message flow and overlay recording:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -552,58 +574,22 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-Terminal C, record per-frame ROS benchmark rows and a summary:
+After the null backend works, stop Terminal B and replace it with one real
+backend command below.
+
+SAM3 baseline:
 
 ```bash
-cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
-cd ros_ws
-
-ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p device:=cuda \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p csv_output:=../results/ros/null-test1-ros.csv \
-  -p summary_output:=../results/ros/null-test1-ros-summary.csv \
-  -p max_messages:=300
+  -p overlay_topic:=/sam/overlay
 ```
 
-Terminal D, record the overlay image stream as an MP4:
-
-```bash
-cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
-cd ros_ws
-
-ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
-  -p overlay_topic:=/sam/overlay \
-  -p video_output:=../overlays/ros/null-test1-ros.mp4 \
-  -p fps:=15.0 \
-  -p max_frames:=300
-```
-
-Optional inspection:
-
-```bash
-cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
-cd ros_ws
-
-ros2 topic echo /sam/result_json
-ros2 topic hz /image
-```
-
-When `backend:=null` works, switch Terminal B to SAM3 or EfficientSAM3.
-
-## 14. ROS EfficientSAM3
-
-For the current working EfficientViT-S checkpoint, use:
-
-```text
-backend=efficientsam3
-backbone_type=efficientvit
-model_name=b0
-```
-
-Terminal B command:
+EfficientSAM3 EfficientViT-S:
 
 ```bash
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
@@ -618,8 +604,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For SAM3-LiteText with the legacy 77-size positional table, use `backend:=sam3`
-and pass the text encoder parameters explicitly:
+SAM3-LiteText legacy 77 positional table:
 
 ```bash
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
@@ -638,7 +623,51 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
 
 Replace the LiteText checkpoint path with the local filename you downloaded.
 
-ROS benchmark outputs:
+### Terminal C: inspect segmentation results
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+
+ros2 topic echo /sam/result_json
+```
+
+Each message should contain fields such as `latency_ms`, `mask_count`,
+`box_count`, `image_encoder_ms`, `text_encoder_ms`, and `grounding_ms`.
+
+### Optional Terminal D: record benchmark CSV
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p result_topic:=/sam/result_json \
+  -p csv_output:=../results/ros/MODEL-test1-ros.csv \
+  -p summary_output:=../results/ros/MODEL-test1-ros-summary.csv \
+  -p max_messages:=300
+```
+
+### Optional Terminal E: record overlay video
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=../overlays/ros/MODEL-test1-ros.mp4 \
+  -p fps:=15.0 \
+  -p max_frames:=300
+```
+
+Use a descriptive `MODEL` stem such as `sam3`, `esam3-efficientvit-s`, or
+`sam3-litetext-l`.
+
+ROS outputs:
 
 ```text
 ../results/ros/*-ros.csv          per-frame latency/profile rows
@@ -646,24 +675,56 @@ ROS benchmark outputs:
 ../overlays/ros/*-ros.mp4         overlay demo video
 ```
 
-Use non-ROS `profile_video` for the most controlled offline benchmark. Use the
-ROS pipeline to measure transport, callback, and deployment behavior.
+For the first successful run, confirm all three conditions:
 
-## 15. Camera Test
-
-After video-file ROS plumbing works, switch the video node to OpenCV camera
-device `0`:
-
-```bash
-ros2 run sam_benchmark_ros video_stream_node --ros-args \
-  -p video_path:="" \
-  -p image_topic:=/image \
-  -p fps:=15.0
+```text
+/image has a nonzero rate
+/sam/result_json publishes mask/box counts
+the overlay MP4 opens and shows masks over the video
 ```
 
-If Thor camera input requires a GStreamer/NVIDIA camera pipeline, add a
-camera-specific node. Do not force a GStreamer pipeline string into the existing
-smoke video node.
+## 14. ROS Backend Parameter Notes
+
+Use these notes when selecting the Terminal B backend command above.
+
+For the current working EfficientViT-S checkpoint, use:
+
+```text
+backend=efficientsam3
+backbone_type=efficientvit
+model_name=b0
+```
+
+For SAM3-LiteText with the legacy 77-size positional table, use `backend:=sam3`
+and pass the text encoder parameters explicitly.
+
+For fixed ctx16 LiteText checkpoints, use:
+
+```text
+text_encoder_context_length=16
+text_encoder_pos_embed_table_size=16
+interpolate_pos_embed=false
+```
+
+For legacy checkpoints whose positional embedding shape is `77`, use:
+
+```text
+text_encoder_context_length=16
+text_encoder_pos_embed_table_size=77
+interpolate_pos_embed=true
+```
+
+Use non-ROS `profile_video` for the most controlled offline benchmark. Use the
+ROS pipeline to measure transport, callback, and deployment behavior with the
+same recorded video input.
+
+## 15. Camera Input Later
+
+This tutorial intentionally stops at recorded-video ROS input. Camera input
+should be validated only after the file-based pipeline works for the selected
+backend. If Thor camera input requires a GStreamer/NVIDIA camera pipeline, add a
+camera-specific node later instead of forcing a GStreamer string into
+`video_stream_node`.
 
 ## 16. TensorRT and ONNX
 
