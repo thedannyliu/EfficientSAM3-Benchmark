@@ -34,6 +34,7 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
             text_encoder_context_length=args.text_encoder_context_length,
             text_encoder_pos_embed_table_size=args.text_encoder_pos_embed_table_size,
             interpolate_pos_embed=args.interpolate_pos_embed,
+            enable_inst_interactivity=bool(args.point),
         )
     )
     torch_module = getattr(backend, "torch", None)

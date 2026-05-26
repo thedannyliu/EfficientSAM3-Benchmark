@@ -36,6 +36,7 @@ class BackendConfig:
     text_encoder_context_length: int = 77
     text_encoder_pos_embed_table_size: int | None = None
     interpolate_pos_embed: bool = False
+    enable_inst_interactivity: bool = False
 
 
 class SegmentationBackend(Protocol):
@@ -75,7 +76,7 @@ class Sam3ImageBackend:
                 text_encoder_context_length=config.text_encoder_context_length,
                 text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
                 interpolate_pos_embed=config.interpolate_pos_embed,
-                enable_inst_interactivity=False,
+                enable_inst_interactivity=config.enable_inst_interactivity,
             )
         elif config.backend == "efficientsam3":
             if not config.checkpoint_path:
@@ -89,7 +90,7 @@ class Sam3ImageBackend:
                 text_encoder_context_length=config.text_encoder_context_length,
                 text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
                 interpolate_pos_embed=config.interpolate_pos_embed,
-                enable_inst_interactivity=False,
+                enable_inst_interactivity=config.enable_inst_interactivity,
             )
         else:
             raise ValueError(f"unsupported SAM backend: {config.backend}")

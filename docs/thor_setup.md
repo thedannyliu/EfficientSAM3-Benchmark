@@ -371,7 +371,8 @@ cat overlays should be treated as a failed quality check.
 
 If text prompt quality is unclear, test a point prompt at the center of `cat1`.
 This bypasses text grounding and checks whether the image/geometry path can
-segment the object under the point.
+segment the object under the point. The image profiler enables SAM3 instance
+interactivity automatically when `--point` is provided.
 
 Run SAM3 with a positive point at the image center:
 
