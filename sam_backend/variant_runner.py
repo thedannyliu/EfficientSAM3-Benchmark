@@ -21,6 +21,8 @@ class Variant:
     model_name: str
     text_encoder_type: str
     text_context: int = 16
+    text_pos_embed_table_size: int = 16
+    interpolate_pos_embed: bool = False
 
 
 DEFAULT_VARIANTS = [
@@ -44,6 +46,7 @@ DEFAULT_VARIANTS = [
         "efficientvit",
         "b0",
         "MobileCLIP-S1",
+        text_pos_embed_table_size=77,
     ),
     Variant(
         "es3_strong_image_strong_available_text",
@@ -51,6 +54,7 @@ DEFAULT_VARIANTS = [
         "efficientvit",
         "b2",
         "MobileCLIP-S1",
+        text_pos_embed_table_size=77,
     ),
 ]
 
@@ -89,7 +93,7 @@ def main() -> None:
                 "--text-encoder-context-length",
                 str(variant.text_context),
                 "--text-encoder-pos-embed-table-size",
-                str(variant.text_context),
+                str(variant.text_pos_embed_table_size),
                 "--prompt",
                 args.prompt,
                 "--video",
@@ -103,6 +107,8 @@ def main() -> None:
                 "--overlay-output",
                 str(overlay_path),
             ]
+            if variant.interpolate_pos_embed:
+                cmd.append("--interpolate-pos-embed")
             subprocess.run(cmd, check=True)
             rows.append(summarize_csv(csv_path, variant, video, overlay_path))
 

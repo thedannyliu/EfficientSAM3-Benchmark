@@ -25,19 +25,20 @@ Last updated: 2026-05-26.
   - `scripts/run_pace_thor_pipeline_smoke.sh`
   - `scripts/pace_l40s_profile_sam3.sbatch`
   - `scripts/pace_l40s_profile_efficientsam3.sbatch`
+- Traditional Chinese Thor guide: `docs/thor_setup_zh_tw.md`.
 
 PACE does not provide system ROS 2 on the login node. A separate experimental
 conda/robostack environment is described by `environment-ros-jazzy.yml`; the
 ROS-free smoke runner is the reliable PACE check for video-to-backend plumbing.
 
-## Active PACE Jobs
+## PACE Benchmark Jobs
 
 Both use `gpu-l40s`, account `gts-agarg35-ideas_l40s`, and QOS `embers`.
 
 | Job ID | Job | Status |
 | --- | --- | --- |
-| `9183683` | EfficientSAM3 profiling | Pending, reason `Priority` |
-| `9183707` | SAM3 profiling | Pending, reason `Priority` |
+| `9183683` | EfficientSAM3 profiling | Failed after partial output; MobileCLIP-S1 variants needed 77-position text table |
+| `9183707` | SAM3 profiling | Completed |
 
 Monitor with:
 
@@ -46,6 +47,22 @@ squeue -j 9183683,9183707
 tail -f logs/esam3-prof-9183683.out
 tail -f logs/sam3-prof-9183707.out
 ```
+
+SAM3 completed 30 frames per video on L40S:
+
+| Video | Mean total latency |
+| --- | --- |
+| `videos/test1.mov` | 234.63 ms |
+| `videos/test2.mov` | 168.33 ms |
+
+EfficientSAM3 partial outputs from job `9183683`:
+
+| Variant | Video | Mean total latency |
+| --- | --- | --- |
+| `es3p1_weak_image_weak_text` | `videos/test1.mov` | 182.86 ms |
+| `es3p1_weak_image_weak_text` | `videos/test2.mov` | 68.54 ms |
+| `es3p1_strong_image_weak_text` | `videos/test1.mov` | 73.56 ms |
+| `es3p1_strong_image_weak_text` | `videos/test2.mov` | 73.26 ms |
 
 ## Expected Outputs
 
