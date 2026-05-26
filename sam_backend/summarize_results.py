@@ -101,6 +101,7 @@ def main() -> None:
         print(
             f"{row['model_id']}: frames={row['frames']} "
             f"mean={_fmt(row['mean_total_ms'])}ms "
+            f"mean_fps={_fmt(row['mean_total_fps'])} "
             f"p50={_fmt(row['p50_total_ms'])}ms "
             f"p95={_fmt(row['p95_total_ms'])}ms "
             f"csv={row['csv']}"
@@ -116,14 +117,23 @@ SUMMARY_FIELDS = [
     "frames",
     "prompt",
     "mean_total_ms",
+    "mean_total_fps",
     "p50_total_ms",
+    "p50_total_fps",
     "p95_total_ms",
+    "p95_total_fps",
     "min_total_ms",
+    "max_total_fps",
     "max_total_ms",
+    "min_total_fps",
     "mean_image_encoder_ms",
+    "mean_image_encoder_fps",
     "mean_text_encoder_ms",
+    "mean_text_encoder_fps",
     "mean_grounding_ms",
+    "mean_grounding_fps",
     "mean_other_ms",
+    "mean_other_fps",
     "mean_mask_count",
     "mean_score_max",
     "params_total",
@@ -182,6 +192,15 @@ def summarize_csv(path: Path) -> dict[str, object] | None:
     params_total = _float(first.get("params_total"))
     params_image = _float(first.get("params_image_encoder"))
     params_text = _float(first.get("params_text_encoder"))
+    mean_total_ms = _mean(totals)
+    p50_total_ms = _percentile(totals, 0.50)
+    p95_total_ms = _percentile(totals, 0.95)
+    min_total_ms = min(totals)
+    max_total_ms = max(totals)
+    mean_image_encoder_ms = _mean_field(rows, "image_encoder_ms")
+    mean_text_encoder_ms = _mean_field(rows, "text_encoder_ms")
+    mean_grounding_ms = _mean_field(rows, "grounding_ms")
+    mean_other_ms = _mean_field(rows, "other_ms")
 
     return {
         "model_id": first.get("model_id") or path.stem,
@@ -191,15 +210,24 @@ def summarize_csv(path: Path) -> dict[str, object] | None:
         "overlay": _overlay_for(path),
         "frames": len(rows),
         "prompt": first.get("prompt", ""),
-        "mean_total_ms": _mean(totals),
-        "p50_total_ms": _percentile(totals, 0.50),
-        "p95_total_ms": _percentile(totals, 0.95),
-        "min_total_ms": min(totals),
-        "max_total_ms": max(totals),
-        "mean_image_encoder_ms": _mean_field(rows, "image_encoder_ms"),
-        "mean_text_encoder_ms": _mean_field(rows, "text_encoder_ms"),
-        "mean_grounding_ms": _mean_field(rows, "grounding_ms"),
-        "mean_other_ms": _mean_field(rows, "other_ms"),
+        "mean_total_ms": mean_total_ms,
+        "mean_total_fps": _fps(mean_total_ms),
+        "p50_total_ms": p50_total_ms,
+        "p50_total_fps": _fps(p50_total_ms),
+        "p95_total_ms": p95_total_ms,
+        "p95_total_fps": _fps(p95_total_ms),
+        "min_total_ms": min_total_ms,
+        "max_total_fps": _fps(min_total_ms),
+        "max_total_ms": max_total_ms,
+        "min_total_fps": _fps(max_total_ms),
+        "mean_image_encoder_ms": mean_image_encoder_ms,
+        "mean_image_encoder_fps": _fps(mean_image_encoder_ms),
+        "mean_text_encoder_ms": mean_text_encoder_ms,
+        "mean_text_encoder_fps": _fps(mean_text_encoder_ms),
+        "mean_grounding_ms": mean_grounding_ms,
+        "mean_grounding_fps": _fps(mean_grounding_ms),
+        "mean_other_ms": mean_other_ms,
+        "mean_other_fps": _fps(mean_other_ms),
         "mean_mask_count": _mean_field(rows, "mask_count"),
         "mean_score_max": _mean_field(rows, "score_max"),
         "params_total": _int_or_empty(params_total),
@@ -285,6 +313,12 @@ def _pct(value: float | None, reference: float) -> float | str:
     if value is None:
         return ""
     return value / reference * 100.0
+
+
+def _fps(latency_ms: float | None) -> float | str:
+    if latency_ms is None or latency_ms <= 0:
+        return ""
+    return 1000.0 / latency_ms
 
 
 def _int_or_empty(value: float | None) -> int | str:

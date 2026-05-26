@@ -262,7 +262,8 @@ python -m sam_backend.summarize_results results \
   --catalog-output results/model_catalog.csv
 ```
 
-This reads per-frame CSV files, writes latency summaries, and writes a README
+This reads per-frame CSV files, writes latency summaries, converts latency to
+FPS for total/image-encoder/text-encoder/grounding timings, and writes a README
 model catalog with parameter counts and percentages relative to original SAM3.
 
 Manual one-off summary:

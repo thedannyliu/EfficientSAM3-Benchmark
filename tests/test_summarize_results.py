@@ -63,8 +63,13 @@ class SummarizeResultsTest(unittest.TestCase):
             assert summary is not None
             self.assertEqual(summary["frames"], 3)
             self.assertEqual(summary["mean_total_ms"], 70.0 / 3.0)
+            self.assertAlmostEqual(float(summary["mean_total_fps"]), 1000.0 / (70.0 / 3.0))
             self.assertEqual(summary["p50_total_ms"], 20.0)
+            self.assertEqual(summary["p50_total_fps"], 50.0)
             self.assertEqual(summary["p95_total_ms"], 20.0)
+            self.assertEqual(summary["mean_image_encoder_fps"], 500.0)
+            self.assertAlmostEqual(float(summary["mean_text_encoder_fps"]), 1000.0 / 3.0)
+            self.assertEqual(summary["mean_grounding_fps"], 250.0)
             self.assertAlmostEqual(float(summary["params_total_pct_of_sam3_image_text"]), 100.0)
 
     def test_catalog_contains_readme_models(self) -> None:
