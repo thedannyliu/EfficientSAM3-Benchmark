@@ -36,7 +36,6 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
             interpolate_pos_embed=args.interpolate_pos_embed,
         )
     )
-    prompt = Prompt(text=args.prompt)
     torch_module = getattr(backend, "torch", None)
     if torch_module is not None and torch_module.cuda.is_available():
         torch_module.cuda.reset_peak_memory_stats()
@@ -46,6 +45,7 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
     if frame_bgr is None:
         raise RuntimeError(f"failed to read image: {args.image}")
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    prompt = _build_prompt(args, frame_rgb.shape[1], frame_rgb.shape[0])
 
     profile = {}
     start = perf_counter()
@@ -71,6 +71,8 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
         "backend": args.backend,
         "image": str(args.image),
         "prompt": args.prompt,
+        "points": prompt.points,
+        "labels": prompt.labels,
         "width": frame_rgb.shape[1],
         "height": frame_rgb.shape[0],
         "mask_count": _safe_len(prediction.masks),
@@ -94,6 +96,30 @@ def _safe_len(value: object) -> int:
         return 0
 
 
+def _build_prompt(args: argparse.Namespace, width: int, height: int) -> Prompt:
+    if args.point:
+        points = [_parse_point(value, width, height, args.point_normalized) for value in args.point]
+        labels = args.point_label or [1] * len(points)
+        if len(labels) != len(points):
+            raise ValueError("--point-label count must match --point count")
+        return Prompt(points=points, labels=labels)
+    if args.prompt:
+        return Prompt(text=args.prompt)
+    raise ValueError("provide --prompt or at least one --point")
+
+
+def _parse_point(value: str, width: int, height: int, normalized: bool) -> tuple[float, float]:
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError(f"point must be formatted as x,y: {value!r}")
+    x = float(parts[0])
+    y = float(parts[1])
+    if normalized:
+        x *= width
+        y *= height
+    return (x, y)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Profile SAM3/EfficientSAM3 on a single image.")
     parser.add_argument("--model-id", default="sam3-image")
@@ -107,6 +133,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text-encoder-pos-embed-table-size", type=int)
     parser.add_argument("--interpolate-pos-embed", action="store_true")
     parser.add_argument("--prompt", default="cats")
+    parser.add_argument(
+        "--point",
+        action="append",
+        help="Point prompt as x,y. May be repeated. Use --point-normalized for 0..1 coordinates.",
+    )
+    parser.add_argument(
+        "--point-label",
+        action="append",
+        type=int,
+        help="Point label for each --point, usually 1 for positive or 0 for negative.",
+    )
+    parser.add_argument("--point-normalized", action="store_true", help="Interpret --point values as 0..1 image fractions.")
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--overlay-output", type=Path)

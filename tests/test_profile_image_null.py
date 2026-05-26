@@ -33,6 +33,9 @@ class NullProfileImageTest(unittest.TestCase):
                 text_encoder_pos_embed_table_size=None,
                 interpolate_pos_embed=False,
                 prompt="cats",
+                point=None,
+                point_label=None,
+                point_normalized=False,
                 image=image_path,
                 json_output=None,
                 overlay_output=overlay_path,
@@ -43,6 +46,37 @@ class NullProfileImageTest(unittest.TestCase):
             self.assertEqual(summary["prompt"], "cats")
             self.assertEqual(summary["mask_count"], 1)
             self.assertTrue(overlay_path.exists())
+
+    def test_profile_image_accepts_normalized_point_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            image_path = tmp / "cat1.jpeg"
+            frame = np.zeros((50, 100, 3), dtype=np.uint8)
+            self.assertTrue(cv2.imwrite(str(image_path), frame))
+
+            args = argparse.Namespace(
+                model_id="null-cat1-point",
+                backend="null",
+                checkpoint_path=None,
+                device="cpu",
+                backbone_type="efficientvit",
+                model_name="b0",
+                text_encoder_type=None,
+                text_encoder_context_length=77,
+                text_encoder_pos_embed_table_size=None,
+                interpolate_pos_embed=False,
+                prompt=None,
+                point=["0.5,0.5"],
+                point_label=[1],
+                point_normalized=True,
+                image=image_path,
+                json_output=None,
+                overlay_output=None,
+            )
+            summary = profile_image(args)
+
+            self.assertEqual(summary["points"], [(50.0, 25.0)])
+            self.assertEqual(summary["labels"], [1])
 
 
 if __name__ == "__main__":

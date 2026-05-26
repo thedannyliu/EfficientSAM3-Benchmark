@@ -367,6 +367,55 @@ Open both overlay PNGs and confirm the cat masks/boxes are visually correct.
 For text-prompt quality checks, a model that runs but produces empty or wrong
 cat overlays should be treated as a failed quality check.
 
+### Single-image center point prompt check
+
+If text prompt quality is unclear, test a point prompt at the center of `cat1`.
+This bypasses text grounding and checks whether the image/geometry path can
+segment the object under the point.
+
+Run SAM3 with a positive point at the image center:
+
+```bash
+python -m sam_backend.profile_image \
+  --model-id sam3-cat1-center-point \
+  --backend sam3 \
+  --device cuda \
+  --prompt "" \
+  --point 0.5,0.5 \
+  --point-normalized \
+  --point-label 1 \
+  --image images/cat1.jpeg \
+  --json-output results/image_checks/sam3-cat1-center-point.json \
+  --overlay-output overlays/image_checks/sam3-cat1-center-point.png
+```
+
+Run EfficientSAM3 with the same point:
+
+```bash
+python -m sam_backend.profile_image \
+  --model-id esam3-efficientvit-s-sa1b1p-cat1-center-point \
+  --backend efficientsam3 \
+  --checkpoint-path checkpoints/effsam3/efficient_sam3_efficientvit_s_sa_1b_1p.pt \
+  --device cuda \
+  --backbone-type efficientvit \
+  --model-name b0 \
+  --prompt "" \
+  --point 0.5,0.5 \
+  --point-normalized \
+  --point-label 1 \
+  --image images/cat1.jpeg \
+  --json-output results/image_checks/esam3-cat1-center-point.json \
+  --overlay-output overlays/image_checks/esam3-cat1-center-point.png
+```
+
+Compare the point-prompt overlays:
+
+```bash
+cat results/image_checks/sam3-cat1-center-point.json
+cat results/image_checks/esam3-cat1-center-point.json
+ls -lh overlays/image_checks/*cat1-center-point.png
+```
+
 ### SAM3 video baseline
 
 SAM3 baseline:
