@@ -32,6 +32,10 @@ class BackendConfig:
     device: str | None = None
     backbone_type: str = "efficientvit"
     model_name: str = "b0"
+    text_encoder_type: str | None = None
+    text_encoder_context_length: int = 77
+    text_encoder_pos_embed_table_size: int | None = None
+    interpolate_pos_embed: bool = False
 
 
 class SegmentationBackend(Protocol):
@@ -64,15 +68,28 @@ class Sam3ImageBackend:
         processor_mod = _import_required("sam3.model.sam3_image_processor")
 
         if config.backend == "sam3":
-            self.model = builder.build_sam3_image_model()
+            self.model = builder.build_sam3_image_model(
+                checkpoint_path=config.checkpoint_path,
+                device=config.device,
+                text_encoder_type=config.text_encoder_type,
+                text_encoder_context_length=config.text_encoder_context_length,
+                text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
+                interpolate_pos_embed=config.interpolate_pos_embed,
+                enable_inst_interactivity=False,
+            )
         elif config.backend == "efficientsam3":
             if not config.checkpoint_path:
                 raise ValueError("--checkpoint-path is required for EfficientSAM3")
             self.model = builder.build_efficientsam3_image_model(
                 checkpoint_path=config.checkpoint_path,
+                device=config.device,
                 backbone_type=config.backbone_type,
                 model_name=config.model_name,
-                enable_inst_interactivity=True,
+                text_encoder_type=config.text_encoder_type,
+                text_encoder_context_length=config.text_encoder_context_length,
+                text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
+                interpolate_pos_embed=config.interpolate_pos_embed,
+                enable_inst_interactivity=False,
             )
         else:
             raise ValueError(f"unsupported SAM backend: {config.backend}")
@@ -82,7 +99,7 @@ class Sam3ImageBackend:
         if hasattr(self.model, "eval"):
             self.model.eval()
 
-        self.processor = processor_mod.Sam3Processor(self.model)
+        self.processor = processor_mod.Sam3Processor(self.model, device=config.device or "cuda")
 
     def predict(self, image: Any, prompt: Prompt) -> Prediction:
         pil_image = _as_pil_image(image)

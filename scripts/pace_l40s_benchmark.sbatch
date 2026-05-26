@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=sam3-bench
 #SBATCH --partition=gpu-l40s
+#SBATCH --account=gts-agarg35-ideas_l40s
 #SBATCH --qos=embers
 #SBATCH --gres=gpu:l40s:1
 #SBATCH --cpus-per-task=8

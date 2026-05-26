@@ -49,6 +49,7 @@ module load python/3.12.5 cuda/12.6.1
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
+python -m pip install -r requirements.txt
 python -m pip install -e .
 
 sbatch scripts/pace_l40s_benchmark.sbatch
@@ -56,6 +57,18 @@ sbatch scripts/pace_l40s_benchmark.sbatch
 
 Install SAM3 or EfficientSAM3 in that same Python 3.12 environment before using
 the real backends.
+
+For EfficientSAM3 component profiling on the local demo videos:
+
+```bash
+bash scripts/setup_pace_venv.sh
+sbatch scripts/pace_l40s_profile_sam3.sbatch
+sbatch scripts/pace_l40s_profile_efficientsam3.sbatch
+```
+
+The default prompt is `monitor`. Per-frame component timings and parameter
+counts are written to `results/`; mask overlay demo videos are written to
+`overlays/`.
 
 ## Thor ROS Shape
 

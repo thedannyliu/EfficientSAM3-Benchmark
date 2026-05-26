@@ -13,6 +13,10 @@ install/
 log/
 logs/
 results/
+overlays/
+videos/
+external/
+checkpoints/
 
 *.pt
 *.pth
