@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>sam_benchmark_ros</name>
+  <version>0.1.0</version>
+  <description>ROS 2 wrappers for SAM3/EfficientSAM3 benchmark backend.</description>
+  <maintainer email="eliu354@gatech.edu">eliu354</maintainer>
+  <license>Apache-2.0</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

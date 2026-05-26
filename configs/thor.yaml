@@ -1,0 +1,10 @@
+os: "Ubuntu 24.04"
+ros_distro: "jazzy"
+backend:
+  device: "cuda"
+  prompt: "person"
+  warmup: 10
+  runs: 100
+notes:
+  - "Install CUDA/TensorRT from JetPack packages on Thor."
+  - "Build TensorRT engines on Thor, not on PACE."
