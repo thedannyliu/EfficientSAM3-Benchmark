@@ -67,11 +67,11 @@ python -m pip install -U pip
 # 依 NVIDIA 當前 Jetson PyTorch 指南或容器版本選擇。
 
 # 2. 再裝 repo 的非 torch dependency
-python -m pip install numpy opencv-python-headless pillow pyyaml huggingface_hub
+python -m pip install "numpy>=1.26,<2" opencv-python-headless pillow pyyaml huggingface_hub
 python -m pip install timm tqdm ftfy==6.1.1 regex iopath typing_extensions psutil
 
 # 3. 安裝本 repo
-python -m pip install -e .
+python -m pip install -e . --no-deps
 ```
 
 確認：
@@ -221,36 +221,70 @@ sudo apt install -y \
 
 ## 9. Build ROS workspace
 
-```bash
-cd EfficientSAM3-Benchmark
-source /opt/ros/jazzy/setup.bash
-source .venv/bin/activate  # 若使用外部 venv，改成該 venv 的 activate 路徑
+Thor 上 ROS console script 可能仍使用 `/usr/bin/python3` shebang。為了讓它同時看到：
 
-python -c "import cv2, rclpy, cv_bridge; print('ros python ok')"
+- repo root 的 `sam_backend`
+- venv 裡的 `torch`
+- editable EfficientSAM3 repo 裡的 `sam3`
+- ROS Jazzy 的 `rclpy` / `cv_bridge`
+
+請使用 repo 提供的 Thor ROS 環境腳本。預設假設：
+
+```text
+venv: ~/venvs/effisam3_venv_ros
+EfficientSAM3 source: ~/efficientsam3/sam3
+ROS: /opt/ros/jazzy/setup.bash
+```
+
+若路徑不同，先設定：
+
+```bash
+export THOR_VENV=/path/to/venv
+export SAM3_SOURCE=/path/to/efficientsam3/sam3
+```
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+python -m pip install "numpy>=1.26,<2"
+python -m pip install -e . --no-deps
+python -c "import cv2, rclpy, cv_bridge, torch, sam3, sam_backend; print('ros python ok')"
 
 cd ros_ws
 colcon build --symlink-install
-source install/setup.bash
+cd ..
+source scripts/source_thor_ros_env.sh
 ```
 
 如果 `cv_bridge` 或 Python path 出問題，先確認：
 
 ```bash
 which python
-python -c "import cv2, rclpy, cv_bridge; print('ok')"
+python -c "import cv2, rclpy, cv_bridge, torch, sam3, sam_backend; print('ok')"
+head -1 ros_ws/install/sam_benchmark_ros/lib/sam_benchmark_ros/sam_backend_node
 ```
 
-ROS 的 Python 與 `.venv` 可能衝突。若衝突嚴重，優先用系統 Python 跑 ROS wrapper，backend 依需求獨立成 service/process。
+若 `head -1` 顯示 `#!/usr/bin/python3`，屬於正常狀況；`scripts/source_thor_ros_env.sh`
+會把 venv site-packages 與 EfficientSAM3 source 加到 `PYTHONPATH`。
+
+若先前曾執行 `python -m pip install -e .` 並把 NumPy 升到 2.x，`cv_bridge`
+可能會出現 NumPy ABI error。修復：
+
+```bash
+source scripts/source_thor_ros_env.sh
+python -m pip install --force-reinstall "numpy>=1.26,<2"
+python -m pip install -e . --no-deps
+```
 
 ## 10. 用影片測 ROS nodes
 
 Terminal A：
 
 ```bash
-cd EfficientSAM3-Benchmark/ros_ws
-source /opt/ros/jazzy/setup.bash
-source ../.venv/bin/activate  # 若使用外部 venv，改成該 venv 的 activate 路徑
-source install/setup.bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
 
 ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p video_path:=../videos/test1.mov \
@@ -261,10 +295,9 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
 Terminal B：
 
 ```bash
-cd EfficientSAM3-Benchmark/ros_ws
-source /opt/ros/jazzy/setup.bash
-source ../.venv/bin/activate  # 若使用外部 venv，改成該 venv 的 activate 路徑
-source install/setup.bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=null \
@@ -277,10 +310,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
 Terminal C：
 
 ```bash
-cd EfficientSAM3-Benchmark/ros_ws
-source /opt/ros/jazzy/setup.bash
-source ../.venv/bin/activate  # 若使用外部 venv，改成該 venv 的 activate 路徑
-source install/setup.bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
 
 ros2 topic echo /sam/result_json
 ros2 topic hz /image
@@ -291,10 +323,9 @@ ros2 topic hz /image
 以下 ROS backend 指令假設沿用 Terminal B 的 shell。若開新 terminal，先重新執行：
 
 ```bash
-cd EfficientSAM3-Benchmark/ros_ws
-source /opt/ros/jazzy/setup.bash
-source ../.venv/bin/activate  # 若使用外部 venv，改成該 venv 的 activate 路徑
-source install/setup.bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
 ```
 
 ## 11. 換成 SAM3 ROS backend

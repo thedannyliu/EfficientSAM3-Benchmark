@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Portable SAM3/EfficientSAM3 backend benchmark scaffold for PACE and Jetson Thor."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "numpy>=1.26",
+  "numpy>=1.26,<2",
   "opencv-python-headless>=4.9",
   "pillow>=10",
   "pyyaml>=6",
