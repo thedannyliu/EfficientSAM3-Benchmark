@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+import argparse
+import tempfile
+import unittest
+from pathlib import Path
+
+import cv2
+import numpy as np
+
+from sam_backend.profile_image import profile_image
+
+
+class NullProfileImageTest(unittest.TestCase):
+    def test_profile_image_writes_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            image_path = tmp / "cats.png"
+            overlay_path = tmp / "overlay.png"
+            frame = np.zeros((48, 64, 3), dtype=np.uint8)
+            frame[12:36, 20:44] = (255, 255, 255)
+            self.assertTrue(cv2.imwrite(str(image_path), frame))
+
+            args = argparse.Namespace(
+                model_id="null-cats",
+                backend="null",
+                checkpoint_path=None,
+                device="cpu",
+                backbone_type="efficientvit",
+                model_name="b0",
+                text_encoder_type=None,
+                text_encoder_context_length=77,
+                text_encoder_pos_embed_table_size=None,
+                interpolate_pos_embed=False,
+                prompt="cats",
+                image=image_path,
+                json_output=None,
+                overlay_output=overlay_path,
+            )
+            summary = profile_image(args)
+
+            self.assertEqual(summary["backend"], "null")
+            self.assertEqual(summary["prompt"], "cats")
+            self.assertEqual(summary["mask_count"], 1)
+            self.assertTrue(overlay_path.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

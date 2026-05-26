@@ -313,6 +313,62 @@ model run with empty or incorrect overlays is not a successful benchmark.
 
 ## 10. Optional SAM3 and SAM3-LiteText Checks
 
+### Single-image text prompt check
+
+Before comparing video overlays, it is useful to test SAM3 and EfficientSAM3 on
+the same still image with a simple prompt. Put a cat image at:
+
+```text
+images/cats.jpg
+```
+
+Run SAM3 with `prompt=cats`:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+mkdir -p results/image_checks overlays/image_checks
+
+python -m sam_backend.profile_image \
+  --model-id sam3-cats-image \
+  --backend sam3 \
+  --device cuda \
+  --prompt cats \
+  --image images/cats.jpg \
+  --json-output results/image_checks/sam3-cats.json \
+  --overlay-output overlays/image_checks/sam3-cats.png
+```
+
+Run EfficientSAM3 with the current EfficientViT-S checkpoint:
+
+```bash
+python -m sam_backend.profile_image \
+  --model-id esam3-efficientvit-s-sa1b1p-cats-image \
+  --backend efficientsam3 \
+  --checkpoint-path checkpoints/effsam3/efficient_sam3_efficientvit_s_sa_1b_1p.pt \
+  --device cuda \
+  --backbone-type efficientvit \
+  --model-name b0 \
+  --prompt cats \
+  --image images/cats.jpg \
+  --json-output results/image_checks/esam3-efficientvit-s-sa1b1p-cats.json \
+  --overlay-output overlays/image_checks/esam3-efficientvit-s-sa1b1p-cats.png
+```
+
+Compare:
+
+```bash
+cat results/image_checks/sam3-cats.json
+cat results/image_checks/esam3-efficientvit-s-sa1b1p-cats.json
+ls -lh overlays/image_checks/*cats*.png
+```
+
+Open both overlay PNGs and confirm the cat masks/boxes are visually correct.
+For text-prompt quality checks, a model that runs but produces empty or wrong
+cat overlays should be treated as a failed quality check.
+
+### SAM3 video baseline
+
 SAM3 baseline:
 
 ```bash
