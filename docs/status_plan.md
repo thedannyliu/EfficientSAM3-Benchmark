@@ -25,7 +25,8 @@ Last updated: 2026-05-26.
   - `scripts/run_pace_thor_pipeline_smoke.sh`
   - `scripts/pace_l40s_profile_sam3.sbatch`
   - `scripts/pace_l40s_profile_efficientsam3.sbatch`
-- Traditional Chinese Thor guide: `docs/thor_setup_zh_tw.md`.
+- English Thor benchmark and ROS guide: `docs/thor_setup.md`.
+- Legacy pointer for the old Traditional Chinese path: `docs/thor_setup_zh_tw.md`.
 
 PACE does not provide system ROS 2 on the login node. A separate experimental
 conda/robostack environment is described by `environment-ros-jazzy.yml`; the

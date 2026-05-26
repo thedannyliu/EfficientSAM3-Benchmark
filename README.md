@@ -72,6 +72,10 @@ counts are written to `results/`; mask overlay demo videos are written to
 
 ## Thor ROS Shape
 
+Use `docs/thor_setup.md` for the current Thor procedure. It covers the unified
+Thor environment, EfficientSAM3 performance profiling, overlay validation, and
+ROS 2 setup.
+
 On Thor, build the ROS package after the backend package is installed:
 
 ```bash
