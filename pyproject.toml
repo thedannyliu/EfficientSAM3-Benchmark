@@ -24,6 +24,7 @@ sam-env-probe = "sam_backend.env_probe:main"
 sam-profile-image = "sam_backend.profile_image:main"
 sam-profile-video = "sam_backend.profile_video:main"
 sam-run-efficientsam3-variants = "sam_backend.variant_runner:main"
+sam-summarize-results = "sam_backend.summarize_results:main"
 sam-thor-pipeline-smoke = "sam_backend.thor_pipeline_smoke:main"
 
 [tool.setuptools.packages.find]

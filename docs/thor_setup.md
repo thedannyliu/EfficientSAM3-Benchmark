@@ -251,6 +251,22 @@ params_total
 
 ## 8. Summarize Latency
 
+Preferred summary command:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+python -m sam_backend.summarize_results results \
+  --output results/benchmark_summary.csv \
+  --catalog-output results/model_catalog.csv
+```
+
+This reads per-frame CSV files, writes latency summaries, and writes a README
+model catalog with parameter counts and percentages relative to original SAM3.
+
+Manual one-off summary:
+
 ```bash
 cd ~/EfficientSAM3-Benchmark
 source scripts/source_thor_ros_env.sh
