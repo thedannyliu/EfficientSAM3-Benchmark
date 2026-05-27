@@ -1,6 +1,6 @@
 # Jetson Thor Benchmark and ROS Guide
 
-Last updated: 2026-05-26.
+Last updated: 2026-05-27.
 
 This guide is the Thor-side procedure for running real EfficientSAM3 profiling,
 checking overlay video quality, and then moving the same backend into ROS 2.
@@ -19,6 +19,16 @@ EfficientSAM3 config: backend=efficientsam3, backbone_type=efficientvit, model_n
 The EfficientSAM3 checkpoint above is the current working Thor example. It is
 an EfficientViT-S image-encoder checkpoint. Do not pass `--text-encoder-type`
 for this checkpoint.
+
+Pipeline layers:
+
+```text
+offline profile_video       = frame-by-frame segmentation, not tracking
+ROS recorded-video pipeline = frame-by-frame segmentation through ROS, not tracking
+native video tracking       = future start_session/add_prompt/propagate_in_video work
+```
+
+See `docs/status_plan.md` for the current status and next tracking milestones.
 
 ## 1. System Check
 
