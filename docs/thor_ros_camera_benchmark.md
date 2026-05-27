@@ -16,13 +16,13 @@ latency plus callback and transport overhead.
 
 ## 1. Prepare The Same Environment As Offline
 
-Start from the feature branch:
+Start from `main`:
 
 ```bash
 git clone git@github.com:thedannyliu/EfficientSAM3-Benchmark.git
 cd EfficientSAM3-Benchmark
 git fetch origin
-git checkout benchmark-coco-sav-profiling
+git checkout main
 ```
 
 Create the Thor venv and install Jetson-compatible PyTorch first. Follow
@@ -34,23 +34,41 @@ https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/
 
 Then install this repo. Use `--system-site-packages` so the venv can use the
 ROS and Jetson OpenCV packages installed by APT.
+The command block below assumes the ROS Jazzy packages in the next section are
+already installed because `scripts/source_thor_ros_env.sh` sources
+`/opt/ros/jazzy/setup.bash`.
 
 ```bash
 python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
-source ~/venvs/effisam3_venv_ros/bin/activate
+export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+
 python -m pip install -U pip
-python -m pip install -r requirements-thor.txt
-python -m pip install -e .
+python -m pip install "numpy>=1.26,<2" opencv-python-headless pillow pyyaml huggingface_hub
+python -m pip install timm tqdm ftfy==6.1.1 regex iopath typing_extensions psutil
+python -m pip install -e . --no-deps
 ```
 
 Do not use `requirements.txt` on Thor unless you intentionally want to manage
 PyTorch yourself; it pins the PACE CUDA PyTorch packages.
 
+Use the same helper in every Thor terminal. If your paths differ, set them
+before sourcing:
+
+```bash
+export THOR_VENV=/path/to/venv
+export SAM3_SOURCE=/path/to/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+```
+
 Install model source repos and checkpoints:
 
 ```bash
-source ~/venvs/effisam3_venv_ros/bin/activate
 cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
 bash scripts/setup_model_repos.sh
 bash scripts/download_sam3_checkpoint.sh
 bash scripts/download_efficientsam3_checkpoints.sh
@@ -79,6 +97,7 @@ Use the repo helper in every ROS terminal:
 cd EfficientSAM3-Benchmark
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
 export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
 source scripts/source_thor_ros_env.sh
 ```
 

@@ -10,28 +10,40 @@ Authoritative upstream install references:
 - NVIDIA PyTorch for Jetson: https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/index.html
 - Jetson AGX Thor JetPack setup: https://docs.nvidia.com/jetson/agx-thor-devkit/user-guide/latest/setup_jetpack.html
 
-## 1. Clone The Feature Branch
+## 1. Get The Repository
 
 ```bash
 git clone git@github.com:thedannyliu/EfficientSAM3-Benchmark.git
 cd EfficientSAM3-Benchmark
 git fetch origin
-git checkout benchmark-coco-sav-profiling
+git checkout main
 ```
 
-Do not run these benchmarks from `main` until this branch is merged.
+If the repo already exists on Thor:
 
-## 2. Create The Thor Python Environment
+```bash
+cd EfficientSAM3-Benchmark
+git checkout main
+git pull
+```
+
+## 2. Use One Thor Environment
 
 Install JetPack and the NVIDIA-provided PyTorch/torchvision wheels that match
 the Thor JetPack release first. Do not let generic PyPI replace them.
+This guide uses the shared Thor helper from `docs/thor_setup.md`; it expects
+ROS Jazzy at `THOR_ROS_SETUP` even for offline runs.
 
 ```bash
 sudo apt update
 sudo apt install -y python3-opencv
 
-python3 -m venv --system-site-packages ~/venvs/effisam3_thor
-source ~/venvs/effisam3_thor/bin/activate
+python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
+export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+
 python -m pip install -U pip
 
 # Follow NVIDIA's Jetson PyTorch page for the exact wheel URLs for this Thor.
@@ -44,11 +56,26 @@ print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "no cuda")
 PY
 ```
 
-Install repo dependencies without replacing the already installed Jetson PyTorch:
+Use this same helper in every Thor terminal, including non-ROS benchmark
+terminals. It sources ROS, activates the venv, and updates `PYTHONPATH` so
+Python can find this repo, venv packages, and the local EfficientSAM3 source.
+
+If your paths differ, set them before sourcing:
 
 ```bash
-python -m pip install -r requirements-thor.txt
-python -m pip install -e .
+export THOR_VENV=/path/to/venv
+export SAM3_SOURCE=/path/to/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+```
+
+Install repo dependencies without replacing the already installed Jetson PyTorch
+or ROS packages:
+
+```bash
+python -m pip install "numpy>=1.26,<2" opencv-python-headless pillow pyyaml huggingface_hub
+python -m pip install timm tqdm ftfy==6.1.1 regex iopath typing_extensions psutil
+python -m pip install -e . --no-deps
 ```
 
 Do not use `requirements.txt` on Thor unless you intentionally want to manage
@@ -60,8 +87,8 @@ same venv. Re-check `torch.cuda.is_available()` after any dependency change.
 ## 3. Install Model Source Repositories
 
 ```bash
-source ~/venvs/effisam3_thor/bin/activate
 cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
 bash scripts/setup_model_repos.sh
 ```
 
@@ -80,8 +107,8 @@ external/MobileSAM
 ## 4. Download Checkpoints
 
 ```bash
-source ~/venvs/effisam3_thor/bin/activate
 cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
 
 bash scripts/download_sam3_checkpoint.sh
 bash scripts/download_efficientsam3_checkpoints.sh
