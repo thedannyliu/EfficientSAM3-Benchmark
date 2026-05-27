@@ -90,6 +90,8 @@ Notes:
 
 ## Pending Runs
 
+Checked on 2026-05-27 with `squeue`; all listed jobs use `QOS=embers`.
+
 | Job | Purpose | Status |
 | --- | --- | --- |
 | `9210795` | SA-V SAM2-family video suite | Pending on `embers` priority |
@@ -97,3 +99,15 @@ Notes:
 | `9215147` | MobileSAM COCO fixed10 point baseline | Pending on `embers` priority |
 | `9215800` | YOLOE-26M-seg + EdgeTAM recorded-video POC | Pending on `embers` priority |
 | `9215801` | YOLOE-26M-seg + EdgeTAM SA-V text manifest | Pending on `afterok:9215800` |
+
+Local validation:
+
+```text
+python -m unittest
+python -m sam_backend.coco_suite --manifest data/manifests/coco_val2017_fixed10.jsonl --models sam3 efficient_sam2p1_hiera_tiny mobilesam_vit_t --dry-run --output-dir results/local_smoke/coco_suite_dry_run --overlay-dir overlays/local_smoke/coco_suite_dry_run
+scripts/check_storage_budget.sh 300 data checkpoints external
+bash scripts/check_pace_qos.sh
+```
+
+All four checks passed. The storage check reported 13.78 GiB total for
+`data`, `checkpoints`, and `external`.

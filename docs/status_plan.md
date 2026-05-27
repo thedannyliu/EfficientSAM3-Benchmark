@@ -32,7 +32,7 @@ Last updated: 2026-05-27.
     `9215800` and `9215801` after the YOLOE+EdgeTAM default text prompt was
     corrected to `monitor` in the submitted Slurm script.
   - `9215800`: YOLOE-26M-seg + EdgeTAM POC on `videos/test1.mov` with
-    text prompt `monitor`, pending/running on PACE.
+    text prompt `monitor`, pending on `Priority`.
     Outputs: `results/yoloe_edgetam/9215800/` and `overlays/yoloe_edgetam/9215800/`.
   - `9215147`: MobileSAM `vit_t` COCO fixed10 point-prompt baseline, pending on
     `Priority`. Its previous `afterok:9215144` dependency was removed after
@@ -76,6 +76,12 @@ Last updated: 2026-05-27.
   - `scripts/check_pace_qos.sh` verifies Slurm scripts and recent jobs use
     `QOS=embers`; `START_DATE=2026-05-01 scripts/check_pace_qos.sh` currently
     reports no non-embers jobs for this user.
+  - Validation refreshed on 2026-05-27:
+    - `python -m unittest`: 24 tests passed.
+    - `python -m sam_backend.coco_suite --manifest data/manifests/coco_val2017_fixed10.jsonl --models sam3 efficient_sam2p1_hiera_tiny mobilesam_vit_t --dry-run --output-dir results/local_smoke/coco_suite_dry_run --overlay-dir overlays/local_smoke/coco_suite_dry_run`: passed and generated dry-run commands.
+    - `scripts/check_storage_budget.sh 300 data checkpoints external`: total
+      local dataset/checkpoint/external storage is 13.78 GiB.
+    - `bash scripts/check_pace_qos.sh`: current and recent jobs use `embers`.
 
 ## Document Layers
 
