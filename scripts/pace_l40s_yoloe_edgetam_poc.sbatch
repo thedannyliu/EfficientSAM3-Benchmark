@@ -16,7 +16,7 @@ source .venv/bin/activate
 
 mkdir -p logs results overlays
 
-TEXT_PROMPT="${TEXT_PROMPT:-person}"
+TEXT_PROMPT="${TEXT_PROMPT:-monitor}"
 YOLOE_SOURCE="${YOLOE_SOURCE:-videos/test1.mov}"
 RUN_ID="${SLURM_JOB_ID:-manual}"
 

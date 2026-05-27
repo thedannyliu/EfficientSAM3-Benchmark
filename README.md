@@ -263,7 +263,7 @@ bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
 Run the PACE POC on a recorded video:
 
 ```bash
-TEXT_PROMPT=person YOLOE_SOURCE=videos/test1.mov \
+TEXT_PROMPT=monitor YOLOE_SOURCE=videos/test1.mov \
   DOWNLOAD_YOLOE_EDGETAM_MOBILESAM=1 \
   sbatch scripts/pace_l40s_yoloe_edgetam_poc.sbatch
 ```
