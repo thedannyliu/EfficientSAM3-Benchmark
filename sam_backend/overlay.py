@@ -62,6 +62,9 @@ def to_numpy(value: Any) -> np.ndarray:
         return np.asarray([])
     if hasattr(value, "detach"):
         value = value.detach()
+    dtype = str(getattr(value, "dtype", ""))
+    if dtype.endswith("bfloat16") and hasattr(value, "float"):
+        value = value.float()
     if hasattr(value, "cpu"):
         value = value.cpu()
     return np.asarray(value)

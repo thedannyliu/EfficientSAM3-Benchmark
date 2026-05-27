@@ -1,0 +1,78 @@
+{
+  "prompt_protocol": {
+    "examples": [
+      "person",
+      "white car",
+      "red sign",
+      "overhead wire"
+    ],
+    "rule": "Fill text_prompt with a short noun phrase for the class/appearance, and instance_hint with how to identify the selected GT object among similar instances.",
+    "scope": "manual SA-V text labels for selected official object IDs"
+  },
+  "samples": [
+    {
+      "initial_bbox_xyxy": [
+        1222,
+        371,
+        1524,
+        987
+      ],
+      "initial_mask_area_ratio": 0.035836709104938275,
+      "object_id": "000",
+      "point": [
+        1385.1144648840684,
+        663.8921290253126
+      ],
+      "prompt_frame_index": 0,
+      "instance_hint": "standing basketball player near the right side of the court",
+      "review_note": "Green GT mask covers the standing basketball player near the right side of the court.",
+      "review_overlay": "overlays/sav/review/sav_val_salient_fixed3/sav_sav_028552_000.png",
+      "sample_id": "sav_sav_028552_000",
+      "text_prompt": "basketball player",
+      "video_id": "sav_028552"
+    },
+    {
+      "initial_bbox_xyxy": [
+        214,
+        190,
+        284,
+        405
+      ],
+      "initial_mask_area_ratio": 0.025819444444444443,
+      "object_id": "001",
+      "point": [
+        252.8147391070468,
+        293.09220010758474
+      ],
+      "prompt_frame_index": 0,
+      "instance_hint": "standing person centered in the hallway",
+      "review_note": "Green GT mask covers the standing person in the hallway.",
+      "review_overlay": "overlays/sav/review/sav_val_salient_fixed3/sav_sav_024246_001.png",
+      "sample_id": "sav_sav_024246_001",
+      "text_prompt": "person",
+      "video_id": "sav_024246"
+    },
+    {
+      "initial_bbox_xyxy": [
+        489,
+        673,
+        677,
+        1066
+      ],
+      "initial_mask_area_ratio": 0.022230902777777777,
+      "object_id": "000",
+      "point": [
+        603.2746973838345,
+        896.5213295587661
+      ],
+      "prompt_frame_index": 0,
+      "instance_hint": "child's right arm and hand on the right side of the image",
+      "review_note": "Green GT mask covers the child's right arm and hand, not the whole child.",
+      "review_overlay": "overlays/sav/review/sav_val_salient_fixed3/sav_sav_019865_000.png",
+      "sample_id": "sav_sav_019865_000",
+      "text_prompt": "arm",
+      "video_id": "sav_019865"
+    }
+  ],
+  "source_manifest": "data/manifests/sav_val_salient_fixed3.jsonl"
+}

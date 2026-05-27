@@ -1,0 +1,75 @@
+{
+  "prompt_protocol": {
+    "examples": [
+      "person",
+      "white car",
+      "red sign",
+      "overhead wire"
+    ],
+    "rule": "Fill text_prompt with a short noun phrase describing the selected GT object, not the most salient object elsewhere in the frame.",
+    "scope": "manual SA-V text labels for selected official object IDs"
+  },
+  "samples": [
+    {
+      "initial_bbox_xyxy": [
+        0,
+        45,
+        1076,
+        120
+      ],
+      "initial_mask_area_ratio": 0.004209587191358025,
+      "object_id": "000",
+      "point": [
+        542.296482987742,
+        85.55825409554359
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "",
+      "review_overlay": "overlays/sav/review/current_fixed3/sav_sav_018669_000.png",
+      "sample_id": "sav_sav_018669_000",
+      "text_prompt": "",
+      "video_id": "sav_018669"
+    },
+    {
+      "initial_bbox_xyxy": [
+        200,
+        700,
+        416,
+        806
+      ],
+      "initial_mask_area_ratio": 0.0068291859567901235,
+      "object_id": "002",
+      "point": [
+        327.3380410987925,
+        744.3086646423275
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "",
+      "review_overlay": "overlays/sav/review/current_fixed3/sav_sav_023216_002.png",
+      "sample_id": "sav_sav_023216_002",
+      "text_prompt": "",
+      "video_id": "sav_023216"
+    },
+    {
+      "initial_bbox_xyxy": [
+        152,
+        105,
+        406,
+        209
+      ],
+      "initial_mask_area_ratio": 0.03121560534591195,
+      "object_id": "000",
+      "point": [
+        278.30820084999215,
+        155.4417597985204
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "",
+      "review_overlay": "overlays/sav/review/current_fixed3/sav_sav_018332_000.png",
+      "sample_id": "sav_sav_018332_000",
+      "text_prompt": "",
+      "video_id": "sav_018332"
+    }
+  ],
+  "source_manifest": "data/manifests/sav_val_fixed3.jsonl"
+}

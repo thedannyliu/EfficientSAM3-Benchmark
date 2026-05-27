@@ -1,0 +1,87 @@
+{
+  "count": 3,
+  "manifest": "data/manifests/sav_val_salient_fixed3.jsonl",
+  "official_subset_manifest": "data/sa-v/sav_val_salient_fixed3/official_subset_manifest.json",
+  "prompt_protocol": {
+    "point": "centroid of selected object's first available annotation mask",
+    "text": "not used; official SA-V val/test has no semantic object labels"
+  },
+  "samples": [
+    {
+      "height": 1080,
+      "initial_bbox_aspect_ratio": 2.036303630363036,
+      "initial_bbox_xyxy": [
+        1222,
+        371,
+        1524,
+        987
+      ],
+      "initial_mask_area": 74311,
+      "initial_mask_area_ratio": 0.035836709104938275,
+      "object_id": "000",
+      "point": [
+        1385.1144648840684,
+        663.8921290253126
+      ],
+      "prompt_frame_index": 0,
+      "sample_id": "sav_sav_028552_000",
+      "video_id": "sav_028552",
+      "width": 1920
+    },
+    {
+      "height": 800,
+      "initial_bbox_aspect_ratio": 3.0422535211267605,
+      "initial_bbox_xyxy": [
+        214,
+        190,
+        284,
+        405
+      ],
+      "initial_mask_area": 9295,
+      "initial_mask_area_ratio": 0.025819444444444443,
+      "object_id": "001",
+      "point": [
+        252.8147391070468,
+        293.09220010758474
+      ],
+      "prompt_frame_index": 0,
+      "sample_id": "sav_sav_024246_001",
+      "video_id": "sav_024246",
+      "width": 450
+    },
+    {
+      "height": 1280,
+      "initial_bbox_aspect_ratio": 2.0846560846560847,
+      "initial_bbox_xyxy": [
+        489,
+        673,
+        677,
+        1066
+      ],
+      "initial_mask_area": 20488,
+      "initial_mask_area_ratio": 0.022230902777777777,
+      "object_id": "000",
+      "point": [
+        603.2746973838345,
+        896.5213295587661
+      ],
+      "prompt_frame_index": 0,
+      "sample_id": "sav_sav_019865_000",
+      "video_id": "sav_019865",
+      "width": 720
+    }
+  ],
+  "seed": 20260527,
+  "selection": "random_video_seeded_salient_first_mask",
+  "selection_filters": {
+    "max_aspect_ratio": 6.0,
+    "min_area_ratio": 0.01
+  },
+  "source": "Meta SA-V official val/test archive",
+  "split": "val",
+  "video_ids": [
+    "sav_028552",
+    "sav_024246",
+    "sav_019865"
+  ]
+}

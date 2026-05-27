@@ -26,7 +26,15 @@ class SamBackendNode(Node):
         self.declare_parameter("text_encoder_context_length", 77)
         self.declare_parameter("text_encoder_pos_embed_table_size", 0)
         self.declare_parameter("interpolate_pos_embed", False)
+        self.declare_parameter("model_config", "")
+        self.declare_parameter("external_repo", "")
+        self.declare_parameter("mobile_sam_model_type", "vit_t")
+        self.declare_parameter("prompt_mode", "auto")
         self.declare_parameter("prompt", "person")
+        self.declare_parameter("point_x", 0.5)
+        self.declare_parameter("point_y", 0.5)
+        self.declare_parameter("point_normalized", True)
+        self.declare_parameter("point_label", 1)
         self.declare_parameter("image_topic", "/image")
         self.declare_parameter("result_topic", "/sam/result_json")
         self.declare_parameter("overlay_topic", "")
@@ -40,7 +48,16 @@ class SamBackendNode(Node):
         text_encoder_context_length = int(self.get_parameter("text_encoder_context_length").value)
         text_encoder_pos_embed_table_size = int(self.get_parameter("text_encoder_pos_embed_table_size").value) or None
         interpolate_pos_embed = bool(self.get_parameter("interpolate_pos_embed").value)
-        self.prompt = Prompt(text=self.get_parameter("prompt").value)
+        model_config = self.get_parameter("model_config").value or None
+        external_repo = self.get_parameter("external_repo").value or None
+        mobile_sam_model_type = self.get_parameter("mobile_sam_model_type").value
+        self.backend_name = str(backend_name)
+        self.prompt_mode = self._resolve_prompt_mode(str(self.get_parameter("prompt_mode").value))
+        self.prompt_text = str(self.get_parameter("prompt").value)
+        self.point_x = float(self.get_parameter("point_x").value)
+        self.point_y = float(self.get_parameter("point_y").value)
+        self.point_normalized = bool(self.get_parameter("point_normalized").value)
+        self.point_label = int(self.get_parameter("point_label").value)
         self.bridge = CvBridge()
         self.backend = create_backend(
             BackendConfig(
@@ -53,6 +70,9 @@ class SamBackendNode(Node):
                 text_encoder_context_length=text_encoder_context_length,
                 text_encoder_pos_embed_table_size=text_encoder_pos_embed_table_size,
                 interpolate_pos_embed=interpolate_pos_embed,
+                model_config=model_config,
+                external_repo=external_repo,
+                mobile_sam_model_type=mobile_sam_model_type,
             )
         )
         self.torch_module = getattr(self.backend, "torch", None)
@@ -72,12 +92,13 @@ class SamBackendNode(Node):
     def on_image(self, msg: Image) -> None:
         callback_start = perf_counter()
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        prompt = self._make_prompt(frame)
         profile = {}
         if self.torch_module is not None:
             with component_timer(getattr(self.backend, "model", None), self.torch_module) as profile:
-                prediction = self.backend.predict(frame, self.prompt)
+                prediction = self.backend.predict(frame, prompt)
         else:
-            prediction = self.backend.predict(frame, self.prompt)
+            prediction = self.backend.predict(frame, prompt)
         callback_total_ms = (perf_counter() - callback_start) * 1000.0
         component_total_ms = sum(profile.values())
         memory = cuda_memory_mb(self.torch_module) if self.torch_module is not None else cuda_memory_mb(None)
@@ -93,8 +114,20 @@ class SamBackendNode(Node):
             "end_to_end_ms": end_to_end_ms,
             "image_encoder_ms": profile.get("image_encoder_ms", 0.0),
             "text_encoder_ms": profile.get("text_encoder_ms", 0.0),
+            "prompt_encoder_ms": profile.get("prompt_encoder_ms", 0.0),
+            "mask_decoder_ms": profile.get("mask_decoder_ms", 0.0),
+            "transformer_ms": profile.get("transformer_ms", 0.0),
+            "geometry_encoder_ms": profile.get("geometry_encoder_ms", 0.0),
+            "segmentation_head_ms": profile.get("segmentation_head_ms", 0.0),
             "grounding_ms": profile.get("grounding_ms", 0.0),
+            "detector_ms": profile.get("detector_ms", 0.0),
+            "memory_attention_ms": profile.get("memory_attention_ms", 0.0),
+            "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
             "other_ms": max(0.0, callback_total_ms - component_total_ms),
+            "prompt_mode": self.prompt_mode,
+            "prompt_text": self.prompt_text if self.prompt_mode == "text" else "",
+            "point_x": prompt.points[0][0] if prompt.points else "",
+            "point_y": prompt.points[0][1] if prompt.points else "",
             "mask_count": _safe_len(prediction.masks),
             "box_count": _safe_len(prediction.boxes),
             "score_max": float(scores.max()) if scores.size else None,
@@ -108,6 +141,27 @@ class SamBackendNode(Node):
             overlay_msg.header = msg.header
             self.overlay_publisher.publish(overlay_msg)
         self.frame_index += 1
+
+    def _resolve_prompt_mode(self, value: str) -> str:
+        if value == "auto":
+            if self.backend_name in {"sam2", "efficient-sam2", "efficienttam", "mobilesam"}:
+                return "point"
+            return "text"
+        if value not in {"text", "point"}:
+            raise ValueError("prompt_mode must be one of: auto, text, point")
+        return value
+
+    def _make_prompt(self, frame: object) -> Prompt:
+        if self.prompt_mode == "text":
+            return Prompt(text=self.prompt_text)
+        height, width = frame.shape[:2]  # type: ignore[attr-defined]
+        if self.point_normalized:
+            x = self.point_x * float(width)
+            y = self.point_y * float(height)
+        else:
+            x = self.point_x
+            y = self.point_y
+        return Prompt(points=[(x, y)], labels=[self.point_label])
 
 
 def _safe_len(value: object) -> int:

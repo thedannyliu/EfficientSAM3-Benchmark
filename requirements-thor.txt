@@ -1,10 +1,4 @@
---extra-index-url https://download.pytorch.org/whl/cu128
-
-torch==2.10.0
-torchvision==0.25.0
-torchaudio==2.10.0
 numpy>=1.26,<2
-opencv-python-headless>=4.9
 pillow>=10
 pyyaml>=6
 huggingface_hub
