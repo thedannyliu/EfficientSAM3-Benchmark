@@ -29,7 +29,7 @@ if [[ ! -d "${MOBILESAM_REPO}/.git" ]]; then
   git clone https://github.com/ChaoningZhang/MobileSAM.git "${MOBILESAM_REPO}"
 fi
 
-python -m pip install -U ultralytics
+python -m pip install -U "numpy>=1.26,<2" "ultralytics>=8.4.56"
 python -m pip install -e "${EDGETAM_REPO}" --no-deps
 python -m pip install -e "${MOBILESAM_REPO}" --no-deps
 
@@ -50,6 +50,8 @@ else:
         shutil.move(str(downloaded), str(weights_path))
 print(f"YOLOE weights ready via Ultralytics cache/name: {weights}")
 PY
+
+python -m pip install --force-reinstall --no-deps "numpy>=1.26,<2"
 
 if [[ ! -f "${EDGETAM_CHECKPOINT}" ]]; then
   if command -v wget >/dev/null 2>&1; then
