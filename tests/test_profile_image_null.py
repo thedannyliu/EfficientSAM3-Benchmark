@@ -8,10 +8,22 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from sam_backend.overlay import to_numpy
 from sam_backend.profile_image import profile_image
 
 
 class NullProfileImageTest(unittest.TestCase):
+    def test_to_numpy_handles_torch_bfloat16(self) -> None:
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is not installed")
+
+        values = to_numpy(torch.ones(2, dtype=torch.bfloat16))
+
+        self.assertEqual(values.dtype, np.float32)
+        self.assertEqual(values.tolist(), [1.0, 1.0])
+
     def test_profile_image_writes_overlay(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -26,6 +38,8 @@ class NullProfileImageTest(unittest.TestCase):
                 backend="null",
                 checkpoint_path=None,
                 device="cpu",
+                model_config=None,
+                external_repo=None,
                 backbone_type="efficientvit",
                 model_name="b0",
                 text_encoder_type=None,
@@ -59,6 +73,8 @@ class NullProfileImageTest(unittest.TestCase):
                 backend="null",
                 checkpoint_path=None,
                 device="cpu",
+                model_config=None,
+                external_repo=None,
                 backbone_type="efficientvit",
                 model_name="b0",
                 text_encoder_type=None,

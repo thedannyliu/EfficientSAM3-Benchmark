@@ -17,6 +17,10 @@ overlays/
 videos/
 external/
 checkpoints/
+data/coco/
+data/sa-v/
+data/sa-v-text/
+data/*.zip
 
 *.pt
 *.pth

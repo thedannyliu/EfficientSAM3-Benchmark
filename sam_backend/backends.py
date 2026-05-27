@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import sys
 from time import perf_counter
 from typing import Any, Protocol
 
@@ -37,6 +38,9 @@ class BackendConfig:
     text_encoder_pos_embed_table_size: int | None = None
     interpolate_pos_embed: bool = False
     enable_inst_interactivity: bool = False
+    model_config: str | None = None
+    external_repo: str | None = None
+    mobile_sam_model_type: str = "vit_t"
 
 
 class SegmentationBackend(Protocol):
@@ -64,6 +68,7 @@ class NullBackend:
 class Sam3ImageBackend:
     def __init__(self, config: BackendConfig) -> None:
         self.config = config
+        _prepend_repo_path(config.external_repo)
         self.torch = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         processor_mod = _import_required("sam3.model.sam3_image_processor")
@@ -72,10 +77,6 @@ class Sam3ImageBackend:
             self.model = builder.build_sam3_image_model(
                 checkpoint_path=config.checkpoint_path,
                 device=config.device,
-                text_encoder_type=config.text_encoder_type,
-                text_encoder_context_length=config.text_encoder_context_length,
-                text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
-                interpolate_pos_embed=config.interpolate_pos_embed,
                 enable_inst_interactivity=config.enable_inst_interactivity,
             )
         elif config.backend == "efficientsam3":
@@ -137,11 +138,136 @@ class Sam3ImageBackend:
             cuda.synchronize()
 
 
+class Sam2PointImageBackend:
+    def __init__(self, config: BackendConfig, package: str) -> None:
+        self.config = config
+        self.package = package
+        _prepend_repo_path(config.external_repo or _default_external_repo(config.backend))
+        self.torch = _import_required("torch")
+
+        if package == "efficient_track_anything":
+            builder = _import_required("efficient_track_anything.build_efficienttam")
+            predictor_mod = _import_required("efficient_track_anything.efficienttam_image_predictor")
+            if not config.model_config:
+                raise ValueError("--model-config is required for EfficientTAM")
+            self.model = builder.build_efficienttam(
+                config.model_config,
+                config.checkpoint_path,
+                device=config.device or "cuda",
+            )
+            self.processor = predictor_mod.EfficientTAMImagePredictor(self.model)
+        else:
+            builder = _import_required("sam2.build_sam")
+            predictor_mod = _import_required("sam2.sam2_image_predictor")
+            if not config.model_config:
+                raise ValueError("--model-config is required for SAM2-style backends")
+            self.model = builder.build_sam2(
+                config.model_config,
+                config.checkpoint_path,
+                device=config.device or "cuda",
+            )
+            self.processor = predictor_mod.SAM2ImagePredictor(self.model)
+
+        if hasattr(self.model, "eval"):
+            self.model.eval()
+
+    def predict(self, image: Any, prompt: Prompt) -> Prediction:
+        if prompt.text:
+            raise ValueError(f"{self.config.backend} supports point prompts in this benchmark, not text prompts")
+        if not prompt.points:
+            raise ValueError(f"{self.config.backend} requires at least one point prompt")
+
+        pil_image = _as_pil_image(image)
+        image_np = np.asarray(pil_image)
+        point_coords = np.asarray(prompt.points, dtype=np.float32)
+        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32)
+
+        self._synchronize()
+        start = perf_counter()
+        with self.torch.inference_mode():
+            self.processor.set_image(image_np)
+            masks, scores, logits = self.processor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                multimask_output=False,
+            )
+        self._synchronize()
+        latency_ms = (perf_counter() - start) * 1000.0
+        return Prediction(
+            masks=masks,
+            scores=scores,
+            latency_ms=latency_ms,
+            metadata={"backend": self.config.backend, "prompt_type": "point"},
+        )
+
+    def _synchronize(self) -> None:
+        cuda = getattr(self.torch, "cuda", None)
+        if cuda is not None and cuda.is_available():
+            cuda.synchronize()
+
+
+class MobileSamPointImageBackend:
+    def __init__(self, config: BackendConfig) -> None:
+        self.config = config
+        _prepend_repo_path(config.external_repo or _default_external_repo(config.backend))
+        self.torch = _import_required("torch")
+        mobile_sam = _import_required("mobile_sam")
+        if not config.checkpoint_path:
+            raise ValueError("--checkpoint-path is required for MobileSAM")
+
+        self.model = mobile_sam.sam_model_registry[config.mobile_sam_model_type](checkpoint=config.checkpoint_path)
+        if config.device and hasattr(self.model, "to"):
+            self.model.to(device=config.device)
+        if hasattr(self.model, "eval"):
+            self.model.eval()
+        self.processor = mobile_sam.SamPredictor(self.model)
+
+    def predict(self, image: Any, prompt: Prompt) -> Prediction:
+        if prompt.text:
+            raise ValueError("mobilesam supports point prompts in this benchmark, not text prompts")
+        if not prompt.points:
+            raise ValueError("mobilesam requires at least one point prompt")
+
+        pil_image = _as_pil_image(image)
+        image_np = np.asarray(pil_image)
+        point_coords = np.asarray(prompt.points, dtype=np.float32)
+        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32)
+
+        self._synchronize()
+        start = perf_counter()
+        with self.torch.inference_mode():
+            self.processor.set_image(image_np)
+            masks, scores, logits = self.processor.predict(
+                point_coords=point_coords,
+                point_labels=point_labels,
+                multimask_output=False,
+            )
+        self._synchronize()
+        latency_ms = (perf_counter() - start) * 1000.0
+        return Prediction(
+            masks=masks,
+            scores=scores,
+            latency_ms=latency_ms,
+            metadata={"backend": self.config.backend, "prompt_type": "point"},
+        )
+
+    def _synchronize(self) -> None:
+        cuda = getattr(self.torch, "cuda", None)
+        if cuda is not None and cuda.is_available():
+            cuda.synchronize()
+
+
 def create_backend(config: BackendConfig) -> SegmentationBackend:
     if config.backend == "null":
         return NullBackend()
     if config.backend in {"sam3", "efficientsam3"}:
         return Sam3ImageBackend(config)
+    if config.backend in {"sam2", "efficient-sam2"}:
+        return Sam2PointImageBackend(config, "sam2")
+    if config.backend == "efficienttam":
+        return Sam2PointImageBackend(config, "efficient_track_anything")
+    if config.backend == "mobilesam":
+        return MobileSamPointImageBackend(config)
     raise ValueError(f"unknown backend: {config.backend}")
 
 
@@ -166,3 +292,24 @@ def _import_required(module_name: str) -> Any:
             f"Missing dependency '{module_name}'. Install the selected SAM backend "
             "in this Python environment before running real inference."
         ) from exc
+
+
+def _prepend_repo_path(repo_path: str | None) -> None:
+    if not repo_path:
+        return
+    path = str(Path(repo_path).resolve())
+    if Path(path).exists() and path not in sys.path:
+        sys.path.insert(0, path)
+
+
+def _default_external_repo(backend: str) -> str | None:
+    defaults = {
+        "sam2": "external/sam2",
+        "efficient-sam2": "external/Efficient-SAM2",
+        "efficienttam": "external/EfficientTAM",
+        "mobilesam": "external/MobileSAM",
+    }
+    path = defaults.get(backend)
+    if path and Path(path).exists():
+        return path
+    return None

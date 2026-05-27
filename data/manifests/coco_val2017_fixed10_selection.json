@@ -1,0 +1,174 @@
+{
+  "count": 10,
+  "manifest": "data/manifests/coco_val2017_fixed10.jsonl",
+  "min_area": 1024.0,
+  "prompt_protocol": {
+    "point": "centroid of selected annotation mask",
+    "text": "COCO category name of selected annotation"
+  },
+  "samples": [
+    {
+      "annotation_id": 74556,
+      "area": 19608.5878,
+      "category_name": "cow",
+      "file_name": "000000267434.jpg",
+      "height": 480,
+      "image_id": 267434,
+      "point": [
+        189.9634521799583,
+        300.79024729367364
+      ],
+      "point_label": 1,
+      "sample_id": "coco_00_267434_74556",
+      "text_prompt": "cow",
+      "width": 640
+    },
+    {
+      "annotation_id": 174678,
+      "area": 88223.91344999998,
+      "category_name": "train",
+      "file_name": "000000217400.jpg",
+      "height": 480,
+      "image_id": 217400,
+      "point": [
+        309.4568144240611,
+        248.73575758939117
+      ],
+      "point_label": 1,
+      "sample_id": "coco_01_217400_174678",
+      "text_prompt": "train",
+      "width": 640
+    },
+    {
+      "annotation_id": 148486,
+      "area": 84038.23120000004,
+      "category_name": "motorcycle",
+      "file_name": "000000179765.jpg",
+      "height": 480,
+      "image_id": 179765,
+      "point": [
+        341.9228157056951,
+        246.026400188657
+      ],
+      "point_label": 1,
+      "sample_id": "coco_02_179765_148486",
+      "text_prompt": "motorcycle",
+      "width": 640
+    },
+    {
+      "annotation_id": 40228,
+      "area": 2569.8219000000004,
+      "category_name": "bird",
+      "file_name": "000000031322.jpg",
+      "height": 427,
+      "image_id": 31322,
+      "point": [
+        439.7023238657322,
+        261.15308004426413
+      ],
+      "point_label": 1,
+      "sample_id": "coco_03_31322_40228",
+      "text_prompt": "bird",
+      "width": 640
+    },
+    {
+      "annotation_id": 452906,
+      "area": 28065.929950000005,
+      "category_name": "person",
+      "file_name": "000000161879.jpg",
+      "height": 569,
+      "image_id": 161879,
+      "point": [
+        145.61599244781652,
+        162.5299814691794
+      ],
+      "point_label": 1,
+      "sample_id": "coco_04_161879_452906",
+      "text_prompt": "person",
+      "width": 640
+    },
+    {
+      "annotation_id": 317141,
+      "area": 27979.387200000005,
+      "category_name": "bed",
+      "file_name": "000000450488.jpg",
+      "height": 500,
+      "image_id": 450488,
+      "point": [
+        79.04057044504549,
+        386.28402824124487
+      ],
+      "point_label": 1,
+      "sample_id": "coco_05_450488_317141",
+      "text_prompt": "bed",
+      "width": 334
+    },
+    {
+      "annotation_id": 128189,
+      "area": 71436.89385,
+      "category_name": "bicycle",
+      "file_name": "000000174482.jpg",
+      "height": 388,
+      "image_id": 174482,
+      "point": [
+        346.4570941308598,
+        214.64575794129473
+      ],
+      "point_label": 1,
+      "sample_id": "coco_06_174482_128189",
+      "text_prompt": "bicycle",
+      "width": 640
+    },
+    {
+      "annotation_id": 589793,
+      "area": 26510.594549999998,
+      "category_name": "zebra",
+      "file_name": "000000068933.jpg",
+      "height": 313,
+      "image_id": 68933,
+      "point": [
+        380.1128686525242,
+        143.6038879444157
+      ],
+      "point_label": 1,
+      "sample_id": "coco_07_68933_589793",
+      "text_prompt": "zebra",
+      "width": 500
+    },
+    {
+      "annotation_id": 583961,
+      "area": 35090.71100000001,
+      "category_name": "elephant",
+      "file_name": "000000293300.jpg",
+      "height": 427,
+      "image_id": 293300,
+      "point": [
+        344.10663613004135,
+        196.39126913194056
+      ],
+      "point_label": 1,
+      "sample_id": "coco_08_293300_583961",
+      "text_prompt": "elephant",
+      "width": 640
+    },
+    {
+      "annotation_id": 1130149,
+      "area": 42821.8671,
+      "category_name": "sink",
+      "file_name": "000000223789.jpg",
+      "height": 500,
+      "image_id": 223789,
+      "point": [
+        133.5053494511602,
+        368.33388912046684
+      ],
+      "point_label": 1,
+      "sample_id": "coco_09_223789_1130149",
+      "text_prompt": "sink",
+      "width": 346
+    }
+  ],
+  "seed": 20260527,
+  "selection": "random_image_seeded_largest_non_crowd_object",
+  "source": "COCO val2017 instances"
+}

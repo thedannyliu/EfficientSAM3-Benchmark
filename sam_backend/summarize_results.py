@@ -130,8 +130,16 @@ SUMMARY_FIELDS = [
     "mean_image_encoder_fps",
     "mean_text_encoder_ms",
     "mean_text_encoder_fps",
+    "mean_prompt_encoder_ms",
+    "mean_prompt_encoder_fps",
+    "mean_mask_decoder_ms",
+    "mean_mask_decoder_fps",
     "mean_grounding_ms",
     "mean_grounding_fps",
+    "mean_memory_attention_ms",
+    "mean_memory_attention_fps",
+    "mean_memory_encoder_ms",
+    "mean_memory_encoder_fps",
     "mean_other_ms",
     "mean_other_fps",
     "mean_mask_count",
@@ -145,6 +153,21 @@ SUMMARY_FIELDS = [
     "params_text_encoder",
     "params_text_encoder_m",
     "params_text_encoder_pct_of_sam3_text",
+    "params_prompt_encoder",
+    "params_prompt_encoder_m",
+    "params_mask_decoder",
+    "params_mask_decoder_m",
+    "weight_total_mb",
+    "weight_image_encoder_mb",
+    "weight_text_encoder_mb",
+    "weight_prompt_encoder_mb",
+    "weight_mask_decoder_mb",
+    "weight_transformer_mb",
+    "weight_geometry_encoder_mb",
+    "weight_segmentation_head_mb",
+    "weight_detector_mb",
+    "weight_memory_encoder_mb",
+    "weight_memory_attention_mb",
     "cuda_peak_allocated_mb",
     "cuda_peak_reserved_mb",
 ]
@@ -199,7 +222,11 @@ def summarize_csv(path: Path) -> dict[str, object] | None:
     max_total_ms = max(totals)
     mean_image_encoder_ms = _mean_field(rows, "image_encoder_ms")
     mean_text_encoder_ms = _mean_field(rows, "text_encoder_ms")
+    mean_prompt_encoder_ms = _mean_field(rows, "prompt_encoder_ms")
+    mean_mask_decoder_ms = _mean_field(rows, "mask_decoder_ms")
     mean_grounding_ms = _mean_field(rows, "grounding_ms")
+    mean_memory_attention_ms = _mean_field(rows, "memory_attention_ms")
+    mean_memory_encoder_ms = _mean_field(rows, "memory_encoder_ms")
     mean_other_ms = _mean_field(rows, "other_ms")
 
     return {
@@ -224,8 +251,16 @@ def summarize_csv(path: Path) -> dict[str, object] | None:
         "mean_image_encoder_fps": _fps(mean_image_encoder_ms),
         "mean_text_encoder_ms": mean_text_encoder_ms,
         "mean_text_encoder_fps": _fps(mean_text_encoder_ms),
+        "mean_prompt_encoder_ms": mean_prompt_encoder_ms,
+        "mean_prompt_encoder_fps": _fps(mean_prompt_encoder_ms),
+        "mean_mask_decoder_ms": mean_mask_decoder_ms,
+        "mean_mask_decoder_fps": _fps(mean_mask_decoder_ms),
         "mean_grounding_ms": mean_grounding_ms,
         "mean_grounding_fps": _fps(mean_grounding_ms),
+        "mean_memory_attention_ms": mean_memory_attention_ms,
+        "mean_memory_attention_fps": _fps(mean_memory_attention_ms),
+        "mean_memory_encoder_ms": mean_memory_encoder_ms,
+        "mean_memory_encoder_fps": _fps(mean_memory_encoder_ms),
         "mean_other_ms": mean_other_ms,
         "mean_other_fps": _fps(mean_other_ms),
         "mean_mask_count": _mean_field(rows, "mask_count"),
@@ -239,6 +274,21 @@ def summarize_csv(path: Path) -> dict[str, object] | None:
         "params_text_encoder": _int_or_empty(params_text),
         "params_text_encoder_m": _params_m(params_text),
         "params_text_encoder_pct_of_sam3_text": _pct(_params_m(params_text), SAM3_TEXT_ENCODER_M),
+        "params_prompt_encoder": _int_or_empty(_float(first.get("params_prompt_encoder"))),
+        "params_prompt_encoder_m": _params_m(_float(first.get("params_prompt_encoder"))),
+        "params_mask_decoder": _int_or_empty(_float(first.get("params_mask_decoder"))),
+        "params_mask_decoder_m": _params_m(_float(first.get("params_mask_decoder"))),
+        "weight_total_mb": _bytes_mb(first.get("weight_total_bytes")),
+        "weight_image_encoder_mb": _bytes_mb(first.get("weight_image_encoder_bytes")),
+        "weight_text_encoder_mb": _bytes_mb(first.get("weight_text_encoder_bytes")),
+        "weight_prompt_encoder_mb": _bytes_mb(first.get("weight_prompt_encoder_bytes")),
+        "weight_mask_decoder_mb": _bytes_mb(first.get("weight_mask_decoder_bytes")),
+        "weight_transformer_mb": _bytes_mb(first.get("weight_transformer_bytes")),
+        "weight_geometry_encoder_mb": _bytes_mb(first.get("weight_geometry_encoder_bytes")),
+        "weight_segmentation_head_mb": _bytes_mb(first.get("weight_segmentation_head_bytes")),
+        "weight_detector_mb": _bytes_mb(first.get("weight_detector_bytes")),
+        "weight_memory_encoder_mb": _bytes_mb(first.get("weight_memory_encoder_bytes")),
+        "weight_memory_attention_mb": _bytes_mb(first.get("weight_memory_attention_bytes")),
         "cuda_peak_allocated_mb": max(_float(row.get("cuda_peak_allocated_mb")) or 0.0 for row in rows),
         "cuda_peak_reserved_mb": max(_float(row.get("cuda_peak_reserved_mb")) or 0.0 for row in rows),
     }
@@ -307,6 +357,13 @@ def _percentile(sorted_values: list[float], q: float) -> float | None:
 
 def _params_m(params: float | None) -> float | None:
     return params / 1_000_000.0 if params is not None else None
+
+
+def _bytes_mb(value: object) -> float | str:
+    number = _float(value)
+    if number is None:
+        return ""
+    return number / (1024.0 * 1024.0)
 
 
 def _pct(value: float | None, reference: float) -> float | str:

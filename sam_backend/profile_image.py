@@ -35,6 +35,8 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
             text_encoder_pos_embed_table_size=args.text_encoder_pos_embed_table_size,
             interpolate_pos_embed=args.interpolate_pos_embed,
             enable_inst_interactivity=bool(args.point),
+            model_config=args.model_config,
+            external_repo=args.external_repo,
         )
     )
     torch_module = getattr(backend, "torch", None)
@@ -82,7 +84,11 @@ def profile_image(args: argparse.Namespace) -> dict[str, Any]:
         "total_ms": total_ms,
         "image_encoder_ms": profile.get("image_encoder_ms", 0.0),
         "text_encoder_ms": profile.get("text_encoder_ms", 0.0),
+        "prompt_encoder_ms": profile.get("prompt_encoder_ms", 0.0),
+        "mask_decoder_ms": profile.get("mask_decoder_ms", 0.0),
         "grounding_ms": profile.get("grounding_ms", 0.0),
+        "memory_attention_ms": profile.get("memory_attention_ms", 0.0),
+        "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
         "other_ms": max(0.0, total_ms - component_total),
         "overlay": str(args.overlay_output) if args.overlay_output else None,
         **memory,
@@ -122,11 +128,17 @@ def _parse_point(value: str, width: int, height: int, normalized: bool) -> tuple
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Profile SAM3/EfficientSAM3 on a single image.")
+    parser = argparse.ArgumentParser(description="Profile a supported SAM backend on a single image.")
     parser.add_argument("--model-id", default="sam3-image")
-    parser.add_argument("--backend", choices=["null", "sam3", "efficientsam3"], default="sam3")
+    parser.add_argument(
+        "--backend",
+        choices=["null", "sam3", "efficientsam3", "sam2", "efficient-sam2", "efficienttam"],
+        default="sam3",
+    )
     parser.add_argument("--checkpoint-path")
     parser.add_argument("--device", default="cuda")
+    parser.add_argument("--model-config", help="Native config path for SAM2/EfficientTAM-style backends.")
+    parser.add_argument("--external-repo", help="Optional repo root to prepend to PYTHONPATH for external backends.")
     parser.add_argument("--backbone-type", default="efficientvit")
     parser.add_argument("--model-name", default="b0")
     parser.add_argument("--text-encoder-type")

@@ -1,0 +1,126 @@
+{
+  "dataset": "coco",
+  "split": "val2017",
+  "seed": 20260527,
+  "count": 10,
+  "source_manifest": "data/manifests/coco_val2017_fixed10.jsonl",
+  "selection": "random_image_seeded_largest_non_crowd_object",
+  "prompt_review": {
+    "date": "2026-05-27",
+    "method": "visual review of fixed COCO images with selected GT bbox and point overlay",
+    "text_policy": "single COCO category name for the selected visually salient object",
+    "point_policy": "positive point on the selected object; current points are selected-mask centroids and were checked against the selected GT masks"
+  },
+  "samples": [
+    {
+      "sample_id": "coco_00_267434_74556",
+      "image_id": 267434,
+      "annotation_id": 74556,
+      "file_name": "000000267434.jpg",
+      "category_name": "cow",
+      "text_prompt": "cow",
+      "point": [189.9634521799583, 300.79024729367364],
+      "point_label": 1,
+      "review_note": "Selected object is the foreground cow; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_01_217400_174678",
+      "image_id": 217400,
+      "annotation_id": 174678,
+      "file_name": "000000217400.jpg",
+      "category_name": "train",
+      "text_prompt": "train",
+      "point": [309.4568144240611, 248.73575758939117],
+      "point_label": 1,
+      "review_note": "Selected object is the train; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_02_179765_148486",
+      "image_id": 179765,
+      "annotation_id": 148486,
+      "file_name": "000000179765.jpg",
+      "category_name": "motorcycle",
+      "text_prompt": "motorcycle",
+      "point": [341.9228157056951, 246.026400188657],
+      "point_label": 1,
+      "review_note": "Selected object is the motorcycle; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_03_31322_40228",
+      "image_id": 31322,
+      "annotation_id": 40228,
+      "file_name": "000000031322.jpg",
+      "category_name": "bird",
+      "text_prompt": "bird",
+      "point": [439.7023238657322, 261.15308004426413],
+      "point_label": 1,
+      "review_note": "Selected object is the lower-right bird; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_04_161879_452906",
+      "image_id": 161879,
+      "annotation_id": 452906,
+      "file_name": "000000161879.jpg",
+      "category_name": "person",
+      "text_prompt": "person",
+      "point": [145.61599244781652, 162.5299814691794],
+      "point_label": 1,
+      "review_note": "Selected object is the person; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_05_450488_317141",
+      "image_id": 450488,
+      "annotation_id": 317141,
+      "file_name": "000000450488.jpg",
+      "category_name": "bed",
+      "text_prompt": "bed",
+      "point": [79.04057044504549, 386.28402824124487],
+      "point_label": 1,
+      "review_note": "Selected object is the bed; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_06_174482_128189",
+      "image_id": 174482,
+      "annotation_id": 128189,
+      "file_name": "000000174482.jpg",
+      "category_name": "bicycle",
+      "text_prompt": "bicycle",
+      "point": [346.4570941308598, 214.64575794129473],
+      "point_label": 1,
+      "review_note": "Selected object is the bicycle; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_07_68933_589793",
+      "image_id": 68933,
+      "annotation_id": 589793,
+      "file_name": "000000068933.jpg",
+      "category_name": "zebra",
+      "text_prompt": "zebra",
+      "point": [380.1128686525242, 143.6038879444157],
+      "point_label": 1,
+      "review_note": "Selected object is the right-side zebra; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_08_293300_583961",
+      "image_id": 293300,
+      "annotation_id": 583961,
+      "file_name": "000000293300.jpg",
+      "category_name": "elephant",
+      "text_prompt": "elephant",
+      "point": [344.10663613004135, 196.39126913194056],
+      "point_label": 1,
+      "review_note": "Selected object is the elephant; text prompt is its COCO category."
+    },
+    {
+      "sample_id": "coco_09_223789_1130149",
+      "image_id": 223789,
+      "annotation_id": 1130149,
+      "file_name": "000000223789.jpg",
+      "category_name": "sink",
+      "text_prompt": "sink",
+      "point": [133.5053494511602, 368.33388912046684],
+      "point_label": 1,
+      "review_note": "Selected object is the sink; text prompt is its COCO category."
+    }
+  ]
+}

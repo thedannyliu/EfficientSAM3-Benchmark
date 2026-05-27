@@ -13,6 +13,7 @@ dependencies = [
   "pillow>=10",
   "pyyaml>=6",
   "huggingface_hub",
+  "setuptools>=68,<81",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,15 @@ sam-benchmark = "sam_backend.benchmark:main"
 sam-env-probe = "sam_backend.env_probe:main"
 sam-profile-image = "sam_backend.profile_image:main"
 sam-profile-video = "sam_backend.profile_video:main"
+sam-make-coco-manifest = "sam_backend.coco_manifest:main"
+sam-make-sav-manifest = "sam_backend.sav_manifest:main"
+sam-review-sav-manifest = "sam_backend.sav_review:main"
+sam-sav-text-prompts = "sam_backend.sav_text_prompts:main"
+sam-profile-coco = "sam_backend.profile_coco:main"
+sam-profile-sav-video = "sam_backend.profile_sav_video:main"
+sam-profile-yoloe-edgetam = "sam_backend.profile_yoloe_edgetam:main"
+sam-summarize-sav-video-suite = "sam_backend.sav_video_report:main"
+sam-run-coco-suite = "sam_backend.coco_suite:main"
 sam-run-efficientsam3-variants = "sam_backend.variant_runner:main"
 sam-summarize-results = "sam_backend.summarize_results:main"
 sam-thor-pipeline-smoke = "sam_backend.thor_pipeline_smoke:main"
