@@ -28,9 +28,12 @@ Last updated: 2026-05-27.
   - `9215034`, `9215042`, and `9215043` were cancelled before start after
     adding YOLOE top-1/best-instance localization diagnostics, so the saved jobs
     would not miss the new output fields.
-  - `9215144`: YOLOE-26M-seg + EdgeTAM POC on `videos/test1.mov` with
+  - `9215144` and `9215148` were cancelled before start and replaced by
+    `9215800` and `9215801` after the YOLOE+EdgeTAM default text prompt was
+    corrected to `monitor` in the submitted Slurm script.
+  - `9215800`: YOLOE-26M-seg + EdgeTAM POC on `videos/test1.mov` with
     text prompt `monitor`, pending/running on PACE.
-    Outputs: `results/yoloe_edgetam/9215144/` and `overlays/yoloe_edgetam/9215144/`.
+    Outputs: `results/yoloe_edgetam/9215800/` and `overlays/yoloe_edgetam/9215800/`.
   - `9215147`: MobileSAM `vit_t` COCO fixed10 point-prompt baseline, pending on
     `Priority`. Its previous `afterok:9215144` dependency was removed after
     shared assets were prepared.
@@ -45,11 +48,11 @@ Last updated: 2026-05-27.
     `overlays/sav/review/sav_val_salient_fixed3/contact_sheet.png`.
     Manual text prompt template:
     `configs/datasets/sav_val_salient_fixed3_text_prompts.json`.
-  - `9215148`: YOLOE-26M-seg + EdgeTAM on the manually labeled
+  - `9215801`: YOLOE-26M-seg + EdgeTAM on the manually labeled
     `data/manifests/sav_val_salient_fixed3_text.jsonl`, submitted with
-    dependency `afterok:9215144`.
-    Outputs: `results/yoloe_edgetam/sav_text/9215148/` and
-    `overlays/yoloe_edgetam/sav_text/9215148/`.
+    dependency `afterok:9215800`.
+    Outputs: `results/yoloe_edgetam/sav_text/9215801/` and
+    `overlays/yoloe_edgetam/sav_text/9215801/`.
   - Earlier COCO job `9205042` failed before this update because SAM3 returned
     CUDA `bfloat16` tensors; `sam_backend.overlay.to_numpy` now casts bfloat16
     tensors to float32 before NumPy conversion.
