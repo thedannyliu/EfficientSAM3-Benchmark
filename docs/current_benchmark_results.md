@@ -59,6 +59,39 @@ Notes:
   including image encoder, text encoder, prompt encoder, mask decoder,
   grounding, detector, memory, parameter, and weight-size fields.
 
+Component timing summary:
+
+| Model | Prompt | Image ms | Text ms | Prompt ms | Mask ms | Transformer ms | Geometry ms | Seg head ms | Grounding ms | Memory ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `sam3` | text | 284.13 | 16.92 | 0.00 | 0.00 | 0.00 | 49.25 | 13.76 | 167.53 | 0.00 |
+| `sam3` | point | 49.27 | 0.00 | 1.17 | 12.56 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `es3p1_weak_image_weak_text` | text | 79.63 | 91.79 | 0.00 | 0.00 | 0.00 | 8.31 | 7.05 | 46.95 | 0.00 |
+| `es3p1_weak_image_weak_text` | point | 9.66 | 0.00 | 0.59 | 5.81 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `es3p1_strong_image_weak_text` | text | 40.85 | 36.57 | 0.00 | 0.00 | 0.00 | 8.30 | 7.02 | 45.28 | 0.00 |
+| `es3p1_strong_image_weak_text` | point | 14.23 | 0.00 | 0.59 | 5.88 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `es3_weak_image_strong_available_text` | text | 38.23 | 10.24 | 0.00 | 0.00 | 0.00 | 8.37 | 7.01 | 50.15 | 0.00 |
+| `es3_weak_image_strong_available_text` | point | 9.72 | 0.00 | 0.59 | 5.79 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `es3_strong_image_strong_available_text` | text | 41.08 | 8.52 | 0.00 | 0.00 | 0.00 | 6.51 | 6.68 | 41.18 | 0.00 |
+| `es3_strong_image_strong_available_text` | point | 14.17 | 0.00 | 0.59 | 5.94 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `sam2p1_hiera_tiny` | point | 49.18 | 0.00 | 36.77 | 41.87 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `efficient_sam2p1_hiera_tiny` | point | 29.83 | 0.00 | 3.60 | 13.79 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `efficienttam_ti` | point | 5641.64 | 0.00 | 3.56 | 12.51 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| `efficienttam_s` | point | 5423.11 | 0.00 | 3.62 | 12.71 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+
+Component parameter and weight summary:
+
+| Model | Total M | Image M | Text M | Prompt M | Mask M | Transformer M | Geometry M | Seg head M | Memory M | Weights MB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `sam3` | 860.06 | 461.84 | 353.72 | 0.01 | 4.22 | 21.05 | 8.22 | 2.30 | 0.00 | 3280.85 |
+| `es3p1_weak_image_weak_text` | 112.89 | 25.86 | 42.54 | 0.01 | 4.22 | 21.05 | 8.22 | 2.30 | 0.00 | 430.63 |
+| `es3p1_strong_image_weak_text` | 127.44 | 40.41 | 42.54 | 0.01 | 4.22 | 21.05 | 8.22 | 2.30 | 0.00 | 486.16 |
+| `es3_weak_image_strong_available_text` | 133.87 | 25.86 | 63.53 | 0.01 | 4.22 | 21.05 | 8.22 | 2.30 | 0.00 | 510.69 |
+| `es3_strong_image_strong_available_text` | 148.43 | 40.41 | 63.53 | 0.01 | 4.22 | 21.05 | 8.22 | 2.30 | 0.00 | 566.22 |
+| `sam2p1_hiera_tiny` | 38.96 | 27.22 | 0.00 | 0.01 | 4.22 | 0.00 | 0.00 | 0.00 | 7.31 | 148.63 |
+| `efficient_sam2p1_hiera_tiny` | 38.96 | 27.22 | 0.00 | 0.01 | 4.22 | 0.00 | 0.00 | 0.00 | 7.31 | 148.63 |
+| `efficienttam_ti` | 17.87 | 6.16 | 0.00 | 0.01 | 4.19 | 0.00 | 0.00 | 0.00 | 7.31 | 68.15 |
+| `efficienttam_s` | 34.06 | 22.35 | 0.00 | 0.01 | 4.19 | 0.00 | 0.00 | 0.00 | 7.31 | 129.91 |
+
 ## SA-V Fixed3 Video Tracking
 
 Partial run:
