@@ -39,6 +39,12 @@ PARAM_WEIGHT_FIELDS = [
     "weight_detector_bytes",
     "weight_memory_encoder_bytes",
     "weight_memory_attention_bytes",
+    "params_yolo_backbone",
+    "params_yolo_neck",
+    "params_yolo_head",
+    "weight_yolo_backbone_bytes",
+    "weight_yolo_neck_bytes",
+    "weight_yolo_head_bytes",
     "checkpoint_file_bytes",
 ]
 
@@ -53,6 +59,12 @@ class YoloCocoRun:
 
 
 RUNS = [
+    YoloCocoRun("yoloe_11s_seg", "yoloe-seg", "yoloe-11s-seg.pt", ("small", "all")),
+    YoloCocoRun("yoloe_11m_seg", "yoloe-seg", "yoloe-11m-seg.pt", ("all",)),
+    YoloCocoRun("yoloe_11l_seg", "yoloe-seg", "yoloe-11l-seg.pt", ("all",)),
+    YoloCocoRun("yoloe_v8s_seg", "yoloe-seg", "yoloe-v8s-seg.pt", ("small", "all")),
+    YoloCocoRun("yoloe_v8m_seg", "yoloe-seg", "yoloe-v8m-seg.pt", ("all",)),
+    YoloCocoRun("yoloe_v8l_seg", "yoloe-seg", "yoloe-v8l-seg.pt", ("all",)),
     YoloCocoRun("yoloe_26n_seg", "yoloe-seg", "yoloe-26n-seg.pt", ("quick", "small", "all")),
     YoloCocoRun("yoloe_26s_seg", "yoloe-seg", "yoloe-26s-seg.pt", ("small", "all")),
     YoloCocoRun("yoloe_26m_seg", "yoloe-seg", "checkpoints/yoloe/yoloe-26m-seg.pt", ("all",)),
@@ -196,6 +208,9 @@ def write_component_summary(output_dir: Path) -> Path | None:
             "mean_cuda_peak_allocated_mb": _mean(profile_rows, "cuda_peak_allocated_mb"),
             "mean_cuda_peak_reserved_mb": _mean(profile_rows, "cuda_peak_reserved_mb"),
             "component_note": first.get("component_note", ""),
+            "yolo_backbone_layers": first.get("yolo_backbone_layers", ""),
+            "yolo_neck_layers": first.get("yolo_neck_layers", ""),
+            "yolo_head_layers": first.get("yolo_head_layers", ""),
         }
         for field_name in COMPONENT_FIELDS:
             row[f"mean_{field_name}"] = _mean(profile_rows, field_name)

@@ -68,6 +68,15 @@ FIELDNAMES = [
     "weight_detector_bytes",
     "weight_memory_encoder_bytes",
     "weight_memory_attention_bytes",
+    "params_yolo_backbone",
+    "params_yolo_neck",
+    "params_yolo_head",
+    "weight_yolo_backbone_bytes",
+    "weight_yolo_neck_bytes",
+    "weight_yolo_head_bytes",
+    "yolo_backbone_layers",
+    "yolo_neck_layers",
+    "yolo_head_layers",
     "checkpoint_file_bytes",
     "component_note",
     "overlay",
@@ -169,7 +178,6 @@ def profile_yolo_coco(args: argparse.Namespace) -> dict[str, Any]:
                 "predict_ms": predict_ms,
                 "postprocess_ms": postprocess_ms,
                 "checkpoint_file_bytes": checkpoint_file_bytes,
-                "component_note": "Ultralytics split: final model layer is head; backbone includes all earlier layers.",
                 "overlay": str(overlay_path),
                 **memory,
                 **params,
@@ -344,39 +352,60 @@ def _write_overlay(
     return path
 
 
-def _yolo_parameter_counts(model: Any) -> dict[str, int]:
+def _yolo_parameter_counts(model: Any) -> dict[str, Any]:
     counts = parameter_counts(model)
     layers = list(getattr(model, "model", []) or [])
     if not layers:
         return counts
 
-    head = layers[-1]
-    body = layers[:-1]
-    head_params, head_bytes = _module_stats(head)
-    body_params, body_bytes = _module_list_stats(body)
+    split = _split_yolo_layers(layers)
+    backbone_params, backbone_bytes = _module_list_stats(split["backbone"])
+    neck_params, neck_bytes = _module_list_stats(split["neck"])
+    head_params, head_bytes = _module_list_stats(split["head"])
     counts["params_segmentation_head"] = head_params
     counts["weight_segmentation_head_bytes"] = head_bytes
-    counts["params_backbone"] = body_params
-    counts["weight_backbone_bytes"] = body_bytes
+    counts["params_backbone"] = backbone_params
+    counts["weight_backbone_bytes"] = backbone_bytes
     counts["params_detector"] = counts["params_total"]
     counts["weight_detector_bytes"] = counts["weight_total_bytes"]
+    counts["params_yolo_backbone"] = backbone_params
+    counts["params_yolo_neck"] = neck_params
+    counts["params_yolo_head"] = head_params
+    counts["weight_yolo_backbone_bytes"] = backbone_bytes
+    counts["weight_yolo_neck_bytes"] = neck_bytes
+    counts["weight_yolo_head_bytes"] = head_bytes
+    counts["yolo_backbone_layers"] = _layer_range(split["backbone_indices"])
+    counts["yolo_neck_layers"] = _layer_range(split["neck_indices"])
+    counts["yolo_head_layers"] = _layer_range(split["head_indices"])
+    counts["component_note"] = (
+        "Ultralytics YOLO split: backbone ends before the first neck "
+        "Upsample/Concat layer; neck excludes the final detection/segment head."
+    )
     return counts
 
 
-def _module_stats(module: Any) -> tuple[int, int]:
-    if module is None or not hasattr(module, "parameters"):
-        return 0, 0
-    seen: set[int] = set()
-    params = 0
-    bytes_count = 0
-    for param in module.parameters():
-        marker = id(param)
-        if marker in seen:
-            continue
-        seen.add(marker)
-        params += param.numel()
-        bytes_count += param.numel() * param.element_size()
-    return params, bytes_count
+def _split_yolo_layers(layers: list[Any]) -> dict[str, Any]:
+    head_start = max(0, len(layers) - 1)
+    neck_start = _infer_neck_start(layers, head_start)
+    return {
+        "backbone": layers[:neck_start],
+        "neck": layers[neck_start:head_start],
+        "head": layers[head_start:],
+        "backbone_indices": list(range(0, neck_start)),
+        "neck_indices": list(range(neck_start, head_start)),
+        "head_indices": list(range(head_start, len(layers))),
+    }
+
+
+def _infer_neck_start(layers: list[Any], head_start: int) -> int:
+    for idx, layer in enumerate(layers[:head_start]):
+        name = _layer_name(layer)
+        if "upsample" in name or "concat" in name:
+            return idx
+    for idx, layer in enumerate(layers[:head_start]):
+        if "spp" in _layer_name(layer):
+            return min(idx + 1, head_start)
+    return head_start
 
 
 def _module_list_stats(modules: list[Any]) -> tuple[int, int]:
@@ -394,6 +423,16 @@ def _module_list_stats(modules: list[Any]) -> tuple[int, int]:
             params += param.numel()
             bytes_count += param.numel() * param.element_size()
     return params, bytes_count
+
+
+def _layer_name(layer: Any) -> str:
+    return str(getattr(layer, "type", type(layer).__name__)).lower()
+
+
+def _layer_range(indices: list[int]) -> str:
+    if not indices:
+        return ""
+    return str(indices[0]) if len(indices) == 1 else f"{indices[0]}-{indices[-1]}"
 
 
 def _checkpoint_file_bytes(model: Any, weights: str) -> int | str:

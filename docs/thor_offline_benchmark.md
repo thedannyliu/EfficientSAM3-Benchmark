@@ -307,9 +307,34 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LIMIT=0 YOLO_PRESET=small bash scripts/run_thor_yolo_coco_suite.sh
 ```
 
-The `small` preset runs `yoloe_26n_seg`, `yoloe_26s_seg`,
-`yolo11n_seg`, `yolo11s_seg`, and `yolo11m_seg`. The `all` preset also
-adds YOLOE-26M/L/X and YOLO11L/X.
+The `small` preset runs the quick models plus `yoloe_11s_seg`,
+`yoloe_v8s_seg`, `yoloe_26s_seg`, `yolo11s_seg`, and `yolo11m_seg`.
+The `all` preset adds every YOLOE segmentation variant currently listed by
+Ultralytics:
+
+```text
+yoloe_11s_seg   yoloe-11s-seg.pt
+yoloe_11m_seg   yoloe-11m-seg.pt
+yoloe_11l_seg   yoloe-11l-seg.pt
+yoloe_v8s_seg   yoloe-v8s-seg.pt
+yoloe_v8m_seg   yoloe-v8m-seg.pt
+yoloe_v8l_seg   yoloe-v8l-seg.pt
+yoloe_26n_seg   yoloe-26n-seg.pt
+yoloe_26s_seg   yoloe-26s-seg.pt
+yoloe_26m_seg   checkpoints/yoloe/yoloe-26m-seg.pt
+yoloe_26l_seg   yoloe-26l-seg.pt
+yoloe_26x_seg   yoloe-26x-seg.pt
+```
+
+The `all` preset also keeps the YOLO11 segmentation closed-set baselines:
+
+```text
+yolo11n_seg
+yolo11s_seg
+yolo11m_seg
+yolo11l_seg
+yolo11x_seg
+```
 
 Important outputs:
 
@@ -334,6 +359,10 @@ mean_predict_ms
 mean_postprocess_ms
 params_*
 weight_*_bytes
+params_yolo_backbone / weight_yolo_backbone_bytes
+params_yolo_neck / weight_yolo_neck_bytes
+params_yolo_head / weight_yolo_head_bytes
+yolo_backbone_layers / yolo_neck_layers / yolo_head_layers
 checkpoint_file_bytes
 ```
 
@@ -346,11 +375,16 @@ For Ultralytics YOLO models, component storage is reported with a pragmatic
 split:
 
 ```text
-params_segmentation_head / weight_segmentation_head_bytes = final model layer
-params_backbone / weight_backbone_bytes = all earlier layers, including neck
+params_yolo_backbone / weight_yolo_backbone_bytes = layers before the first neck Upsample/Concat layer
+params_yolo_neck / weight_yolo_neck_bytes = neck/FPN/PAN layers before the final head
+params_yolo_head / weight_yolo_head_bytes = final detect/segment head layer
+params_segmentation_head / weight_segmentation_head_bytes = same final YOLO head
 params_detector / weight_detector_bytes = whole YOLO model
 checkpoint_file_bytes = local .pt file size when the path is discoverable
 ```
+
+The summary also stores `yolo_backbone_layers`, `yolo_neck_layers`, and
+`yolo_head_layers` so the split can be audited for each Ultralytics model.
 
 Use lower confidence while debugging open-vocabulary localization:
 

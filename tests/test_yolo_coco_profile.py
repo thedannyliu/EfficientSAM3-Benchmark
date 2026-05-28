@@ -14,6 +14,8 @@ from sam_backend.profile_yolo_coco import (
     _filter_detections_by_class,
     _mask_ious,
     _predict_kwargs,
+    _split_yolo_layers,
+    _yolo_parameter_counts,
 )
 from sam_backend.yolo_coco_suite import run_suite, weight_names_for_preset, write_component_summary
 
@@ -43,6 +45,34 @@ class Result:
     boxes = Boxes()
     masks = Masks()
     names = {0: "cow", 1: "person"}
+
+
+class FakeParam:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def numel(self) -> int:
+        return self.n
+
+    def element_size(self) -> int:
+        return 4
+
+
+class FakeLayer:
+    def __init__(self, type_name: str, params: int) -> None:
+        self.type = type_name
+        self.param = FakeParam(params)
+
+    def parameters(self) -> list[FakeParam]:
+        return [self.param]
+
+
+class FakeYoloModel:
+    def __init__(self, layers: list[FakeLayer]) -> None:
+        self.model = layers
+
+    def parameters(self) -> list[FakeParam]:
+        return [param for layer in self.model for param in layer.parameters()]
 
 
 class YoloCocoProfileTest(unittest.TestCase):
@@ -101,6 +131,51 @@ class YoloCocoProfileTest(unittest.TestCase):
     def test_weight_names_for_preset_matches_quick_models(self) -> None:
         self.assertEqual(weight_names_for_preset("quick"), ["yoloe-26n-seg.pt", "yolo11n-seg.pt"])
 
+    def test_all_preset_contains_all_requested_yoloe_variants(self) -> None:
+        weights = set(weight_names_for_preset("all"))
+        self.assertTrue(
+            {
+                "yoloe-11s-seg.pt",
+                "yoloe-11m-seg.pt",
+                "yoloe-11l-seg.pt",
+                "yoloe-v8s-seg.pt",
+                "yoloe-v8m-seg.pt",
+                "yoloe-v8l-seg.pt",
+                "yoloe-26n-seg.pt",
+                "yoloe-26s-seg.pt",
+                "checkpoints/yoloe/yoloe-26m-seg.pt",
+                "yoloe-26l-seg.pt",
+                "yoloe-26x-seg.pt",
+            }.issubset(weights)
+        )
+
+    def test_yolo_parameter_counts_split_backbone_neck_head(self) -> None:
+        layers = [
+            FakeLayer("Conv", 1),
+            FakeLayer("SPPF", 2),
+            FakeLayer("Upsample", 3),
+            FakeLayer("Concat", 4),
+            FakeLayer("Segment", 5),
+        ]
+
+        counts = _yolo_parameter_counts(FakeYoloModel(layers))
+
+        self.assertEqual(counts["params_yolo_backbone"], 3)
+        self.assertEqual(counts["params_yolo_neck"], 7)
+        self.assertEqual(counts["params_yolo_head"], 5)
+        self.assertEqual(counts["yolo_backbone_layers"], "0-1")
+        self.assertEqual(counts["yolo_neck_layers"], "2-3")
+        self.assertEqual(counts["yolo_head_layers"], "4")
+
+    def test_yolo_split_falls_back_to_after_spp(self) -> None:
+        layers = [FakeLayer("Conv", 1), FakeLayer("SPPF", 2), FakeLayer("Segment", 3)]
+
+        split = _split_yolo_layers(layers)
+
+        self.assertEqual(len(split["backbone"]), 2)
+        self.assertEqual(len(split["neck"]), 0)
+        self.assertEqual(len(split["head"]), 1)
+
     def test_yolo_component_summary_contains_miou_and_storage(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -123,6 +198,15 @@ class YoloCocoProfileTest(unittest.TestCase):
                         "params_total",
                         "weight_total_bytes",
                         "checkpoint_file_bytes",
+                        "params_yolo_backbone",
+                        "params_yolo_neck",
+                        "params_yolo_head",
+                        "weight_yolo_backbone_bytes",
+                        "weight_yolo_neck_bytes",
+                        "weight_yolo_head_bytes",
+                        "yolo_backbone_layers",
+                        "yolo_neck_layers",
+                        "yolo_head_layers",
                         "component_note",
                     ],
                 )
@@ -142,6 +226,15 @@ class YoloCocoProfileTest(unittest.TestCase):
                         "params_total": "1000000",
                         "weight_total_bytes": "4000000",
                         "checkpoint_file_bytes": "2000000",
+                        "params_yolo_backbone": "300000",
+                        "params_yolo_neck": "400000",
+                        "params_yolo_head": "300000",
+                        "weight_yolo_backbone_bytes": "1200000",
+                        "weight_yolo_neck_bytes": "1600000",
+                        "weight_yolo_head_bytes": "1200000",
+                        "yolo_backbone_layers": "0-9",
+                        "yolo_neck_layers": "10-21",
+                        "yolo_head_layers": "22",
                         "component_note": "note",
                     }
                 )
@@ -153,6 +246,8 @@ class YoloCocoProfileTest(unittest.TestCase):
                 rows = list(csv.DictReader(f))
             self.assertEqual(rows[0]["miou_best"], "0.4")
             self.assertEqual(rows[0]["effective_fps"], "50.0")
+            self.assertEqual(rows[0]["params_yolo_neck_m"], "0.4")
+            self.assertEqual(rows[0]["yolo_head_layers"], "22")
             self.assertEqual(rows[0]["checkpoint_file_mb"], str(2000000 / (1024.0 * 1024.0)))
 
 
