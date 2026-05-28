@@ -13,8 +13,11 @@ from sam_backend.profile_yoloe_edgetam import (
     _load_sources,
     _localization_diagnostics,
     _mask_iou,
+    _masks_by_obj,
     _overlay_frame,
+    _overlay_frame_multi,
     _resolve_edgetam_model_config,
+    _select_initial_detections,
 )
 
 
@@ -47,6 +50,29 @@ class YoloeEdgeTamProfileHelpersTest(unittest.TestCase):
         right[5:, 5:] = True
         self.assertAlmostEqual(_mask_iou(left, right), 0.5)
 
+    def test_select_initial_detections_keeps_top_k_after_area_filter(self) -> None:
+        detections = [
+            {"mask": np.ones((4, 4), dtype=bool), "rank": 1},
+            {"mask": np.ones((2, 2), dtype=bool), "rank": 2},
+            {"mask": np.ones((3, 3), dtype=bool), "rank": 3},
+        ]
+        args = argparse.Namespace(max_objects=2, min_initial_mask_area=5)
+
+        selected = _select_initial_detections(detections, args)
+
+        self.assertEqual([item["rank"] for item in selected], [1, 3])
+
+    def test_masks_by_obj_splits_multi_object_logits(self) -> None:
+        logits = np.zeros((2, 1, 4, 4), dtype=np.float32)
+        logits[0, 0, :2, :2] = 1
+        logits[1, 0, 2:, 2:] = 1
+
+        masks = _masks_by_obj([7, 9], logits)
+
+        self.assertEqual([track_id for track_id, _mask in masks], [7, 9])
+        self.assertEqual(int(masks[0][1].sum()), 4)
+        self.assertEqual(int(masks[1][1].sum()), 4)
+
     def test_overlay_frame_draws_mask_and_label(self) -> None:
         frame = np.zeros((32, 48, 3), dtype=np.uint8)
         mask = np.zeros((32, 48), dtype=bool)
@@ -56,6 +82,18 @@ class YoloeEdgeTamProfileHelpersTest(unittest.TestCase):
         self.assertEqual(overlay.shape, frame.shape)
         self.assertGreater(int(overlay.sum()), 0)
         self.assertGreater(int(overlay[12, 16, 1]), 0)
+
+    def test_overlay_frame_multi_draws_multiple_masks(self) -> None:
+        frame = np.zeros((32, 48, 3), dtype=np.uint8)
+        left = np.zeros((32, 48), dtype=bool)
+        right = np.zeros((32, 48), dtype=bool)
+        left[22:30, 6:16] = True
+        right[22:30, 28:38] = True
+
+        overlay = _overlay_frame_multi(frame, [(1, left, ""), (2, right, "")], "screen", "video", 4)
+
+        self.assertGreater(int(overlay[24, 10].sum()), 0)
+        self.assertGreater(int(overlay[24, 32].sum()), 0)
 
     def test_localization_diagnostics_reports_top1_and_best_instance(self) -> None:
         gt = np.zeros((10, 10), dtype=bool)

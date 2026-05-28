@@ -36,12 +36,15 @@ SUMMARY_FIELDS = [
     "text_prompt",
     "instance_hint",
     "status",
+    "track_count",
+    "object_rows",
     "frames_tracked",
     "effective_tracking_fps",
     "first_mask_latency_ms",
     "yoloe_set_classes_ms",
     "yoloe_init_ms",
     "yoloe_initial_detection_count",
+    "yoloe_initial_tracked_count",
     "yoloe_initial_top1_confidence",
     "yoloe_initial_top1_gt_iou",
     "yoloe_initial_best_gt_iou",
@@ -153,7 +156,20 @@ def _profile_source(
             instance_hint=instance_hint,
             localization=localization,
         ), []
-    detection = detections[0]
+    initial_detections = _select_initial_detections(detections, args)
+    if not initial_detections:
+        return _empty_summary(
+            args,
+            source_id,
+            "no_yoloe_detection_after_filter",
+            yoloe_set_classes_ms,
+            yoloe_init_ms,
+            yoloe_params,
+            edgetam_params,
+            text_prompt=text_prompt,
+            instance_hint=instance_hint,
+            localization=localization,
+        ), []
 
     rows: list[dict[str, Any]] = []
     step_latencies: list[float] = []
@@ -161,10 +177,11 @@ def _profile_source(
     reground_count = 0
     overlay_writer = None
     overlay_video = ""
-    prev_area: float | None = None
+    prev_area_by_obj: dict[int, float] = {}
     next_start = 0
-    obj_id = 1
+    frames_tracked = 0
     max_frames = args.max_frames if args.max_frames > 0 else _count_frames(frames_dir)
+    single_object_mode = len(initial_detections) == 1
 
     try:
         _sync(torch_module)
@@ -175,18 +192,13 @@ def _profile_source(
 
         start = perf_counter()
         with _autocast_context(torch_module, args.autocast_bfloat16):
-            predictor.add_new_points_or_box(
-                inference_state=state,
-                frame_idx=0,
-                obj_id=obj_id,
-                box=detection["box"],
-            )
+            _register_initial_detections(predictor, state, initial_detections, args)
         _sync(torch_module)
         edgetam_add_prompt_ms = (perf_counter() - start) * 1000.0
 
         propagate_start = perf_counter()
-        while len(rows) < max_frames:
-            remaining = max_frames - len(rows)
+        while frames_tracked < max_frames:
+            remaining = max_frames - frames_tracked
             broke_for_reground = False
             with _autocast_context(torch_module, args.autocast_bfloat16):
                 iterator = predictor.propagate_in_video(
@@ -203,15 +215,13 @@ def _profile_source(
                     _sync(torch_module)
                     step_ms = (perf_counter() - step_start) * 1000.0
                     frame_idx = int(frame_idx)
-                    pred_mask = _first_mask(out_mask_logits)
-                    area = float(pred_mask.sum())
-                    reason = _area_reground_reason(prev_area, area, args.area_jump_ratio)
-                    prev_area = area
+                    masks_by_obj = _masks_by_obj(out_obj_ids, out_mask_logits)
                     yoloe_ms = ""
                     yoloe_conf = ""
                     yoloe_iou = ""
+                    validation = None
 
-                    if frame_idx > 0 and args.yoloe_interval > 0 and frame_idx % args.yoloe_interval == 0:
+                    if single_object_mode and frame_idx > 0 and args.yoloe_interval > 0 and frame_idx % args.yoloe_interval == 0:
                         frame_bgr = _read_frame(frames_dir, frame_idx)
                         if frame_bgr is not None:
                             validate_start = perf_counter()
@@ -221,46 +231,61 @@ def _profile_source(
                             yoloe_validation_latencies.append(float(yoloe_ms))
                             if validation is not None:
                                 yoloe_conf = validation["confidence"]
-                                yoloe_iou = _mask_iou(pred_mask, validation["mask"])
-                                if yoloe_iou < args.reground_iou:
-                                    reason = reason or "low_yoloe_edgetam_iou"
-                                    reground_count += 1
-                                    predictor.add_new_points_or_box(
-                                        inference_state=state,
-                                        frame_idx=frame_idx,
-                                        obj_id=obj_id,
-                                        box=validation["box"],
-                                    )
-                                    next_start = frame_idx + 1
-                                    broke_for_reground = True
 
-                    if reason and not broke_for_reground:
-                        reground_count += 1
+                    frame_rows = []
+                    overlay_masks = []
+                    for obj_id, pred_mask in masks_by_obj:
+                        area = float(pred_mask.sum())
+                        reason = _area_reground_reason(prev_area_by_obj.get(obj_id), area, args.area_jump_ratio)
+                        prev_area_by_obj[obj_id] = area
+
+                        row_yoloe_iou = ""
+                        row_reason = reason
+                        if single_object_mode and validation is not None:
+                            row_yoloe_iou = _mask_iou(pred_mask, validation["mask"])
+                            if row_yoloe_iou < args.reground_iou:
+                                row_reason = row_reason or "low_yoloe_edgetam_iou"
+                                reground_count += 1
+                                predictor.add_new_points_or_box(
+                                    inference_state=state,
+                                    frame_idx=frame_idx,
+                                    obj_id=obj_id,
+                                    box=validation["box"],
+                                )
+                                next_start = frame_idx + 1
+                                broke_for_reground = True
+
+                        if row_reason and not broke_for_reground:
+                            reground_count += 1
+
+                        frame_rows.append(
+                            {
+                                "source_id": source_id,
+                                "frame_index": frame_idx,
+                                "track_id": obj_id,
+                                "mask_area": area,
+                                "tracking_score": "",
+                                "edgetam_step_ms": step_ms,
+                                "yoloe_validation_ms": yoloe_ms,
+                                "yoloe_confidence": yoloe_conf,
+                                "yoloe_edgetam_iou": row_yoloe_iou,
+                                "reground_reason": row_reason,
+                            }
+                        )
+                        overlay_masks.append((obj_id, pred_mask, row_reason))
 
                     frame_bgr = _read_frame(frames_dir, frame_idx) if args.overlay_root else None
                     if frame_bgr is not None and args.overlay_root:
                         if overlay_writer is None:
                             overlay_video, overlay_writer = _open_overlay_writer(args.overlay_root, source_id, frame_bgr.shape, args.overlay_fps)
-                        overlay_writer.write(_overlay_frame(frame_bgr, pred_mask, text_prompt, source_id, frame_idx, obj_id, reason))
+                        overlay_writer.write(_overlay_frame_multi(frame_bgr, overlay_masks, text_prompt, source_id, frame_idx))
 
-                    rows.append(
-                        {
-                            "source_id": source_id,
-                            "frame_index": frame_idx,
-                            "track_id": obj_id if out_obj_ids else "",
-                            "mask_area": area,
-                            "tracking_score": "",
-                            "edgetam_step_ms": step_ms,
-                            "yoloe_validation_ms": yoloe_ms,
-                            "yoloe_confidence": yoloe_conf,
-                            "yoloe_edgetam_iou": yoloe_iou,
-                            "reground_reason": reason,
-                        }
-                    )
+                    rows.extend(frame_rows)
                     step_latencies.append(step_ms)
-                    if broke_for_reground or len(rows) >= max_frames:
+                    frames_tracked += 1
+                    if broke_for_reground or frames_tracked >= max_frames:
                         break
-                if not broke_for_reground and len(rows) < max_frames:
+                if not broke_for_reground and frames_tracked < max_frames:
                     break
             if not broke_for_reground:
                 break
@@ -276,12 +301,15 @@ def _profile_source(
         "text_prompt": text_prompt,
         "instance_hint": instance_hint,
         "status": "ok",
-        "frames_tracked": len(rows),
-        "effective_tracking_fps": len(rows) * 1000.0 / edgetam_propagate_total_ms if edgetam_propagate_total_ms > 0 else "",
+        "track_count": len(initial_detections),
+        "object_rows": len(rows),
+        "frames_tracked": frames_tracked,
+        "effective_tracking_fps": frames_tracked * 1000.0 / edgetam_propagate_total_ms if edgetam_propagate_total_ms > 0 else "",
         "first_mask_latency_ms": first_mask_latency_ms,
         "yoloe_set_classes_ms": yoloe_set_classes_ms,
         "yoloe_init_ms": yoloe_init_ms,
         **localization,
+        "yoloe_initial_tracked_count": len(initial_detections),
         "edgetam_session_init_ms": edgetam_session_init_ms,
         "edgetam_add_prompt_ms": edgetam_add_prompt_ms,
         "edgetam_propagate_total_ms": edgetam_propagate_total_ms,
@@ -343,7 +371,14 @@ def _run_yoloe(yoloe: Any, frame_bgr: np.ndarray, args: argparse.Namespace) -> d
 
 def _run_yoloe_candidates(yoloe: Any, frame_bgr: np.ndarray, args: argparse.Namespace) -> list[dict[str, Any]]:
     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    results = yoloe.predict(frame_rgb, imgsz=args.yoloe_imgsz, conf=args.yoloe_conf, verbose=False)
+    predict_kwargs: dict[str, Any] = {"imgsz": args.yoloe_imgsz, "conf": args.yoloe_conf, "verbose": False}
+    if args.yoloe_iou is not None:
+        predict_kwargs["iou"] = args.yoloe_iou
+    if args.yoloe_max_det > 0:
+        predict_kwargs["max_det"] = args.yoloe_max_det
+    if args.yoloe_agnostic_nms is not None:
+        predict_kwargs["agnostic_nms"] = args.yoloe_agnostic_nms
+    results = yoloe.predict(frame_rgb, **predict_kwargs)
     if not results:
         return []
     result = results[0]
@@ -373,6 +408,57 @@ def _run_yoloe_candidates(yoloe: Any, frame_bgr: np.ndarray, args: argparse.Name
             }
         )
     return detections
+
+
+def _select_initial_detections(detections: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    selected = [
+        detection
+        for detection in detections
+        if float(np.asarray(detection["mask"], dtype=bool).sum()) >= args.min_initial_mask_area
+    ]
+    if args.max_objects > 0:
+        selected = selected[: args.max_objects]
+    return selected
+
+
+def _register_initial_detections(predictor: Any, state: Any, detections: list[dict[str, Any]], args: argparse.Namespace) -> None:
+    for obj_id, detection in enumerate(detections, start=1):
+        if args.edgetam_init_prompt == "mask" and hasattr(predictor, "add_new_mask"):
+            predictor.add_new_mask(
+                inference_state=state,
+                frame_idx=0,
+                obj_id=obj_id,
+                mask=detection["mask"],
+            )
+        else:
+            predictor.add_new_points_or_box(
+                inference_state=state,
+                frame_idx=0,
+                obj_id=obj_id,
+                box=detection["box"],
+            )
+
+
+def _masks_by_obj(out_obj_ids: Any, mask_logits: Any) -> list[tuple[int, np.ndarray]]:
+    ids = [_as_obj_id(value) for value in out_obj_ids]
+    values = to_numpy(mask_logits)
+    if values.ndim == 4:
+        values = values[:, 0]
+    elif values.ndim == 2:
+        values = values[None, ...]
+    if values.ndim != 3:
+        return []
+    if not ids:
+        ids = list(range(1, values.shape[0] + 1))
+    count = min(len(ids), values.shape[0])
+    return [(ids[idx], values[idx] > 0) for idx in range(count)]
+
+
+def _as_obj_id(value: Any) -> int:
+    array = np.asarray(value)
+    if array.shape == ():
+        return int(array.item())
+    return int(array.reshape(-1)[0])
 
 
 def _materialize_frames(source: dict[str, Any], out_dir: Path, max_frames: int) -> Path:
@@ -441,12 +527,15 @@ def _empty_summary(
         "text_prompt": text_prompt or getattr(args, "text_prompt", ""),
         "instance_hint": instance_hint,
         "status": status,
+        "track_count": 0,
+        "object_rows": 0,
         "frames_tracked": 0,
         "effective_tracking_fps": "",
         "first_mask_latency_ms": yoloe_set_classes_ms + yoloe_init_ms,
         "yoloe_set_classes_ms": yoloe_set_classes_ms,
         "yoloe_init_ms": yoloe_init_ms,
         **localization,
+        "yoloe_initial_tracked_count": 0,
         "edgetam_session_init_ms": "",
         "edgetam_add_prompt_ms": "",
         "edgetam_propagate_total_ms": "",
@@ -457,13 +546,6 @@ def _empty_summary(
         **yoloe_params,
         **edgetam_params,
     }
-
-
-def _first_mask(mask_logits: Any) -> np.ndarray:
-    values = to_numpy(mask_logits)
-    while values.ndim > 2:
-        values = values[0]
-    return values > 0
 
 
 def _read_frame(frames_dir: Path, frame_idx: int) -> np.ndarray | None:
@@ -569,16 +651,45 @@ def _overlay_frame(
     reason: str,
     alpha: float = 0.45,
 ) -> np.ndarray:
+    return _overlay_frame_multi(frame_bgr, [(track_id, mask, reason)], prompt, source_id, frame_idx, alpha=alpha)
+
+
+def _overlay_frame_multi(
+    frame_bgr: np.ndarray,
+    masks: list[tuple[int, np.ndarray, str]],
+    prompt: str,
+    source_id: str,
+    frame_idx: int,
+    alpha: float = 0.45,
+) -> np.ndarray:
     overlay = frame_bgr.copy()
-    if mask.shape != overlay.shape[:2]:
-        mask = cv2.resize(mask.astype("uint8"), (overlay.shape[1], overlay.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
-    overlay[mask] = (overlay[mask] * (1.0 - alpha) + np.asarray([40, 220, 60]) * alpha).astype(np.uint8)
-    label = f"YOLOE+EdgeTAM {source_id} frame={frame_idx} id={track_id} prompt={prompt}"
-    if reason:
-        label += f" {reason}"
-    cv2.putText(overlay, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 3, cv2.LINE_AA)
-    cv2.putText(overlay, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1, cv2.LINE_AA)
+    for track_id, mask, _reason in masks:
+        if mask.shape != overlay.shape[:2]:
+            mask = cv2.resize(mask.astype("uint8"), (overlay.shape[1], overlay.shape[0]), interpolation=cv2.INTER_NEAREST).astype(bool)
+        color = np.asarray(_track_color(track_id), dtype=np.float32)
+        overlay[mask] = (overlay[mask] * (1.0 - alpha) + color * alpha).astype(np.uint8)
+
+    labels = [f"id={track_id}{':' + reason if reason else ''}" for track_id, _mask, reason in masks]
+    label = f"YOLOE+EdgeTAM {source_id} frame={frame_idx} objects={len(masks)} prompt={prompt}"
+    if labels:
+        label += " " + " ".join(labels[:6])
+        if len(labels) > 6:
+            label += f" +{len(labels) - 6}"
+    cv2.putText(overlay, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(overlay, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
     return overlay
+
+
+def _track_color(track_id: int) -> tuple[int, int, int]:
+    palette = [
+        (40, 220, 60),
+        (230, 120, 40),
+        (60, 170, 255),
+        (210, 80, 220),
+        (40, 210, 210),
+        (230, 220, 50),
+    ]
+    return palette[(track_id - 1) % len(palette)]
 
 
 def _prefix_dict(prefix: str, values: dict[str, int]) -> dict[str, int]:
@@ -620,7 +731,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--yoloe-weights", default="checkpoints/yoloe/yoloe-26m-seg.pt")
     parser.add_argument("--yoloe-imgsz", type=int, default=640)
     parser.add_argument("--yoloe-conf", type=float, default=0.25)
+    parser.add_argument("--yoloe-iou", type=float, help="Optional YOLOE NMS IoU threshold.")
+    parser.add_argument("--yoloe-max-det", type=int, default=0, help="Optional YOLOE max_det override; 0 keeps Ultralytics default.")
+    parser.add_argument("--yoloe-agnostic-nms", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--yoloe-interval", type=int, default=20)
+    parser.add_argument("--max-objects", type=int, default=1, help="Track top K initial YOLOE detections; 0 tracks all detections.")
+    parser.add_argument("--min-initial-mask-area", type=float, default=0.0)
+    parser.add_argument("--edgetam-init-prompt", choices=["box", "mask"], default="box")
     parser.add_argument("--reground-iou", type=float, default=0.35)
     parser.add_argument("--area-jump-ratio", type=float, default=2.5)
     parser.add_argument("--edgetam-external-repo", default="external/EdgeTAM")

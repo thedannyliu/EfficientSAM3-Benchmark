@@ -367,6 +367,38 @@ python -m sam_backend.profile_yoloe_edgetam \
   --work-dir "results/thor/offline/yoloe_edgetam/${RUN_ID}/work"
 ```
 
+By default this tracks the top-1 YOLOE detection to preserve older POC
+behavior. For multiple screens/monitors, register multiple detections with
+unique EdgeTAM object IDs:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.profile_yoloe_edgetam \
+  --video-path videos/test1.mov \
+  --source-id test1 \
+  --text-prompt monitor \
+  --device cuda \
+  --yoloe-conf 0.05 \
+  --yoloe-iou 0.75 \
+  --yoloe-max-det 50 \
+  --no-yoloe-agnostic-nms \
+  --max-objects 10 \
+  --edgetam-init-prompt mask \
+  --max-frames 240 \
+  --yoloe-interval 20 \
+  --autocast-bfloat16 \
+  --csv-output "results/thor/offline/yoloe_edgetam_multi/${RUN_ID}/frames.csv" \
+  --summary-output "results/thor/offline/yoloe_edgetam_multi/${RUN_ID}/summary.json" \
+  --overlay-root "overlays/thor/offline/yoloe_edgetam_multi/${RUN_ID}" \
+  --work-dir "results/thor/offline/yoloe_edgetam_multi/${RUN_ID}/work"
+```
+
+Use `frames_summary.csv` columns `yoloe_initial_detection_count`,
+`yoloe_initial_tracked_count`, `track_count`, and `object_rows` to confirm that
+YOLOE found multiple instances and EdgeTAM registered them. If
+`yoloe_initial_detection_count` is still `1`, tune the YOLOE prompt, confidence,
+IoU, NMS, or image size; EdgeTAM only tracks objects that were prompted.
+
 SA-V manually labeled text prompts:
 
 ```bash

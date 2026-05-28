@@ -170,7 +170,7 @@ def collect_sav_rows(root: Path) -> list[dict[str, object]]:
 
 def collect_yoloe_rows(root: Path) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
-    for task_dir in ("yoloe_edgetam", "yoloe_edgetam_sav"):
+    for task_dir in ("yoloe_edgetam", "yoloe_edgetam_multi", "yoloe_edgetam_sav"):
         for path in sorted((root / task_dir).glob("*/frames_summary.csv")):
             source_rows = _read_csv(path)
             if not source_rows:
