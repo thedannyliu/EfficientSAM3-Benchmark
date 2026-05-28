@@ -56,6 +56,7 @@ SUMMARY_FIELDS = [
     "memory_attention_ms",
     "memory_encoder_ms",
     "other_ms",
+    "init_prompt",
     "cuda_peak_allocated_mb",
     "cuda_peak_reserved_mb",
     "params_total",
@@ -188,12 +189,15 @@ def _profile_one(
 
             start = perf_counter()
             with _autocast_context(torch_module, args.autocast_bfloat16):
-                predictor.add_new_points_or_box(
-                    inference_state=state,
+                _add_initial_prompt(
+                    predictor=predictor,
+                    state=state,
+                    item=item,
                     frame_idx=prompt_frame,
                     obj_id=obj_id,
                     points=points,
                     labels=labels,
+                    init_prompt=getattr(args, "init_prompt", "point"),
                 )
             _sync(torch_module)
             add_prompt_ms = (perf_counter() - start) * 1000.0
@@ -293,6 +297,7 @@ def _profile_one(
         "memory_attention_ms": profile.get("memory_attention_ms", 0.0),
         "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
         "other_ms": max(0.0, total_ms - component_total),
+        "init_prompt": getattr(args, "init_prompt", "point"),
         "cuda_peak_allocated_mb": memory["cuda_peak_allocated_mb"],
         "cuda_peak_reserved_mb": memory["cuda_peak_reserved_mb"],
         "eval_mode": eval_mode,
@@ -354,6 +359,39 @@ def _first_mask(mask_logits: Any) -> np.ndarray:
     while values.ndim > 2:
         values = values[0]
     return values > 0
+
+
+def _add_initial_prompt(
+    predictor: Any,
+    state: Any,
+    item: dict[str, Any],
+    frame_idx: int,
+    obj_id: int,
+    points: np.ndarray,
+    labels: np.ndarray,
+    init_prompt: str,
+) -> None:
+    if init_prompt == "mask":
+        mask = _read_gt_mask(item, frame_idx)
+        if mask is None:
+            raise RuntimeError(
+                f"--init-prompt mask requires a GT mask for video={item['video_id']} "
+                f"object={item['object_id']} frame={frame_idx}"
+            )
+        predictor.add_new_mask(
+            inference_state=state,
+            frame_idx=frame_idx,
+            obj_id=obj_id,
+            mask=mask,
+        )
+        return
+    predictor.add_new_points_or_box(
+        inference_state=state,
+        frame_idx=frame_idx,
+        obj_id=obj_id,
+        points=points,
+        labels=labels,
+    )
 
 
 def _read_gt_mask(item: dict[str, Any], frame_idx: int) -> np.ndarray | None:
@@ -459,6 +497,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--external-repo", required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-frames", type=int, default=96, help="Maximum propagated frames per video; use 0 for all frames.")
+    parser.add_argument(
+        "--init-prompt",
+        choices=["point", "mask"],
+        default="point",
+        help="Initial SA-V prompt. Use mask to match SAM2-family VOS eval protocols.",
+    )
     parser.add_argument("--autocast-bfloat16", action="store_true")
     parser.add_argument(
         "--eval-mode",

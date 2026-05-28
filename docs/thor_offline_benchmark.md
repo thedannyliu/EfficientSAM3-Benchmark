@@ -266,10 +266,15 @@ python -m sam_backend.coco_suite \
 This should produce one overlay per selected model and no failed rows in
 `coco_suite_summary.csv`.
 
-## 8. Run SA-V Point-Prompt Video Tracking
+## 8. Run SA-V Video Tracking
 
 This uses official SA-V masks for IoU and overlay videos. SAM2-family models use
-point prompts derived from the selected object's first available GT mask.
+point prompts derived from the selected object's first available GT mask by
+default. For VOS-style validation, use `--init-prompt mask`; Efficient-SAM2's
+upstream SA-V/VOS inference initializes objects with `add_new_mask`, not a
+single point. If the Efficient-SAM2 overlay looks like the first mask stays
+fixed in image coordinates, rerun with `--init-prompt mask` before treating it
+as a model or propagation bug.
 
 SAM2.1 tiny:
 
@@ -304,6 +309,7 @@ python -m sam_backend.profile_sav_video \
   --manifest data/manifests/sav_val_fixed3.jsonl \
   --eval-mode both \
   --max-frames 120 \
+  --init-prompt mask \
   --autocast-bfloat16 \
   --csv-output "results/thor/offline/sav/${RUN_ID}/efficient_sam2p1_hiera_tiny/frames.csv" \
   --summary-output "results/thor/offline/sav/${RUN_ID}/efficient_sam2p1_hiera_tiny/summary.json" \
