@@ -311,6 +311,7 @@ def _build_predictor(args: argparse.Namespace) -> tuple[Any, Any]:
             args.model_config,
             args.checkpoint_path,
             device=args.device,
+            hydra_overrides_extra=list(_efficienttam_hydra_overrides()),
         )
     elif args.backend in {"sam2", "efficient-sam2"}:
         builder = _import_required("sam2.build_sam")
@@ -337,6 +338,10 @@ def _prepare_efficient_sam2_predictor(predictor: Any) -> None:
         predictor.time_log = {}
     if not hasattr(predictor, "Mem_Frame_Prune"):
         predictor.Mem_Frame_Prune = False
+
+
+def _efficienttam_hydra_overrides() -> tuple[str, ...]:
+    return ("++model.compile_image_encoder=False",)
 
 
 def _read_manifest(path: Path) -> list[dict[str, Any]]:

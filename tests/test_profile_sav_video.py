@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from sam_backend.profile_sav_video import _prepare_efficient_sam2_predictor
+from sam_backend.profile_sav_video import _efficienttam_hydra_overrides, _prepare_efficient_sam2_predictor
 
 
 class DummyEfficientSam2Predictor:
@@ -24,6 +24,9 @@ class ProfileSavVideoTest(unittest.TestCase):
         self.assertFalse(predictor.enable_MeP_info)
         self.assertEqual(predictor.time_log, {})
         self.assertFalse(predictor.Mem_Frame_Prune)
+
+    def test_efficienttam_overrides_disable_image_encoder_compile(self) -> None:
+        self.assertIn("++model.compile_image_encoder=False", _efficienttam_hydra_overrides())
 
 
 if __name__ == "__main__":
