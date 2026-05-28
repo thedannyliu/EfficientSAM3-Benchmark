@@ -191,9 +191,12 @@ Ultralytics weights are resolved by model name and cached by Ultralytics.
 
 ## 6. Run The COCO Fixed10 Image Suite
 
-This is the main single-image benchmark. It runs SAM3, EfficientSAM3 variants,
-SAM2.1 tiny, Efficient-SAM2.1 tiny, EfficientTAM-Ti/S, and MobileSAM where
-their checkpoints/repos exist.
+This is the main SAM-family single-image benchmark. It runs SAM3,
+EfficientSAM3 variants, SAM2.1 tiny/small/base-plus/large,
+Efficient-SAM2.1 tiny/small/base-plus/large, EfficientTAM-Ti/S, and
+MobileSAM-ViT-T where their checkpoints/repos exist. Official SAM3 currently
+has one image checkpoint in this benchmark; the size sweep comes from
+EfficientSAM3 and the SAM2-family models.
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
@@ -232,6 +235,8 @@ mean_grounding_ms
 mean_detector_ms
 params_*
 weight_*_bytes
+checkpoint_file_bytes
+checkpoint_file_mb
 ```
 
 `effective_fps` is `1000 / mean_total_ms` for the profiled prediction rows.
@@ -428,7 +433,57 @@ python -m sam_backend.profile_yolo_coco \
   --overlay-dir "overlays/thor/offline/yolo_coco/${RUN_ID}/yolo11n_seg"
 ```
 
-## 8. Run A Smaller Image Sanity Check
+## 8. Run All COCO Image Models And Merge Summary
+
+Use this when you want one command that runs the YOLOE/YOLO11 COCO mask suite,
+the SAM-family COCO suite, and then writes a single comparison CSV:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
+  SAM_MODELS="sam3 es3p1_weak_image_weak_text sam2p1_hiera_tiny efficient_sam2p1_hiera_tiny mobilesam_vit_t" \
+  bash scripts/run_thor_coco_all_benchmarks.sh
+```
+
+After the smoke run, run the full matrix:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=0 YOLO_PRESET=all \
+  bash scripts/run_thor_coco_all_benchmarks.sh
+```
+
+Important outputs:
+
+```text
+results/thor/offline/coco_all/<run_id>/coco_all_model_summary.csv
+results/thor/offline/coco_all/<run_id>/sam/coco_suite_component_summary.csv
+results/thor/offline/coco_all/<run_id>/yolo/yolo_coco_model_summary.csv
+overlays/thor/offline/coco_all/<run_id>/sam/<model_id>/*.png
+overlays/thor/offline/coco_all/<run_id>/yolo/<model_id>/*.png
+```
+
+`coco_all_model_summary.csv` is the first table to inspect after the run. It
+keeps one row per model/prompt mode and includes `suite`, `model_id`, `family`,
+`backend`, `prompt_mode`, `effective_fps`, `mean_total_ms`, `miou_best`,
+`miou_merged`, CUDA peak memory, total/component parameter counts, total/component
+weight sizes, `checkpoint_file_mb`, and `source_csv`.
+
+Optional model subsets are space-separated:
+
+```bash
+YOLO_MODELS="yoloe_26n_seg yolo11n_seg" \
+SAM_MODELS="sam3 sam2p1_hiera_tiny mobilesam_vit_t" \
+LIMIT=1 YOLO_PRESET=all bash scripts/run_thor_coco_all_benchmarks.sh
+```
+
+Use `DRY_RUN=1` to verify the expanded command matrix without loading models:
+
+```bash
+DRY_RUN=1 YOLO_PRESET=quick LIMIT=1 bash scripts/run_thor_coco_all_benchmarks.sh
+```
+
+## 9. Run A Smaller Image Sanity Check
 
 Use this before the full suite when changing the environment:
 
@@ -447,7 +502,7 @@ python -m sam_backend.coco_suite \
 This should produce one overlay per selected model and no failed rows in
 `coco_suite_summary.csv`.
 
-## 9. Run SA-V Video Tracking
+## 10. Run SA-V Video Tracking
 
 This uses official SA-V masks for IoU and overlay videos. SAM2-family models use
 point prompts derived from the selected object's first available GT mask by
@@ -534,7 +589,7 @@ python -m sam_backend.sav_video_report \
   --output "results/thor/offline/sav/${RUN_ID}/sav_video_suite_summary.csv"
 ```
 
-## 10. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
+## 11. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
 
 Recorded video POC:
 
@@ -610,7 +665,7 @@ config is therefore `configs/edgetam.yaml`; older repo-relative values such as
 `external/EdgeTAM/sam2/configs/edgetam.yaml` are normalized by the benchmark
 entrypoint before calling EdgeTAM.
 
-## 11. Record The Run
+## 12. Record The Run
 
 For each Thor offline run, save these in your notes or PR:
 

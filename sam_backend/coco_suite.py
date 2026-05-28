@@ -47,6 +47,7 @@ PARAM_WEIGHT_FIELDS = [
     "weight_detector_bytes",
     "weight_memory_encoder_bytes",
     "weight_memory_attention_bytes",
+    "checkpoint_file_bytes",
 ]
 
 
@@ -148,11 +149,59 @@ DEFAULT_RUNS = [
         external_repo="external/sam2",
     ),
     CocoRun(
+        "sam2p1_hiera_small",
+        "sam2",
+        "point",
+        checkpoint_path="checkpoints/sam2/sam2.1_hiera_small.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_s.yaml",
+        external_repo="external/sam2",
+    ),
+    CocoRun(
+        "sam2p1_hiera_base_plus",
+        "sam2",
+        "point",
+        checkpoint_path="checkpoints/sam2/sam2.1_hiera_base_plus.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_b+.yaml",
+        external_repo="external/sam2",
+    ),
+    CocoRun(
+        "sam2p1_hiera_large",
+        "sam2",
+        "point",
+        checkpoint_path="checkpoints/sam2/sam2.1_hiera_large.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_l.yaml",
+        external_repo="external/sam2",
+    ),
+    CocoRun(
         "efficient_sam2p1_hiera_tiny",
         "efficient-sam2",
         "point",
         checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_tiny.pt",
         model_config="configs/sam2.1/sam2.1_hiera_t.yaml",
+        external_repo="external/Efficient-SAM2",
+    ),
+    CocoRun(
+        "efficient_sam2p1_hiera_small",
+        "efficient-sam2",
+        "point",
+        checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_small.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_s.yaml",
+        external_repo="external/Efficient-SAM2",
+    ),
+    CocoRun(
+        "efficient_sam2p1_hiera_base_plus",
+        "efficient-sam2",
+        "point",
+        checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_base_plus.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_b+.yaml",
+        external_repo="external/Efficient-SAM2",
+    ),
+    CocoRun(
+        "efficient_sam2p1_hiera_large",
+        "efficient-sam2",
+        "point",
+        checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_large.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_l.yaml",
         external_repo="external/Efficient-SAM2",
     ),
     CocoRun(
@@ -354,6 +403,8 @@ def _readable_param_weight_fields(row: dict[str, object]) -> dict[str, float | s
             fields[f"{key}_m"] = _numeric(value) / 1_000_000.0 if _numeric(value) is not None else ""
         elif key.startswith("weight_") and key.endswith("_bytes"):
             fields[f"{key[:-6]}_mb"] = _numeric(value) / (1024.0 * 1024.0) if _numeric(value) is not None else ""
+        elif key == "checkpoint_file_bytes":
+            fields["checkpoint_file_mb"] = _numeric(value) / (1024.0 * 1024.0) if _numeric(value) is not None else ""
     return fields
 
 

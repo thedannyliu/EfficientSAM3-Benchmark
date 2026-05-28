@@ -80,6 +80,7 @@ FIELDNAMES = [
     "weight_detector_bytes",
     "weight_memory_encoder_bytes",
     "weight_memory_attention_bytes",
+    "checkpoint_file_bytes",
     "overlay",
 ]
 
@@ -201,6 +202,7 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
                     "memory_attention_ms": profile.get("memory_attention_ms", 0.0),
                     "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
                     "other_ms": max(0.0, total_ms - component_total),
+                    "checkpoint_file_bytes": _checkpoint_file_bytes(args.checkpoint_path),
                     "overlay": str(overlay_path),
                     **memory,
                     **params,
@@ -291,6 +293,13 @@ def _write_overlay(
     if not ok:
         raise RuntimeError(f"failed to write overlay image: {path}")
     return path
+
+
+def _checkpoint_file_bytes(checkpoint_path: str | None) -> int | str:
+    if not checkpoint_path:
+        return ""
+    path = Path(checkpoint_path)
+    return path.stat().st_size if path.exists() and path.is_file() else ""
 
 
 def _summarize(args: argparse.Namespace, rows: list[dict[str, Any]]) -> dict[str, Any]:
