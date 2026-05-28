@@ -335,6 +335,8 @@ def _prepare_efficient_sam2_predictor(predictor: Any) -> None:
         predictor.enable_MeP_info = False
     if not hasattr(predictor, "time_log"):
         predictor.time_log = {}
+    if not hasattr(predictor, "Mem_Frame_Prune"):
+        predictor.Mem_Frame_Prune = False
 
 
 def _read_manifest(path: Path) -> list[dict[str, Any]]:

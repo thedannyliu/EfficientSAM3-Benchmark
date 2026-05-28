@@ -23,6 +23,7 @@ class ProfileSavVideoTest(unittest.TestCase):
         self.assertTrue(predictor.init_memory_info_called)
         self.assertFalse(predictor.enable_MeP_info)
         self.assertEqual(predictor.time_log, {})
+        self.assertFalse(predictor.Mem_Frame_Prune)
 
 
 if __name__ == "__main__":
