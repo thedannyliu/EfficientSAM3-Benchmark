@@ -514,6 +514,9 @@ checkpoint is available or trained.
 - Added Thor unified ROS environment helper.
 - Fixed Thor ROS Python path issues for `/usr/bin/python3` ROS entrypoints.
 - Documented NumPy `<2` requirement for ROS `cv_bridge` compatibility.
+- Disabled EfficientTAM image encoder `torch.compile` in the Thor SA-V profiler
+  path because the current Triton bundled `ptxas` does not recognize `sm_110a`
+  and otherwise emits a large PTX dump before failing.
 - Added ROS recorded-video segmentation nodes and recorders.
 - Updated Thor tutorial to separate offline benchmarking from ROS recorded-video deployment checks.
 

@@ -798,6 +798,28 @@ If the checkpoint shape says `77` but the current model shape says `16`, use:
 
 and keep `--backend sam3`.
 
+### EfficientTAM Triton `sm_110a` Compile Failure
+
+On Thor, EfficientTAM image encoder `torch.compile` can fail before tracking
+starts with a long Triton/PTX dump ending in:
+
+```text
+ptxas fatal: Value 'sm_110a' is not defined for option 'gpu-name'
+```
+
+This is a fatal PyTorch Inductor/Triton compile failure, not just noisy logging.
+The benchmark adapter disables EfficientTAM image encoder compile by passing
+`++model.compile_image_encoder=False` to the EfficientTAM builder. Reinstall the
+repo after pulling the fix:
+
+```bash
+source scripts/source_thor_ros_env.sh
+python -m pip install -e . --no-deps
+```
+
+The run may be slower than EfficientTAM's upstream optimized mode, but it avoids
+the unsupported `sm_110a` Triton compile path on the current Thor stack.
+
 ## 18. What to Record
 
 For each real benchmark run, record:

@@ -298,6 +298,16 @@ python -m sam_backend.profile_sav_video \
   --overlay-root "overlays/thor/offline/sav/${RUN_ID}/efficienttam_ti"
 ```
 
+On Thor, `sam_backend.profile_sav_video` disables EfficientTAM image encoder
+`torch.compile` through `++model.compile_image_encoder=False`. The default
+EfficientTAM builder enables compilation on GPUs with compute capability 8 or
+newer, but the bundled Triton `ptxas` in the current Thor venv does not
+recognize Thor's `sm_110a` target. Leaving compilation enabled causes a fatal
+`ptxas fatal: Value 'sm_110a' is not defined for option 'gpu-name'` error and a
+large PTX repro dump. Disabling compile is slower than the upstream optimized
+path, but it is the stable Thor benchmark path until the Triton/ptxas stack
+supports `sm_110a`.
+
 Summarize all completed SA-V runs:
 
 ```bash
