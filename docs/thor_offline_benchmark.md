@@ -194,9 +194,10 @@ Ultralytics weights are resolved by model name and cached by Ultralytics.
 This is the main SAM-family single-image benchmark. It runs SAM3,
 EfficientSAM3 variants, SAM2.1 tiny/small/base-plus/large,
 Efficient-SAM2.1 tiny/small/base-plus/large, EfficientTAM-Ti/S, and
-MobileSAM-ViT-T where their checkpoints/repos exist. Official SAM3 currently
-has one image checkpoint in this benchmark; the size sweep comes from
-EfficientSAM3 and the SAM2-family models.
+MobileSAM registry variants `vit_t/vit_b/vit_l/vit_h` where their
+checkpoints/repos exist. Official SAM3 currently has one image checkpoint in
+this benchmark; the size sweep comes from EfficientSAM3, SAM2-family, and
+MobileSAM registry variants.
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
@@ -445,7 +446,10 @@ PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
   bash scripts/run_thor_coco_all_benchmarks.sh
 ```
 
-After the smoke run, run the full matrix:
+After the smoke run, run the full matrix. This includes all YOLOE-seg sizes,
+YOLO11 segmentation sizes, SAM2.1 sizes, Efficient-SAM2.1 sizes,
+EfficientSAM3 variants, EfficientTAM-Ti/S, and MobileSAM `vit_t/vit_b/vit_l/vit_h`
+when the checkpoints are available:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"

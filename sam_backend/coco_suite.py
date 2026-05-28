@@ -228,6 +228,30 @@ DEFAULT_RUNS = [
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_t"),
     ),
+    CocoRun(
+        "mobilesam_vit_b",
+        "mobilesam",
+        "point",
+        checkpoint_path="checkpoints/mobilesam/sam_vit_b_01ec64.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_b"),
+    ),
+    CocoRun(
+        "mobilesam_vit_l",
+        "mobilesam",
+        "point",
+        checkpoint_path="checkpoints/mobilesam/sam_vit_l_0b3195.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_l"),
+    ),
+    CocoRun(
+        "mobilesam_vit_h",
+        "mobilesam",
+        "point",
+        checkpoint_path="checkpoints/mobilesam/sam_vit_h_4b8939.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_h"),
+    ),
 ]
 
 

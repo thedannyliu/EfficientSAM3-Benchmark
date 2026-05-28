@@ -21,6 +21,20 @@ fi
 
 mkdir -p external checkpoints/edgetam checkpoints/mobilesam checkpoints/yoloe
 
+download_if_missing() {
+  local url="$1"
+  local output="$2"
+  if [[ -f "${output}" ]]; then
+    echo "${output}"
+    return
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -O "${output}" "${url}"
+  else
+    curl -L -o "${output}" "${url}"
+  fi
+}
+
 if [[ ! -d "${EDGETAM_REPO}/.git" ]]; then
   git clone https://github.com/facebookresearch/EdgeTAM.git "${EDGETAM_REPO}"
 fi
@@ -54,24 +68,21 @@ PY
 python -m pip install --force-reinstall --no-deps "numpy>=1.26,<2"
 
 if [[ ! -f "${EDGETAM_CHECKPOINT}" ]]; then
-  if command -v wget >/dev/null 2>&1; then
-    wget -O "${EDGETAM_CHECKPOINT}" \
-      https://huggingface.co/spaces/facebook/EdgeTAM/resolve/main/checkpoints/edgetam.pt
-  else
-    curl -L -o "${EDGETAM_CHECKPOINT}" \
-      https://huggingface.co/spaces/facebook/EdgeTAM/resolve/main/checkpoints/edgetam.pt
-  fi
+  download_if_missing \
+    https://huggingface.co/spaces/facebook/EdgeTAM/resolve/main/checkpoints/edgetam.pt \
+    "${EDGETAM_CHECKPOINT}"
 fi
 
 if [[ ! -f "${MOBILESAM_CHECKPOINT}" ]]; then
-  if command -v wget >/dev/null 2>&1; then
-    wget -O "${MOBILESAM_CHECKPOINT}" \
-      https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt
-  else
-    curl -L -o "${MOBILESAM_CHECKPOINT}" \
-      https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt
-  fi
+  download_if_missing \
+    https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt \
+    "${MOBILESAM_CHECKPOINT}"
 fi
+
+SAM_BASE_URL="https://dl.fbaipublicfiles.com/segment_anything"
+download_if_missing "${SAM_BASE_URL}/sam_vit_b_01ec64.pth" "checkpoints/mobilesam/sam_vit_b_01ec64.pth"
+download_if_missing "${SAM_BASE_URL}/sam_vit_l_0b3195.pth" "checkpoints/mobilesam/sam_vit_l_0b3195.pth"
+download_if_missing "${SAM_BASE_URL}/sam_vit_h_4b8939.pth" "checkpoints/mobilesam/sam_vit_h_4b8939.pth"
 
 bash scripts/check_storage_budget.sh "${STORAGE_LIMIT_GIB}" data checkpoints external
 
@@ -81,5 +92,8 @@ EdgeTAM repo:        ${EDGETAM_REPO}
 EdgeTAM checkpoint:  ${EDGETAM_CHECKPOINT}
 MobileSAM repo:      ${MOBILESAM_REPO}
 MobileSAM checkpoint:${MOBILESAM_CHECKPOINT}
+MobileSAM SAM ViT-B: checkpoints/mobilesam/sam_vit_b_01ec64.pth
+MobileSAM SAM ViT-L: checkpoints/mobilesam/sam_vit_l_0b3195.pth
+MobileSAM SAM ViT-H: checkpoints/mobilesam/sam_vit_h_4b8939.pth
 Storage budget:      ${STORAGE_LIMIT_GIB} GiB
 EOF
