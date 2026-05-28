@@ -15,6 +15,7 @@ class Prompt:
     text: str | None = None
     points: list[tuple[float, float]] = field(default_factory=list)
     labels: list[int] = field(default_factory=list)
+    boxes: list[tuple[float, float, float, float]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -130,7 +131,16 @@ class Sam3ImageBackend:
                 point_labels=prompt.labels or [1] * len(prompt.points),
             )
             return {"masks": masks, "scores": scores, "logits": logits}
-        raise ValueError("prompt must include text or points")
+        if prompt.boxes:
+            masks, scores, logits = self.model.predict_inst(
+                state,
+                point_coords=None,
+                point_labels=None,
+                box=np.asarray(prompt.boxes, dtype=np.float32),
+                multimask_output=False,
+            )
+            return {"masks": masks, "scores": scores, "logits": logits}
+        raise ValueError("prompt must include text, points, or boxes")
 
     def _synchronize(self) -> None:
         cuda = getattr(self.torch, "cuda", None)
@@ -174,13 +184,14 @@ class Sam2PointImageBackend:
     def predict(self, image: Any, prompt: Prompt) -> Prediction:
         if prompt.text:
             raise ValueError(f"{self.config.backend} supports point prompts in this benchmark, not text prompts")
-        if not prompt.points:
-            raise ValueError(f"{self.config.backend} requires at least one point prompt")
+        if not prompt.points and not prompt.boxes:
+            raise ValueError(f"{self.config.backend} requires at least one point or box prompt")
 
         pil_image = _as_pil_image(image)
         image_np = np.asarray(pil_image)
-        point_coords = np.asarray(prompt.points, dtype=np.float32)
-        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32)
+        point_coords = np.asarray(prompt.points, dtype=np.float32) if prompt.points else None
+        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32) if prompt.points else None
+        box = np.asarray(prompt.boxes[0], dtype=np.float32) if prompt.boxes else None
 
         self._synchronize()
         start = perf_counter()
@@ -189,6 +200,7 @@ class Sam2PointImageBackend:
             masks, scores, logits = self.processor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
+                box=box,
                 multimask_output=False,
             )
         self._synchronize()
@@ -225,13 +237,14 @@ class MobileSamPointImageBackend:
     def predict(self, image: Any, prompt: Prompt) -> Prediction:
         if prompt.text:
             raise ValueError("mobilesam supports point prompts in this benchmark, not text prompts")
-        if not prompt.points:
-            raise ValueError("mobilesam requires at least one point prompt")
+        if not prompt.points and not prompt.boxes:
+            raise ValueError("mobilesam requires at least one point or box prompt")
 
         pil_image = _as_pil_image(image)
         image_np = np.asarray(pil_image)
-        point_coords = np.asarray(prompt.points, dtype=np.float32)
-        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32)
+        point_coords = np.asarray(prompt.points, dtype=np.float32) if prompt.points else None
+        point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32) if prompt.points else None
+        box = np.asarray(prompt.boxes[0], dtype=np.float32) if prompt.boxes else None
 
         self._synchronize()
         start = perf_counter()
@@ -240,6 +253,7 @@ class MobileSamPointImageBackend:
             masks, scores, logits = self.processor.predict(
                 point_coords=point_coords,
                 point_labels=point_labels,
+                box=box,
                 multimask_output=False,
             )
         self._synchronize()

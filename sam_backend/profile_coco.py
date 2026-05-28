@@ -24,6 +24,10 @@ FIELDNAMES = [
     "prompt",
     "point_x",
     "point_y",
+    "box_x1",
+    "box_y1",
+    "box_x2",
+    "box_y2",
     "image",
     "image_id",
     "annotation_id",
@@ -105,7 +109,7 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
             text_encoder_context_length=args.text_encoder_context_length,
             text_encoder_pos_embed_table_size=args.text_encoder_pos_embed_table_size,
             interpolate_pos_embed=args.interpolate_pos_embed,
-            enable_inst_interactivity=args.prompt_mode in {"point", "both"},
+            enable_inst_interactivity=args.prompt_mode in {"point", "box", "both", "all"},
             model_config=args.model_config,
             external_repo=args.external_repo,
             mobile_sam_model_type=getattr(args, "mobile_sam_model_type", "vit_t"),
@@ -116,12 +120,14 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
         torch_module.cuda.reset_peak_memory_stats()
     params = parameter_counts(getattr(backend, "model", None))
 
-    point_only_backends = {"sam2", "efficient-sam2", "efficienttam", "mobilesam"}
-    if args.backend in point_only_backends and args.prompt_mode == "text":
+    interactive_only_backends = {"sam2", "efficient-sam2", "efficienttam", "mobilesam"}
+    if args.backend in interactive_only_backends and args.prompt_mode == "text":
         raise ValueError(f"{args.backend} supports point prompts in this benchmark, not text prompts")
-    prompt_modes = ["text", "point"] if args.prompt_mode == "both" else [args.prompt_mode]
-    if args.backend in point_only_backends and args.prompt_mode == "both":
+    prompt_modes = _prompt_modes(args.prompt_mode)
+    if args.backend in interactive_only_backends and args.prompt_mode == "both":
         prompt_modes = ["point"]
+    if args.backend in interactive_only_backends and args.prompt_mode == "all":
+        prompt_modes = ["point", "box"]
     eval_mode = getattr(args, "eval_mode", "both")
     use_gt = eval_mode in {"gt", "both"}
     use_overlay = eval_mode in {"overlay", "both"} and args.overlay_dir is not None
@@ -158,6 +164,7 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
                 best_iou, merged_iou = _prediction_iou(prediction.masks, gt_mask) if use_gt else ("", "")
                 overlay_path = _write_overlay(args.overlay_dir, item, prompt_mode, frame_rgb, prediction) if use_overlay else ""
                 point = item["point"]
+                box = _bbox_xyxy(item)
                 row = {
                     "model_id": args.model_id,
                     "backend": args.backend,
@@ -166,6 +173,10 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
                     "prompt": prompt.text or "",
                     "point_x": point[0],
                     "point_y": point[1],
+                    "box_x1": box[0] if box else "",
+                    "box_y1": box[1] if box else "",
+                    "box_x2": box[2] if box else "",
+                    "box_y2": box[3] if box else "",
                     "image": item["image_path"],
                     "image_id": item["image_id"],
                     "annotation_id": item["annotation_id"],
@@ -211,7 +222,28 @@ def _build_prompt(item: dict[str, Any], prompt_mode: str) -> Prompt:
     if prompt_mode == "point":
         point = item["point"]
         return Prompt(points=[(float(point[0]), float(point[1]))], labels=[int(item.get("point_label", 1))])
+    if prompt_mode == "box":
+        box = _bbox_xyxy(item)
+        if box is None:
+            raise ValueError(f"missing bbox_xywh for sample {item.get('sample_id', '')}")
+        return Prompt(boxes=[box])
     raise ValueError(f"unknown prompt mode: {prompt_mode}")
+
+
+def _prompt_modes(prompt_mode: str) -> list[str]:
+    if prompt_mode == "both":
+        return ["text", "point"]
+    if prompt_mode == "all":
+        return ["text", "point", "box"]
+    return [prompt_mode]
+
+
+def _bbox_xyxy(item: dict[str, Any]) -> tuple[float, float, float, float] | None:
+    bbox = item.get("bbox_xywh")
+    if not bbox or len(bbox) != 4:
+        return None
+    x, y, w, h = [float(value) for value in bbox]
+    return x, y, x + w, y + h
 
 
 def _prediction_iou(masks: Any, gt_mask: Any) -> tuple[float, float]:
@@ -318,7 +350,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text-encoder-pos-embed-table-size", type=int)
     parser.add_argument("--interpolate-pos-embed", action="store_true")
     parser.add_argument("--mobile-sam-model-type", default="vit_t")
-    parser.add_argument("--prompt-mode", choices=["text", "point", "both"], default="both")
+    parser.add_argument("--prompt-mode", choices=["text", "point", "box", "both", "all"], default="both")
     parser.add_argument(
         "--eval-mode",
         choices=["gt", "overlay", "both", "profile"],

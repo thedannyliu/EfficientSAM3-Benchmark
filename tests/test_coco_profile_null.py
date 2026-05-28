@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from sam_backend.coco_manifest import build_coco_manifest
-from sam_backend.profile_coco import profile_coco
+from sam_backend.profile_coco import _build_prompt, profile_coco
 
 
 class CocoProfileNullTest(unittest.TestCase):
@@ -90,6 +90,23 @@ class CocoProfileNullTest(unittest.TestCase):
             with csv_path.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             self.assertEqual([row["prompt_mode"] for row in rows], ["text", "point"])
+
+            box_prompt = _build_prompt(manifest_rows[0], "box")
+            self.assertEqual(box_prompt.boxes[0], (10.0, 5.0, 20.0, 15.0))
+
+            args.prompt_mode = "all"
+            csv_path_all = tmp / "profile_all.csv"
+            args.csv_output = csv_path_all
+            summary = profile_coco(args)
+            self.assertEqual(summary["rows"], 3)
+
+            with csv_path_all.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual([row["prompt_mode"] for row in rows], ["text", "point", "box"])
+            self.assertEqual(rows[-1]["box_x1"], "10.0")
+            self.assertEqual(rows[-1]["box_y1"], "5.0")
+            self.assertEqual(rows[-1]["box_x2"], "20.0")
+            self.assertEqual(rows[-1]["box_y2"], "15.0")
 
 
 if __name__ == "__main__":

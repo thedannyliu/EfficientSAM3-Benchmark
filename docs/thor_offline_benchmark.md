@@ -216,6 +216,37 @@ params_*
 weight_*_bytes
 ```
 
+EfficientSAM3's upstream `external/efficientsam3/eval/eval_coco.py` evaluates
+COCO with each annotation's ground-truth bounding box:
+
+```text
+model.predict_inst(..., box=gt_box, multimask_output=False)
+```
+
+That is an interactive box-prompt segmentation check, not text-prompt object
+discovery. To reproduce that protocol for one EfficientSAM3 variant:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.profile_coco \
+  --manifest data/manifests/coco_val2017_fixed10.jsonl \
+  --model-id es3_weak_image_strong_available_text_box \
+  --backend efficientsam3 \
+  --checkpoint-path checkpoints/stage1_all_converted/efficient_sam3_efficientvit-b0_mobileclip_s1.pth \
+  --external-repo external/efficientsam3 \
+  --backbone-type efficientvit \
+  --model-name b0 \
+  --text-encoder-type MobileCLIP-S1 \
+  --text-encoder-context-length 16 \
+  --text-encoder-pos-embed-table-size 77 \
+  --prompt-mode box \
+  --device cuda \
+  --eval-mode both \
+  --csv-output "results/thor/offline/coco_box/${RUN_ID}/profile.csv" \
+  --summary-output "results/thor/offline/coco_box/${RUN_ID}/summary.json" \
+  --overlay-dir "overlays/thor/offline/coco_box/${RUN_ID}"
+```
+
 ## 7. Run A Smaller Image Sanity Check
 
 Use this before the full suite when changing the environment:
