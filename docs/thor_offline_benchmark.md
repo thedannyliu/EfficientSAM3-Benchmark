@@ -307,6 +307,14 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 LIMIT=0 YOLO_PRESET=small bash scripts/run_thor_yolo_coco_suite.sh
 ```
 
+Run every YOLOE segmentation variant plus all YOLO11 segmentation baselines:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=0 YOLO_PRESET=all \
+  bash scripts/run_thor_yolo_coco_suite.sh
+```
+
 The `small` preset runs the quick models plus `yoloe_11s_seg`,
 `yoloe_v8s_seg`, `yoloe_26s_seg`, `yolo11s_seg`, and `yolo11m_seg`.
 The `all` preset adds every YOLOE segmentation variant currently listed by
