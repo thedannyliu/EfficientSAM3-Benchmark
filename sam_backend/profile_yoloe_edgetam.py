@@ -300,18 +300,40 @@ def _build_models(args: argparse.Namespace) -> tuple[Any, Any, Any]:
     torch_module = _import_required("torch")
     ultralytics = _import_required("ultralytics")
     builder = _import_required("sam2.build_sam")
+    model_config = _resolve_edgetam_model_config(args.edgetam_model_config, args.edgetam_external_repo)
     yoloe_cls = getattr(ultralytics, "YOLOE")
     yoloe = yoloe_cls(args.yoloe_weights)
     if hasattr(yoloe, "to"):
         yoloe.to(args.device)
     predictor = builder.build_sam2_video_predictor(
-        args.edgetam_model_config,
+        model_config,
         args.edgetam_checkpoint_path,
         device=args.device,
     )
     if hasattr(predictor, "eval"):
         predictor.eval()
     return yoloe, predictor, torch_module
+
+
+def _resolve_edgetam_model_config(config: str, external_repo: str) -> str:
+    config_path = Path(config)
+    if not config_path.is_absolute():
+        parts = config_path.parts
+        external_parts = Path(external_repo).parts
+        sam2_index = len(external_parts)
+        if (
+            len(parts) > sam2_index + 1
+            and parts[:sam2_index] == external_parts
+            and parts[sam2_index] == "sam2"
+        ):
+            return str(Path(*parts[sam2_index + 1 :]))
+        return config
+
+    sam2_root = (Path(external_repo) / "sam2").resolve()
+    try:
+        return str(config_path.resolve().relative_to(sam2_root))
+    except ValueError:
+        return config
 
 
 def _run_yoloe(yoloe: Any, frame_bgr: np.ndarray, args: argparse.Namespace) -> dict[str, Any] | None:
@@ -603,7 +625,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--area-jump-ratio", type=float, default=2.5)
     parser.add_argument("--edgetam-external-repo", default="external/EdgeTAM")
     parser.add_argument("--edgetam-checkpoint-path", default="checkpoints/edgetam/edgetam.pt")
-    parser.add_argument("--edgetam-model-config", default="external/EdgeTAM/sam2/configs/edgetam.yaml")
+    parser.add_argument("--edgetam-model-config", default="configs/edgetam.yaml")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-frames", type=int, default=240)
     parser.add_argument("--autocast-bfloat16", action="store_true")

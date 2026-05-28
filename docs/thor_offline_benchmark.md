@@ -355,6 +355,11 @@ Check `frames_summary.csv` for first-mask latency, tracking FPS, YOLOE
 validation latency, re-ground count, and top-1 versus GT-assisted localization
 diagnostics.
 
+EdgeTAM's Hydra builder searches configs under the `sam2` package. The default
+config is therefore `configs/edgetam.yaml`; older repo-relative values such as
+`external/EdgeTAM/sam2/configs/edgetam.yaml` are normalized by the benchmark
+entrypoint before calling EdgeTAM.
+
 ## 10. Record The Run
 
 For each Thor offline run, save these in your notes or PR:

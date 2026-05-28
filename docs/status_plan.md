@@ -428,7 +428,7 @@ YOLOE model: checkpoints/yoloe/yoloe-26m-seg.pt
 YOLOE input: 640
 YOLOE interval: 20 frames
 EdgeTAM checkpoint: checkpoints/edgetam/edgetam.pt
-EdgeTAM config: external/EdgeTAM/sam2/configs/edgetam.yaml
+EdgeTAM config: configs/edgetam.yaml
 Prompt source: operator-supplied text prompt per recorded video
 ```
 

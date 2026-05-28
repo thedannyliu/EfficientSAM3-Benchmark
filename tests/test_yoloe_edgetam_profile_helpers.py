@@ -8,13 +8,36 @@ from pathlib import Path
 
 import numpy as np
 
-from sam_backend.profile_yoloe_edgetam import _area_reground_reason, _load_sources, _localization_diagnostics, _mask_iou, _overlay_frame
+from sam_backend.profile_yoloe_edgetam import (
+    _area_reground_reason,
+    _load_sources,
+    _localization_diagnostics,
+    _mask_iou,
+    _overlay_frame,
+    _resolve_edgetam_model_config,
+)
 
 
 class YoloeEdgeTamProfileHelpersTest(unittest.TestCase):
     def test_area_jump_rule(self) -> None:
         self.assertEqual(_area_reground_reason(10.0, 30.0, 2.5), "mask_area_jump")
         self.assertEqual(_area_reground_reason(10.0, 20.0, 2.5), "")
+
+    def test_resolve_edgetam_model_config_for_hydra_package_path(self) -> None:
+        self.assertEqual(
+            _resolve_edgetam_model_config("configs/edgetam.yaml", "external/EdgeTAM"),
+            "configs/edgetam.yaml",
+        )
+        self.assertEqual(
+            _resolve_edgetam_model_config("external/EdgeTAM/sam2/configs/edgetam.yaml", "external/EdgeTAM"),
+            "configs/edgetam.yaml",
+        )
+
+    def test_resolve_edgetam_model_config_for_absolute_external_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = Path(tmpdir) / "external" / "EdgeTAM"
+            config = repo / "sam2" / "configs" / "edgetam.yaml"
+            self.assertEqual(_resolve_edgetam_model_config(str(config), str(repo)), "configs/edgetam.yaml")
 
     def test_mask_iou(self) -> None:
         left = np.zeros((10, 10), dtype=bool)
