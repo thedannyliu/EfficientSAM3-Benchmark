@@ -322,13 +322,19 @@ def _build_predictor(args: argparse.Namespace) -> tuple[Any, Any]:
     else:
         raise ValueError(f"unsupported video backend: {args.backend}")
     if args.backend == "efficient-sam2":
-        if hasattr(predictor, "init_memory_info"):
-            predictor.init_memory_info(enable_MeP_info=False)
-        elif not hasattr(predictor, "enable_MeP_info"):
-            predictor.enable_MeP_info = False
+        _prepare_efficient_sam2_predictor(predictor)
     if hasattr(predictor, "eval"):
         predictor.eval()
     return predictor, torch_module
+
+
+def _prepare_efficient_sam2_predictor(predictor: Any) -> None:
+    if hasattr(predictor, "init_memory_info"):
+        predictor.init_memory_info(enable_MeP_info=False)
+    elif not hasattr(predictor, "enable_MeP_info"):
+        predictor.enable_MeP_info = False
+    if not hasattr(predictor, "time_log"):
+        predictor.time_log = {}
 
 
 def _read_manifest(path: Path) -> list[dict[str, Any]]:
