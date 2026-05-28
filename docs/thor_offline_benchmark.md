@@ -216,6 +216,13 @@ params_*
 weight_*_bytes
 ```
 
+`effective_fps` is `1000 / mean_total_ms` for the profiled prediction rows.
+It excludes model construction, checkpoint loading, image `cv2.imread`,
+ground-truth mask decoding, and overlay writing. For each COCO row, `total_ms`
+starts immediately before `backend.predict(frame_rgb, prompt)` and includes the
+single-image model path, such as SAM3 `set_image` plus the selected text, point,
+or box prompt.
+
 EfficientSAM3's upstream `external/efficientsam3/eval/eval_coco.py` evaluates
 COCO with each annotation's ground-truth bounding box:
 
