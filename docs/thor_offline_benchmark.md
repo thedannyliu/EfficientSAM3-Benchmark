@@ -171,6 +171,24 @@ bash scripts/prepare_sav_salient_subset.sh
 
 Keep `data/`, `checkpoints/`, and `external/` under the agreed 300 GiB cap.
 
+For YOLO COCO baselines, the script can also prepare the COCO fixed manifest and
+Ultralytics weights before benchmarking. This avoids discovering missing data or
+weights halfway through a run:
+
+```bash
+PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=0 YOLO_PRESET=quick EVAL_MODE=profile \
+  bash scripts/run_thor_yolo_coco_suite.sh --dry-run
+```
+
+`PREPARE_COCO=1` calls `scripts/prepare_coco_fixed_subset.sh`, which downloads
+COCO val2017/images plus annotations if needed and writes
+`data/manifests/coco_val2017_fixed${COCO_COUNT}.jsonl`. The default
+`COCO_COUNT` is `10`.
+
+Use `YOLO_PRESET=small` or `YOLO_PRESET=all` to prepare the larger YOLOE/YOLO11
+weights. `checkpoints/yoloe/yoloe-26m-seg.pt` is used when present; other
+Ultralytics weights are resolved by model name and cached by Ultralytics.
+
 ## 6. Run The COCO Fixed10 Image Suite
 
 This is the main single-image benchmark. It runs SAM3, EfficientSAM3 variants,
@@ -254,7 +272,111 @@ python -m sam_backend.profile_coco \
   --overlay-dir "overlays/thor/offline/coco_box/${RUN_ID}"
 ```
 
-## 7. Run A Smaller Image Sanity Check
+## 7. Run YOLO COCO Mask Suite
+
+This is the COCO image benchmark for YOLO mask baselines. It currently runs:
+
+```text
+YOLOE-seg: open-vocabulary text prompt -> instance masks
+YOLO11-seg: closed-set COCO class prediction -> target-class masks
+```
+
+YOLO-World is intentionally not included in this script yet because it is an
+open-vocabulary detector baseline, not a mask model. Add it later as a separate
+box-IoU path or a YOLO-World + SAM2 hybrid mask path.
+
+Fastest smoke run, starting from the smallest models:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=1 YOLO_PRESET=quick \
+  bash scripts/run_thor_yolo_coco_suite.sh
+```
+
+The quick preset runs:
+
+```text
+yoloe_26n_seg
+yolo11n_seg
+```
+
+To include the small/medium models after the smoke run:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+LIMIT=0 YOLO_PRESET=small bash scripts/run_thor_yolo_coco_suite.sh
+```
+
+The `small` preset runs `yoloe_26n_seg`, `yoloe_26s_seg`,
+`yolo11n_seg`, `yolo11s_seg`, and `yolo11m_seg`. The `all` preset also
+adds YOLOE-26M/L/X and YOLO11L/X.
+
+Important outputs:
+
+```text
+results/thor/offline/yolo_coco/<run_id>/yolo_coco_suite_summary.csv
+results/thor/offline/yolo_coco/<run_id>/yolo_coco_component_summary.csv
+results/thor/offline/yolo_coco/<run_id>/<model_id>/profile.csv
+results/thor/offline/yolo_coco/<run_id>/<model_id>/summary.json
+overlays/thor/offline/yolo_coco/<run_id>/<model_id>/*.png
+```
+
+Read `yolo_coco_component_summary.csv` first. It contains:
+
+```text
+effective_fps
+miou_best
+miou_merged
+mean_best_box_iou
+mean_target_detection_count
+mean_set_classes_ms
+mean_predict_ms
+mean_postprocess_ms
+params_*
+weight_*_bytes
+checkpoint_file_bytes
+```
+
+`miou_best` is the mean IoU of the best predicted target mask against the
+selected COCO annotation mask. `miou_merged` unions all target detections before
+computing IoU. Overlays are written for every evaluated sample when
+`EVAL_MODE=both` or `EVAL_MODE=overlay`.
+
+For Ultralytics YOLO models, component storage is reported with a pragmatic
+split:
+
+```text
+params_segmentation_head / weight_segmentation_head_bytes = final model layer
+params_backbone / weight_backbone_bytes = all earlier layers, including neck
+params_detector / weight_detector_bytes = whole YOLO model
+checkpoint_file_bytes = local .pt file size when the path is discoverable
+```
+
+Use lower confidence while debugging open-vocabulary localization:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+LIMIT=1 YOLO_PRESET=quick CONF=0.05 bash scripts/run_thor_yolo_coco_suite.sh
+```
+
+Run a single model directly:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.profile_yolo_coco \
+  --manifest data/manifests/coco_val2017_fixed10.jsonl \
+  --model-id yolo11n_seg \
+  --family yolo-seg \
+  --weights yolo11n-seg.pt \
+  --device cuda \
+  --limit 1 \
+  --eval-mode both \
+  --csv-output "results/thor/offline/yolo_coco/${RUN_ID}/yolo11n_seg/profile.csv" \
+  --summary-output "results/thor/offline/yolo_coco/${RUN_ID}/yolo11n_seg/summary.json" \
+  --overlay-dir "overlays/thor/offline/yolo_coco/${RUN_ID}/yolo11n_seg"
+```
+
+## 8. Run A Smaller Image Sanity Check
 
 Use this before the full suite when changing the environment:
 
@@ -273,7 +395,7 @@ python -m sam_backend.coco_suite \
 This should produce one overlay per selected model and no failed rows in
 `coco_suite_summary.csv`.
 
-## 8. Run SA-V Video Tracking
+## 9. Run SA-V Video Tracking
 
 This uses official SA-V masks for IoU and overlay videos. SAM2-family models use
 point prompts derived from the selected object's first available GT mask by
@@ -360,7 +482,7 @@ python -m sam_backend.sav_video_report \
   --output "results/thor/offline/sav/${RUN_ID}/sav_video_suite_summary.csv"
 ```
 
-## 9. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
+## 10. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
 
 Recorded video POC:
 
@@ -436,7 +558,7 @@ config is therefore `configs/edgetam.yaml`; older repo-relative values such as
 `external/EdgeTAM/sam2/configs/edgetam.yaml` are normalized by the benchmark
 entrypoint before calling EdgeTAM.
 
-## 10. Record The Run
+## 11. Record The Run
 
 For each Thor offline run, save these in your notes or PR:
 
