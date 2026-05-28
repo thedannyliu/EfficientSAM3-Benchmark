@@ -6,7 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sam_backend.coco_suite import run_suite, write_component_summary
+from sam_backend.coco_suite import (
+    run_suite,
+    write_component_summary,
+    write_model_summary,
+)
 
 
 class CocoSuiteTest(unittest.TestCase):
@@ -97,6 +101,68 @@ class CocoSuiteTest(unittest.TestCase):
             self.assertEqual(rows[0]["mean_image_encoder_ms"], "4.0")
             self.assertEqual(rows[0]["params_total_m"], "1.2e-05")
             self.assertEqual(rows[0]["weight_total_mb"], str(48 / (1024.0 * 1024.0)))
+
+    def test_model_summary_combines_prompt_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            run_dir = tmp / "model_a"
+            run_dir.mkdir()
+            with (run_dir / "profile.csv").open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "model_id",
+                        "backend",
+                        "sample_id",
+                        "prompt_mode",
+                        "total_ms",
+                        "best_iou",
+                        "merged_iou",
+                        "params_total",
+                        "weight_total_bytes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "model_id": "model_a",
+                        "backend": "null",
+                        "sample_id": "s1",
+                        "prompt_mode": "text",
+                        "total_ms": "10",
+                        "best_iou": "0.2",
+                        "merged_iou": "0.3",
+                        "params_total": "2000000",
+                        "weight_total_bytes": "8000000",
+                    }
+                )
+                writer.writerow(
+                    {
+                        "model_id": "model_a",
+                        "backend": "null",
+                        "sample_id": "s1",
+                        "prompt_mode": "point",
+                        "total_ms": "30",
+                        "best_iou": "0.4",
+                        "merged_iou": "0.5",
+                        "params_total": "2000000",
+                        "weight_total_bytes": "8000000",
+                    }
+                )
+
+            summary_path = write_model_summary(tmp)
+
+            self.assertIsNotNone(summary_path)
+            with summary_path.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["model_id"], "model_a")
+            self.assertEqual(rows[0]["prompt_modes"], "point+text")
+            self.assertEqual(rows[0]["samples"], "1")
+            self.assertEqual(rows[0]["rows"], "2")
+            self.assertEqual(rows[0]["effective_fps"], "50.0")
+            self.assertAlmostEqual(float(rows[0]["miou_best"]), 0.3)
+            self.assertEqual(rows[0]["params_total_m"], "2.0")
 
 
 if __name__ == "__main__":

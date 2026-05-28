@@ -50,6 +50,56 @@ PARAM_WEIGHT_FIELDS = [
     "checkpoint_file_bytes",
 ]
 
+MODEL_SUMMARY_FIELDS = [
+    "model_id",
+    "backend",
+    "prompt_modes",
+    "samples",
+    "rows",
+    "effective_fps",
+    "mean_total_ms",
+    "miou_best",
+    "miou_merged",
+    "mean_cuda_peak_allocated_mb",
+    "mean_cuda_peak_reserved_mb",
+    "mean_image_encoder_ms",
+    "mean_text_encoder_ms",
+    "mean_prompt_encoder_ms",
+    "mean_mask_decoder_ms",
+    "mean_transformer_ms",
+    "mean_geometry_encoder_ms",
+    "mean_segmentation_head_ms",
+    "mean_grounding_ms",
+    "mean_detector_ms",
+    "mean_memory_attention_ms",
+    "mean_memory_encoder_ms",
+    "params_total_m",
+    "params_backbone_m",
+    "params_image_encoder_m",
+    "params_text_encoder_m",
+    "params_transformer_m",
+    "params_geometry_encoder_m",
+    "params_segmentation_head_m",
+    "params_prompt_encoder_m",
+    "params_mask_decoder_m",
+    "params_detector_m",
+    "params_memory_encoder_m",
+    "params_memory_attention_m",
+    "weight_total_mb",
+    "weight_backbone_mb",
+    "weight_image_encoder_mb",
+    "weight_text_encoder_mb",
+    "weight_transformer_mb",
+    "weight_geometry_encoder_mb",
+    "weight_segmentation_head_mb",
+    "weight_prompt_encoder_mb",
+    "weight_mask_decoder_mb",
+    "weight_detector_mb",
+    "weight_memory_encoder_mb",
+    "weight_memory_attention_mb",
+    "checkpoint_file_mb",
+]
+
 
 @dataclass(frozen=True)
 class CocoRun:
@@ -268,6 +318,9 @@ def main() -> None:
     component_summary_path = write_component_summary(args.output_dir)
     if component_summary_path:
         print(component_summary_path)
+    model_summary_path = write_model_summary(args.output_dir)
+    if model_summary_path:
+        print(model_summary_path)
 
 
 def run_suite(args: argparse.Namespace) -> list[dict[str, str]]:
@@ -365,6 +418,34 @@ def _result(run: CocoRun, status: str, summary_path: Path, csv_path: Path, messa
 
 
 def write_component_summary(output_dir: Path) -> Path | None:
+    rows = collect_component_summary_rows(output_dir)
+    if not rows:
+        return None
+
+    path = output_dir / "coco_suite_component_summary.csv"
+    fieldnames = list(rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def write_model_summary(output_dir: Path) -> Path | None:
+    rows = collect_model_summary_rows(output_dir)
+    if not rows:
+        return None
+
+    path = output_dir / "coco_suite_model_summary.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=MODEL_SUMMARY_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field_name: row.get(field_name, "") for field_name in MODEL_SUMMARY_FIELDS})
+    return path
+
+
+def collect_component_summary_rows(output_dir: Path) -> list[dict[str, object]]:
     rows = []
     for profile_csv in sorted(output_dir.glob("*/profile.csv")):
         with profile_csv.open(newline="", encoding="utf-8") as f:
@@ -394,17 +475,40 @@ def write_component_summary(output_dir: Path) -> Path | None:
                 row[field_name] = first.get(field_name, "")
             row.update(_readable_param_weight_fields(row))
             rows.append(row)
+    return rows
 
-    if not rows:
-        return None
 
-    path = output_dir / "coco_suite_component_summary.csv"
-    fieldnames = list(rows[0].keys())
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    return path
+def collect_model_summary_rows(output_dir: Path) -> list[dict[str, object]]:
+    rows = []
+    for profile_csv in sorted(output_dir.glob("*/profile.csv")):
+        with profile_csv.open(newline="", encoding="utf-8") as f:
+            profile_rows = list(csv.DictReader(f))
+        if not profile_rows:
+            continue
+        first = profile_rows[0]
+        total_ms = _mean(profile_rows, "total_ms")
+        row = {
+            "model_id": first.get("model_id", profile_csv.parent.name),
+            "backend": first.get("backend", ""),
+            "prompt_modes": "+".join(
+                sorted({row.get("prompt_mode", "") for row in profile_rows if row.get("prompt_mode", "")})
+            ),
+            "rows": len(profile_rows),
+            "samples": len({row.get("sample_id", "") for row in profile_rows}),
+            "mean_total_ms": total_ms,
+            "effective_fps": 1000.0 / total_ms if isinstance(total_ms, float) and total_ms > 0 else "",
+            "miou_best": _mean(profile_rows, "best_iou"),
+            "miou_merged": _mean(profile_rows, "merged_iou"),
+            "mean_cuda_peak_allocated_mb": _mean(profile_rows, "cuda_peak_allocated_mb"),
+            "mean_cuda_peak_reserved_mb": _mean(profile_rows, "cuda_peak_reserved_mb"),
+        }
+        for field_name in COMPONENT_FIELDS:
+            row[f"mean_{field_name}"] = _mean(profile_rows, field_name)
+        for field_name in PARAM_WEIGHT_FIELDS:
+            row[field_name] = first.get(field_name, "")
+        row.update(_readable_param_weight_fields(row))
+        rows.append(row)
+    return rows
 
 
 def _mean(rows: list[dict[str, str]], key: str) -> float | str:

@@ -214,13 +214,17 @@ Important outputs:
 
 ```text
 results/thor/offline/coco/<run_id>/coco_suite_summary.csv
+results/thor/offline/coco/<run_id>/coco_suite_model_summary.csv
 results/thor/offline/coco/<run_id>/coco_suite_component_summary.csv
 results/thor/offline/coco/<run_id>/<model_id>/profile.csv
 results/thor/offline/coco/<run_id>/<model_id>/summary.json
 overlays/thor/offline/coco/<run_id>/<model_id>/*.png
 ```
 
-Read `coco_suite_component_summary.csv` first. It contains:
+Read `coco_suite_model_summary.csv` first. It is the concise one-row-per-model
+table for comparing mIoU, FPS, latency, CUDA memory, parameter count, and model
+size across the full run. Use `coco_suite_component_summary.csv` when you need
+the same metrics split by prompt mode. The summary columns include:
 
 ```text
 mean_total_ms
@@ -234,9 +238,8 @@ mean_prompt_encoder_ms
 mean_mask_decoder_ms
 mean_grounding_ms
 mean_detector_ms
-params_*
-weight_*_bytes
-checkpoint_file_bytes
+params_*_m
+weight_*_mb
 checkpoint_file_mb
 ```
 
