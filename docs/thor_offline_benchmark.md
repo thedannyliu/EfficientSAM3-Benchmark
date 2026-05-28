@@ -379,5 +379,28 @@ mIoU when GT exists
 CUDA peak memory
 ```
 
+To collect all completed Thor offline summaries into per-task CSVs and a model
+storage/component table:
+
+```bash
+python -m sam_backend.thor_offline_report \
+  --root results/thor/offline \
+  --output-dir results/thor/offline/reports
+```
+
+This writes:
+
+```text
+results/thor/offline/reports/thor_offline_coco_summary.csv
+results/thor/offline/reports/thor_offline_sav_summary.csv
+results/thor/offline/reports/thor_offline_yoloe_edgetam_summary.csv
+results/thor/offline/reports/thor_offline_all_summary.csv
+results/thor/offline/reports/thor_offline_model_storage_components.csv
+```
+
+The task summaries keep the existing `params_*` and `weight_*` component
+columns from the benchmark outputs and add checkpoint/asset storage totals. The
+storage component CSV records each model asset path, existence, and file size.
+
 Generated `results/`, `overlays/`, `data/`, `checkpoints/`, and `external/`
 contents are intentionally ignored and should not be committed.
