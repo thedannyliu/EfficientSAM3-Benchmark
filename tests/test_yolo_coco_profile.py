@@ -17,7 +17,12 @@ from sam_backend.profile_yolo_coco import (
     _split_yolo_layers,
     _yolo_parameter_counts,
 )
-from sam_backend.yolo_coco_suite import run_suite, weight_names_for_preset, write_component_summary
+from sam_backend.yolo_coco_suite import (
+    run_suite,
+    weight_names_for_preset,
+    write_component_summary,
+    write_model_summary,
+)
 
 
 class TensorLike:
@@ -249,6 +254,53 @@ class YoloCocoProfileTest(unittest.TestCase):
             self.assertEqual(rows[0]["params_yolo_neck_m"], "0.4")
             self.assertEqual(rows[0]["yolo_head_layers"], "22")
             self.assertEqual(rows[0]["checkpoint_file_mb"], str(2000000 / (1024.0 * 1024.0)))
+
+    def test_yolo_model_summary_is_concise_one_row_per_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            run_dir = tmp / "yoloe_26n_seg"
+            run_dir.mkdir()
+            with (run_dir / "profile.csv").open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "model_id",
+                        "family",
+                        "weights",
+                        "sample_id",
+                        "total_ms",
+                        "best_iou",
+                        "merged_iou",
+                        "predict_ms",
+                        "params_total",
+                        "weight_total_bytes",
+                    ],
+                )
+                writer.writeheader()
+                writer.writerow(
+                    {
+                        "model_id": "yoloe_26n_seg",
+                        "family": "yoloe-seg",
+                        "weights": "yoloe-26n-seg.pt",
+                        "sample_id": "s1",
+                        "total_ms": "25",
+                        "best_iou": "0.25",
+                        "merged_iou": "0.30",
+                        "predict_ms": "20",
+                        "params_total": "2000000",
+                        "weight_total_bytes": "8000000",
+                    }
+                )
+
+            summary_path = write_model_summary(tmp)
+
+            self.assertIsNotNone(summary_path)
+            with summary_path.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]["model_id"], "yoloe_26n_seg")
+            self.assertEqual(rows[0]["effective_fps"], "40.0")
+            self.assertEqual(rows[0]["miou_best"], "0.25")
+            self.assertEqual(rows[0]["params_total_m"], "2.0")
 
 
 if __name__ == "__main__":

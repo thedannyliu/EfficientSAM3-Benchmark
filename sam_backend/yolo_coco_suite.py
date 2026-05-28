@@ -48,6 +48,34 @@ PARAM_WEIGHT_FIELDS = [
     "checkpoint_file_bytes",
 ]
 
+MODEL_SUMMARY_FIELDS = [
+    "model_id",
+    "family",
+    "weights",
+    "samples",
+    "rows",
+    "effective_fps",
+    "mean_total_ms",
+    "miou_best",
+    "miou_merged",
+    "mean_best_box_iou",
+    "mean_target_detection_count",
+    "mean_set_classes_ms",
+    "mean_predict_ms",
+    "mean_postprocess_ms",
+    "mean_cuda_peak_allocated_mb",
+    "mean_cuda_peak_reserved_mb",
+    "params_total_m",
+    "params_yolo_backbone_m",
+    "params_yolo_neck_m",
+    "params_yolo_head_m",
+    "weight_total_mb",
+    "weight_yolo_backbone_mb",
+    "weight_yolo_neck_mb",
+    "weight_yolo_head_mb",
+    "checkpoint_file_mb",
+]
+
 
 @dataclass(frozen=True)
 class YoloCocoRun:
@@ -91,6 +119,9 @@ def main() -> None:
     component_summary_path = write_component_summary(args.output_dir)
     if component_summary_path:
         print(component_summary_path)
+    model_summary_path = write_model_summary(args.output_dir)
+    if model_summary_path:
+        print(model_summary_path)
 
 
 def run_suite(args: argparse.Namespace) -> list[dict[str, str]]:
@@ -185,6 +216,34 @@ def _result(run: YoloCocoRun, status: str, summary_path: Path, csv_path: Path, m
 
 
 def write_component_summary(output_dir: Path) -> Path | None:
+    rows = collect_summary_rows(output_dir)
+    if not rows:
+        return None
+
+    path = output_dir / "yolo_coco_component_summary.csv"
+    fieldnames = list(rows[0].keys())
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
+
+
+def write_model_summary(output_dir: Path) -> Path | None:
+    rows = collect_summary_rows(output_dir)
+    if not rows:
+        return None
+
+    path = output_dir / "yolo_coco_model_summary.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=MODEL_SUMMARY_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field_name: row.get(field_name, "") for field_name in MODEL_SUMMARY_FIELDS})
+    return path
+
+
+def collect_summary_rows(output_dir: Path) -> list[dict[str, object]]:
     rows = []
     for profile_csv in sorted(output_dir.glob("*/profile.csv")):
         with profile_csv.open(newline="", encoding="utf-8") as f:
@@ -218,17 +277,7 @@ def write_component_summary(output_dir: Path) -> Path | None:
             row[field_name] = first.get(field_name, "")
         row.update(_readable_param_weight_fields(row))
         rows.append(row)
-
-    if not rows:
-        return None
-
-    path = output_dir / "yolo_coco_component_summary.csv"
-    fieldnames = list(rows[0].keys())
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-    return path
+    return rows
 
 
 def _mean(rows: list[dict[str, str]], key: str) -> float | str:

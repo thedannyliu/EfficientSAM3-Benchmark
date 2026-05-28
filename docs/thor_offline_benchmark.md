@@ -340,13 +340,17 @@ Important outputs:
 
 ```text
 results/thor/offline/yolo_coco/<run_id>/yolo_coco_suite_summary.csv
+results/thor/offline/yolo_coco/<run_id>/yolo_coco_model_summary.csv
 results/thor/offline/yolo_coco/<run_id>/yolo_coco_component_summary.csv
 results/thor/offline/yolo_coco/<run_id>/<model_id>/profile.csv
 results/thor/offline/yolo_coco/<run_id>/<model_id>/summary.json
 overlays/thor/offline/yolo_coco/<run_id>/<model_id>/*.png
 ```
 
-Read `yolo_coco_component_summary.csv` first. It contains:
+Read `yolo_coco_model_summary.csv` first. It is the concise one-row-per-model
+table for comparing mIoU, FPS, latency, CUDA memory, parameter count, and model
+size across the full run. Use `yolo_coco_component_summary.csv` when you need
+the full component/storage breakdown. The summary columns include:
 
 ```text
 effective_fps
@@ -359,6 +363,7 @@ mean_predict_ms
 mean_postprocess_ms
 params_*
 weight_*_bytes
+params_total_m / weight_total_mb / checkpoint_file_mb
 params_yolo_backbone / weight_yolo_backbone_bytes
 params_yolo_neck / weight_yolo_neck_bytes
 params_yolo_head / weight_yolo_head_bytes
@@ -370,6 +375,11 @@ checkpoint_file_bytes
 selected COCO annotation mask. `miou_merged` unions all target detections before
 computing IoU. Overlays are written for every evaluated sample when
 `EVAL_MODE=both` or `EVAL_MODE=overlay`.
+
+For comparing model sizes, use `params_total_m`, `weight_total_mb`, and
+`checkpoint_file_mb` in `yolo_coco_model_summary.csv`. The component summary
+also includes `params_yolo_backbone_m`, `params_yolo_neck_m`,
+`params_yolo_head_m`, and the matching `weight_yolo_*_mb` fields.
 
 For Ultralytics YOLO models, component storage is reported with a pragmatic
 split:
