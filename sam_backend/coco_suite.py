@@ -53,7 +53,7 @@ PARAM_WEIGHT_FIELDS = [
 MODEL_SUMMARY_FIELDS = [
     "model_id",
     "backend",
-    "prompt_modes",
+    "prompt_mode",
     "samples",
     "rows",
     "effective_fps",
@@ -483,31 +483,31 @@ def collect_model_summary_rows(output_dir: Path) -> list[dict[str, object]]:
     for profile_csv in sorted(output_dir.glob("*/profile.csv")):
         with profile_csv.open(newline="", encoding="utf-8") as f:
             profile_rows = list(csv.DictReader(f))
-        if not profile_rows:
-            continue
-        first = profile_rows[0]
-        total_ms = _mean(profile_rows, "total_ms")
-        row = {
-            "model_id": first.get("model_id", profile_csv.parent.name),
-            "backend": first.get("backend", ""),
-            "prompt_modes": "+".join(
-                sorted({row.get("prompt_mode", "") for row in profile_rows if row.get("prompt_mode", "")})
-            ),
-            "rows": len(profile_rows),
-            "samples": len({row.get("sample_id", "") for row in profile_rows}),
-            "mean_total_ms": total_ms,
-            "effective_fps": 1000.0 / total_ms if isinstance(total_ms, float) and total_ms > 0 else "",
-            "miou_best": _mean(profile_rows, "best_iou"),
-            "miou_merged": _mean(profile_rows, "merged_iou"),
-            "mean_cuda_peak_allocated_mb": _mean(profile_rows, "cuda_peak_allocated_mb"),
-            "mean_cuda_peak_reserved_mb": _mean(profile_rows, "cuda_peak_reserved_mb"),
-        }
-        for field_name in COMPONENT_FIELDS:
-            row[f"mean_{field_name}"] = _mean(profile_rows, field_name)
-        for field_name in PARAM_WEIGHT_FIELDS:
-            row[field_name] = first.get(field_name, "")
-        row.update(_readable_param_weight_fields(row))
-        rows.append(row)
+        by_prompt: dict[str, list[dict[str, str]]] = {}
+        for row in profile_rows:
+            by_prompt.setdefault(row.get("prompt_mode", ""), []).append(row)
+        for prompt_mode, prompt_rows in sorted(by_prompt.items()):
+            first = prompt_rows[0]
+            total_ms = _mean(prompt_rows, "total_ms")
+            row = {
+                "model_id": first.get("model_id", profile_csv.parent.name),
+                "backend": first.get("backend", ""),
+                "prompt_mode": prompt_mode,
+                "rows": len(prompt_rows),
+                "samples": len({row.get("sample_id", "") for row in prompt_rows}),
+                "mean_total_ms": total_ms,
+                "effective_fps": 1000.0 / total_ms if isinstance(total_ms, float) and total_ms > 0 else "",
+                "miou_best": _mean(prompt_rows, "best_iou"),
+                "miou_merged": _mean(prompt_rows, "merged_iou"),
+                "mean_cuda_peak_allocated_mb": _mean(prompt_rows, "cuda_peak_allocated_mb"),
+                "mean_cuda_peak_reserved_mb": _mean(prompt_rows, "cuda_peak_reserved_mb"),
+            }
+            for field_name in COMPONENT_FIELDS:
+                row[f"mean_{field_name}"] = _mean(prompt_rows, field_name)
+            for field_name in PARAM_WEIGHT_FIELDS:
+                row[field_name] = first.get(field_name, "")
+            row.update(_readable_param_weight_fields(row))
+            rows.append(row)
     return rows
 
 

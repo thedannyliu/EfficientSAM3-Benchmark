@@ -102,7 +102,7 @@ class CocoSuiteTest(unittest.TestCase):
             self.assertEqual(rows[0]["params_total_m"], "1.2e-05")
             self.assertEqual(rows[0]["weight_total_mb"], str(48 / (1024.0 * 1024.0)))
 
-    def test_model_summary_combines_prompt_modes(self) -> None:
+    def test_model_summary_groups_by_prompt(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
             run_dir = tmp / "model_a"
@@ -155,14 +155,17 @@ class CocoSuiteTest(unittest.TestCase):
             self.assertIsNotNone(summary_path)
             with summary_path.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0]["model_id"], "model_a")
-            self.assertEqual(rows[0]["prompt_modes"], "point+text")
+            self.assertEqual(rows[0]["prompt_mode"], "point")
             self.assertEqual(rows[0]["samples"], "1")
-            self.assertEqual(rows[0]["rows"], "2")
-            self.assertEqual(rows[0]["effective_fps"], "50.0")
-            self.assertAlmostEqual(float(rows[0]["miou_best"]), 0.3)
+            self.assertEqual(rows[0]["rows"], "1")
+            self.assertEqual(rows[0]["effective_fps"], str(1000.0 / 30.0))
+            self.assertAlmostEqual(float(rows[0]["miou_best"]), 0.4)
             self.assertEqual(rows[0]["params_total_m"], "2.0")
+            self.assertEqual(rows[1]["prompt_mode"], "text")
+            self.assertEqual(rows[1]["effective_fps"], "100.0")
+            self.assertAlmostEqual(float(rows[1]["miou_best"]), 0.2)
 
 
 if __name__ == "__main__":

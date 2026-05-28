@@ -221,14 +221,15 @@ results/thor/offline/coco/<run_id>/<model_id>/summary.json
 overlays/thor/offline/coco/<run_id>/<model_id>/*.png
 ```
 
-Read `coco_suite_model_summary.csv` first. It is the concise one-row-per-model
-table for comparing mIoU, FPS, latency, CUDA memory, parameter count, and model
-size across the full run. Use `coco_suite_component_summary.csv` when you need
-the same metrics split by prompt mode. The summary columns include:
+Read `coco_suite_model_summary.csv` first. It is the concise model/prompt table
+for comparing mIoU, FPS, latency, CUDA memory, parameter count, and model size
+across the full run. Text and point prompts are separate rows. The summary
+columns include:
 
 ```text
 mean_total_ms
 effective_fps
+prompt_mode
 miou_best
 miou_merged
 mean_cuda_peak_allocated_mb
