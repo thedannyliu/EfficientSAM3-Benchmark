@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VENV_DIR="${VENV_DIR:-.venv}"
+VENV_DIR="${VENV_DIR:-${HOME}/venvs/effisam3_venv_ros}"
 PYTHON_BIN="${PYTHON_BIN:-}"
+HF_CA_BUNDLE="${HF_CA_BUNDLE:-}"
 STORAGE_LIMIT_GIB="${STORAGE_LIMIT_GIB:-300}"
 COCO_COUNT="${COCO_COUNT:-10}"
 SAV_SPLIT="${SAV_SPLIT:-val}"
@@ -42,17 +43,30 @@ echo "Repo: ${repo_root}"
 echo "Python: ${PYTHON_BIN}"
 echo "Venv: ${VENV_DIR}"
 
+if [[ -n "${HF_CA_BUNDLE}" ]]; then
+  if [[ ! -f "${HF_CA_BUNDLE}" ]]; then
+    echo "ERROR: HF_CA_BUNDLE does not exist: ${HF_CA_BUNDLE}" >&2
+    exit 2
+  fi
+  export SSL_CERT_FILE="${HF_CA_BUNDLE}"
+  export REQUESTS_CA_BUNDLE="${HF_CA_BUNDLE}"
+  export CURL_CA_BUNDLE="${HF_CA_BUNDLE}"
+  echo "CA bundle: ${HF_CA_BUNDLE}"
+fi
+
 if [[ -d "${VENV_DIR}" && ! -f "${VENV_DIR}/bin/activate" ]]; then
   echo "Removing incomplete virtual environment: ${VENV_DIR}"
   rm -rf "${VENV_DIR}"
 fi
 
 if [[ ! -d "${VENV_DIR}" ]]; then
+  mkdir -p "$(dirname "${VENV_DIR}")"
   "${PYTHON_BIN}" -m venv "${VENV_DIR}"
 fi
 
 source "${VENV_DIR}/bin/activate"
 export PYTHON=python
+export VENV_DIR
 
 if [[ "${INSTALL_DEPS}" == "1" ]]; then
   python -m pip install -U pip
@@ -77,16 +91,22 @@ fi
 if [[ "${DOWNLOAD_CHECKPOINTS}" == "1" ]]; then
   if [[ "${CHECK_HF_AUTH}" == "1" ]]; then
     python - <<'PY'
+import os
+
 from huggingface_hub import HfApi
+
+venv_dir = os.environ["VENV_DIR"]
 
 try:
     user = HfApi().whoami()
 except Exception as exc:
     raise SystemExit(
         "ERROR: Hugging Face auth is required before checkpoint download.\n"
-        "Run: source .venv/bin/activate && hf auth login && hf auth whoami\n"
+        f"Run: source {venv_dir}/bin/activate && hf auth login && hf auth whoami\n"
         "Or rerun setup with: HF_TOKEN=hf_xxx PYTHON_BIN=python3.12 "
         "bash scripts/setup_5090_offline_benchmark.sh\n"
+        "If this is an SSL self-signed certificate error, set "
+        "HF_CA_BUNDLE=/path/to/corporate-root-ca.pem and rerun.\n"
         f"Auth check failed with: {exc}"
     )
 

@@ -2,11 +2,16 @@
 set -euo pipefail
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-  if [[ -f ".venv/bin/activate" ]]; then
-    source .venv/bin/activate
+  fallback_venv="${VENV_DIR:-}"
+  if [[ -n "${fallback_venv}" && -f "${fallback_venv}/bin/activate" ]]; then
+    source "${fallback_venv}/bin/activate"
+  elif [[ -f ".venv/bin/activate" ]]; then
+    source ".venv/bin/activate"
+  elif [[ -f "${HOME}/venvs/effisam3_venv_ros/bin/activate" ]]; then
+    source "${HOME}/venvs/effisam3_venv_ros/bin/activate"
   else
-    echo "ERROR: activate the project .venv before running this script." >&2
-    echo "Expected: source .venv/bin/activate" >&2
+    echo "ERROR: activate the benchmark venv before running this script." >&2
+    echo "Expected: source ~/venvs/effisam3_venv_ros/bin/activate" >&2
     exit 2
   fi
 fi

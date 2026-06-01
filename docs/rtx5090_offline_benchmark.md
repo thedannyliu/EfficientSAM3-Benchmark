@@ -30,6 +30,7 @@ Expected host:
 OS: Ubuntu or another x86_64 Linux workstation
 GPU: NVIDIA RTX 5090
 Python: 3.12
+venv: ~/venvs/effisam3_venv_ros
 NVIDIA driver: new enough for the CUDA 12.8 PyTorch wheels in requirements.txt
 ```
 
@@ -114,7 +115,7 @@ Do not commit local datasets, checkpoints, TensorRT engines, or videos.
 
 The one-command setup does the repeatable workstation work:
 
-- creates `.venv`
+- creates `~/venvs/effisam3_venv_ros`
 - installs `requirements.txt`
 - installs this repo editable
 - clones and installs external model repos under `external/`
@@ -136,11 +137,30 @@ Or create the environment first, log in interactively, and rerun setup:
 
 ```bash
 PYTHON_BIN=python3.12 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
-source .venv/bin/activate
+source ~/venvs/effisam3_venv_ros/bin/activate
 hf auth login
 hf auth whoami
 PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
 ```
+
+If `hf auth whoami` fails with `CERTIFICATE_VERIFY_FAILED` or
+`self-signed certificate in certificate chain`, the workstation is behind an
+HTTPS-inspecting proxy or has a local root CA that Python does not trust yet.
+Get the workstation's trusted root CA from IT or the machine administrator,
+save it as a PEM file, then rerun with:
+
+```bash
+mkdir -p ~/certs
+# Put the organization/root CA PEM at ~/certs/workstation-root-ca.pem first.
+openssl x509 -in ~/certs/workstation-root-ca.pem -noout -subject -issuer -dates
+
+HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
+  PYTHON_BIN=python3.12 \
+  bash scripts/setup_5090_offline_benchmark.sh
+```
+
+`HF_CA_BUNDLE` is propagated to `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
+`CURL_CA_BUNDLE` for Python, Hugging Face, curl, and related download helpers.
 
 Run:
 
@@ -155,6 +175,7 @@ PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
 VENV_DIR=.venv bash scripts/setup_5090_offline_benchmark.sh
 PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 bash scripts/setup_5090_offline_benchmark.sh
+HF_CA_BUNDLE=~/certs/workstation-root-ca.pem bash scripts/setup_5090_offline_benchmark.sh
 CHECK_HF_AUTH=0 bash scripts/setup_5090_offline_benchmark.sh
 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
 STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
@@ -163,11 +184,12 @@ STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
 After setup, activate the environment in every terminal:
 
 ```bash
-source .venv/bin/activate
+source ~/venvs/effisam3_venv_ros/bin/activate
 ```
 
 If an earlier attempt created a broken `.venv` with Ubuntu 22.04's default
-`python3`, remove it before rerunning:
+`python3`, it can be removed. The default RTX 5090 setup now uses the same
+venv path as Thor, `~/venvs/effisam3_venv_ros`, unless `VENV_DIR` is set:
 
 ```bash
 rm -rf .venv
@@ -191,8 +213,9 @@ Use this only if you do not want the setup script.
 
 ```bash
 PYTHON_BIN="${PYTHON_BIN:-python3.12}"
-"${PYTHON_BIN}" -m venv .venv
-source .venv/bin/activate
+mkdir -p ~/venvs
+"${PYTHON_BIN}" -m venv ~/venvs/effisam3_venv_ros
+source ~/venvs/effisam3_venv_ros/bin/activate
 python -m pip install -U pip
 python -m pip install -r requirements.txt
 python -m pip install -e .
@@ -212,7 +235,7 @@ workstation CUDA PyTorch packages from `requirements.txt`.
 ## 5. Install Model Source Repositories
 
 ```bash
-source .venv/bin/activate
+source ~/venvs/effisam3_venv_ros/bin/activate
 bash scripts/setup_model_repos.sh
 ```
 
@@ -231,7 +254,7 @@ external/MobileSAM
 ## 6. Download Checkpoints
 
 ```bash
-source .venv/bin/activate
+source ~/venvs/effisam3_venv_ros/bin/activate
 
 bash scripts/download_sam3_checkpoint.sh
 bash scripts/download_efficientsam3_checkpoints.sh
@@ -263,6 +286,7 @@ checkpoints/mobilesam/mobile_sam.pt
 SAM3 and EfficientSAM3 downloads use Hugging Face. If auth fails:
 
 ```bash
+source ~/venvs/effisam3_venv_ros/bin/activate
 hf auth login
 hf auth whoami
 ```
@@ -313,7 +337,7 @@ removed by default unless `KEEP_SAV_ARCHIVE=1` is set.
 ## 8. Run The COCO Fixed10 Image Suite
 
 ```bash
-source .venv/bin/activate
+source ~/venvs/effisam3_venv_ros/bin/activate
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 
 python -m sam_backend.coco_suite \
