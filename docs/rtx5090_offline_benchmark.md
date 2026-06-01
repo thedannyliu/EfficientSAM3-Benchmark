@@ -123,6 +123,25 @@ The one-command setup does the repeatable workstation work:
 - reapplies tracked SA-V fixed10 text prompts
 - runs a lightweight null-backend smoke check
 
+Checkpoint download requires Hugging Face auth for SAM3 and EfficientSAM3.
+For a first-time setup, create a read token at
+`https://huggingface.co/settings/tokens`, then either export it for this shell:
+
+```bash
+export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx"
+PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
+```
+
+Or create the environment first, log in interactively, and rerun setup:
+
+```bash
+PYTHON_BIN=python3.12 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
+source .venv/bin/activate
+hf auth login
+hf auth whoami
+PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
+```
+
 Run:
 
 ```bash
@@ -136,6 +155,7 @@ PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
 VENV_DIR=.venv bash scripts/setup_5090_offline_benchmark.sh
 PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 bash scripts/setup_5090_offline_benchmark.sh
+CHECK_HF_AUTH=0 bash scripts/setup_5090_offline_benchmark.sh
 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
 STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
 ```

@@ -11,6 +11,7 @@ SAV_COUNT="${SAV_COUNT:-10}"
 INSTALL_DEPS="${INSTALL_DEPS:-1}"
 SETUP_REPOS="${SETUP_REPOS:-1}"
 DOWNLOAD_CHECKPOINTS="${DOWNLOAD_CHECKPOINTS:-1}"
+CHECK_HF_AUTH="${CHECK_HF_AUTH:-1}"
 PREPARE_DATASETS="${PREPARE_DATASETS:-1}"
 PREPARE_SAV_TEXT="${PREPARE_SAV_TEXT:-1}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
@@ -74,6 +75,24 @@ if [[ "${SETUP_REPOS}" == "1" ]]; then
 fi
 
 if [[ "${DOWNLOAD_CHECKPOINTS}" == "1" ]]; then
+  if [[ "${CHECK_HF_AUTH}" == "1" ]]; then
+    python - <<'PY'
+from huggingface_hub import HfApi
+
+try:
+    user = HfApi().whoami()
+except Exception as exc:
+    raise SystemExit(
+        "ERROR: Hugging Face auth is required before checkpoint download.\n"
+        "Run: source .venv/bin/activate && hf auth login && hf auth whoami\n"
+        "Or rerun setup with: HF_TOKEN=hf_xxx PYTHON_BIN=python3.12 "
+        "bash scripts/setup_5090_offline_benchmark.sh\n"
+        f"Auth check failed with: {exc}"
+    )
+
+print("huggingface:", user.get("name") or user.get("email") or "authenticated")
+PY
+  fi
   bash scripts/download_sam3_checkpoint.sh
   bash scripts/download_efficientsam3_checkpoints.sh
   bash scripts/download_sam2_family_checkpoints.sh
