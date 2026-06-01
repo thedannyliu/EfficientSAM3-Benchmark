@@ -146,6 +146,14 @@ After setup, activate the environment in every terminal:
 source .venv/bin/activate
 ```
 
+If an earlier attempt created a broken `.venv` with Ubuntu 22.04's default
+`python3`, remove it before rerunning:
+
+```bash
+rm -rf .venv
+PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
+```
+
 Verify CUDA:
 
 ```bash

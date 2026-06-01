@@ -41,6 +41,11 @@ echo "Repo: ${repo_root}"
 echo "Python: ${PYTHON_BIN}"
 echo "Venv: ${VENV_DIR}"
 
+if [[ -d "${VENV_DIR}" && ! -f "${VENV_DIR}/bin/activate" ]]; then
+  echo "Removing incomplete virtual environment: ${VENV_DIR}"
+  rm -rf "${VENV_DIR}"
+fi
+
 if [[ ! -d "${VENV_DIR}" ]]; then
   "${PYTHON_BIN}" -m venv "${VENV_DIR}"
 fi
