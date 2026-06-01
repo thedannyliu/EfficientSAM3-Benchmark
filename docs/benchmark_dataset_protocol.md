@@ -20,16 +20,23 @@ Outputs:
 - `data/manifests/coco_val2017_fixed10.jsonl`
 - `data/coco/coco_val2017_fixed10_selection.json`
 
-SA-V video tracking benchmark with official GT:
+SA-V video/frame benchmark with official GT:
 
 ```bash
-bash scripts/download_sav_valtest_subset.sh val 3
+bash scripts/prepare_sav_fixed10_subset.sh
 ```
 
 Outputs:
 
-- `data/manifests/sav_val_fixed3.jsonl`
-- `data/sa-v/sav_val_fixed3/official_subset_manifest.json`
+- `data/manifests/sav_val_fixed10.jsonl`
+- `data/manifests/sav_val_fixed10_selection.json`
+- `data/sa-v/sav_val_fixed10/official_subset_manifest.json`
+
+The generic downloader still accepts arbitrary fixed counts:
+
+```bash
+bash scripts/download_sav_valtest_subset.sh val 10
+```
 
 Or prepare both datasets in one command:
 
@@ -102,7 +109,7 @@ interactive point-prompt components when those modules exist. SAM2,
 Efficient-SAM2, and EfficientTAM populate image encoder, prompt encoder, mask
 decoder, and memory components according to their native model objects.
 
-## Video Prompts And Tracking On SA-V
+## SA-V Prompts, Video Tracking, And Frame-By-Frame Images
 
 Official SA-V val/test is used because it has frame directories and PNG masks:
 
@@ -112,31 +119,36 @@ Annotations_6fps/<video_id>/<object_id>/*.png
 ```
 
 SA-V val/test masks do not include semantic category names. Therefore this repo
-uses point prompts for SA-V tracking:
+uses point prompts by default and records manual text prompts separately:
 
 1. Videos are selected from `sav_val.txt` or `sav_test.txt` with the fixed seed.
 2. For each video, the target is the largest object mask in the first available
    annotation frame, unless `SAV_SELECTION_POLICY=salient_first_mask` is used.
 3. The prompt is a positive point at that mask centroid.
-4. The model initializes a video state, receives the point prompt once, and then
-   propagates masks through the video.
-5. IoU is computed on annotated frames for that selected object.
-6. Prediction PNGs and overlay MP4s are written so quantitative IoU can be
+4. Native video mode initializes a video state, receives the point or mask
+   prompt once, and then propagates masks through the video.
+5. Frame-by-frame image mode treats each annotated frame as an independent
+   image sample. For `--prompt-mode point`, the point is the centroid of that
+   frame's selected GT mask, not the first-frame point.
+6. For `--prompt-mode text`, a manual `text_prompt` must be merged into the
+   manifest with `sam-sav-text-prompts apply`.
+7. IoU is computed on annotated frames for that selected object.
+8. Prediction PNGs and overlay MP4s are written so quantitative IoU can be
    checked against visual mask quality.
 
 Text-prompt video tracking requires semantic labels or text descriptions for
 the target object. Official SA-V val/test does not provide those labels, so a
-text-prompt SA-V tracking score would need a separate, documented label source.
-Using a generic prompt such as `object` would not be a meaningful text-prompt
+text-prompt SA-V tracking score needs the manual prompt record described below.
+Using a generic prompt such as `object` is not a meaningful text-prompt
 benchmark.
 
 Manual text prompts for a fixed SA-V object set are tracked separately:
 
 ```bash
 sam-sav-text-prompts init \
-  --manifest data/manifests/sav_val_fixed3.jsonl \
-  --review-dir overlays/sav/review/current_fixed3 \
-  --output configs/datasets/sav_val_fixed3_text_prompts.json
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --review-dir overlays/sav/review/current_fixed10 \
+  --output configs/datasets/sav_val_fixed10_text_prompts.json
 ```
 
 Edit `text_prompt` and `instance_hint` for each `sample_id` in that JSON after
@@ -148,9 +160,9 @@ manifest:
 
 ```bash
 sam-sav-text-prompts apply \
-  --manifest data/manifests/sav_val_fixed3.jsonl \
-  --prompts configs/datasets/sav_val_fixed3_text_prompts.json \
-  --output data/manifests/sav_val_fixed3_text.jsonl
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --prompts configs/datasets/sav_val_fixed10_text_prompts.json \
+  --output data/manifests/sav_val_fixed10_text.jsonl
 ```
 
 Use the `_text.jsonl` manifest only for text-prompt/overlay POC runs or for
@@ -165,18 +177,59 @@ the object somewhere among its returned instances.
 `yoloe_initial_top1_gt_iou`, `yoloe_initial_best_gt_iou`,
 `yoloe_initial_best_rank`, and `yoloe_initial_localization_note` in the summary
 CSV.
-For YOLOE+EdgeTAM, the text-enabled manifest can be passed directly:
+For frame-by-frame image mode, use `sam-profile-sav-frames`:
+
+```bash
+sam-profile-sav-frames \
+  --manifest data/manifests/sav_val_fixed10_text.jsonl \
+  --model-id sam3_sav_frames \
+  --backend sam3 \
+  --checkpoint-path checkpoints/sam3/sam3.pt \
+  --external-repo external/sam3 \
+  --device cuda \
+  --prompt-mode both \
+  --max-frames 30 \
+  --csv-output results/sav_frames/sam3/frames.csv \
+  --summary-output results/sav_frames/sam3/summary.json \
+  --overlay-dir overlays/sav_frames/sam3
+```
+
+`sam-profile-sav-frames` writes a row per evaluated annotated frame and prompt
+mode. The matching `frames_summary.csv` groups results by video/object/prompt
+mode so SA-V can be compared like COCO image rows while still using the same
+fixed video/object selection record.
+
+For native point-prompt video mode, use `sam-profile-sav-video`:
+
+```bash
+sam-profile-sav-video \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --model-id sam2p1_hiera_tiny \
+  --backend sam2 \
+  --external-repo external/sam2 \
+  --checkpoint-path checkpoints/sam2/sam2.1_hiera_tiny.pt \
+  --model-config configs/sam2.1/sam2.1_hiera_t.yaml \
+  --device cuda \
+  --init-prompt point \
+  --max-frames 120 \
+  --csv-output results/sav_video/sam2p1_hiera_tiny/frames.csv \
+  --summary-output results/sav_video/sam2p1_hiera_tiny/summary.json \
+  --overlay-root overlays/sav_video/sam2p1_hiera_tiny
+```
+
+For text-prompt video tracking, YOLOE+EdgeTAM can consume the text-enabled
+manifest directly:
 
 ```bash
 sam-profile-yoloe-edgetam \
-  --manifest data/manifests/sav_val_fixed3_text.jsonl \
+  --manifest data/manifests/sav_val_fixed10_text.jsonl \
   --csv-output results/yoloe_edgetam/manual_text/frames.csv \
   --summary-output results/yoloe_edgetam/manual_text/summary.json \
   --overlay-root overlays/yoloe_edgetam/manual_text \
   --work-dir results/yoloe_edgetam/manual_text/work
 ```
 
-Current fixed3 note: the first seeded SA-V subset contains small annotated
+Legacy fixed3 note: the first seeded SA-V subset contains small annotated
 targets. For example, `sav_018669` object `000` covers about `0.421%` of the
 frame and has a very thin first-frame bbox. It is a valid official GT target,
 but it is not a good visual-quality demo target.
@@ -250,10 +303,17 @@ coco_08_293300_583961 elephant   point=(344.107, 196.391)
 coco_09_223789_1130149 sink       point=(133.505, 368.334)
 ```
 
-Current SA-V val fixed3 video IDs:
+Legacy SA-V val fixed3 video IDs:
 
 ```text
 sav_018669
 sav_023216
 sav_018332
+```
+
+Current SA-V fixed10 video IDs are generated by
+`scripts/prepare_sav_fixed10_subset.sh` and recorded in:
+
+```text
+data/manifests/sav_val_fixed10_selection.json
 ```

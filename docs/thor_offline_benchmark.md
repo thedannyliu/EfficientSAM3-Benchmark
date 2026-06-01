@@ -150,17 +150,17 @@ data/manifests/coco_val2017_fixed10_selection.json
 configs/datasets/coco_val2017_fixed10_prompts.json
 ```
 
-SA-V fixed3 video benchmark:
+SA-V fixed10 video/frame benchmark:
 
 ```bash
-bash scripts/download_sav_valtest_subset.sh val 3
+bash scripts/prepare_sav_fixed10_subset.sh
 ```
 
 Outputs:
 
 ```text
-data/manifests/sav_val_fixed3.jsonl
-data/manifests/sav_val_fixed3_selection.json
+data/manifests/sav_val_fixed10.jsonl
+data/manifests/sav_val_fixed10_selection.json
 ```
 
 For visually clearer demos, also prepare the salient SA-V subset:
@@ -531,7 +531,7 @@ python -m sam_backend.profile_sav_video \
   --checkpoint-path checkpoints/sam2/sam2.1_hiera_tiny.pt \
   --model-config configs/sam2.1/sam2.1_hiera_t.yaml \
   --device cuda \
-  --manifest data/manifests/sav_val_fixed3.jsonl \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
   --eval-mode both \
   --max-frames 120 \
   --autocast-bfloat16 \
@@ -550,7 +550,7 @@ python -m sam_backend.profile_sav_video \
   --checkpoint-path checkpoints/efficient-sam2/sam2.1_hiera_tiny.pt \
   --model-config configs/sam2.1/sam2.1_hiera_t.yaml \
   --device cuda \
-  --manifest data/manifests/sav_val_fixed3.jsonl \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
   --eval-mode both \
   --max-frames 120 \
   --init-prompt mask \
@@ -570,7 +570,7 @@ python -m sam_backend.profile_sav_video \
   --checkpoint-path checkpoints/efficienttam/efficienttam_ti.pt \
   --model-config configs/efficienttam/efficienttam_ti.yaml \
   --device cuda \
-  --manifest data/manifests/sav_val_fixed3.jsonl \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
   --eval-mode both \
   --max-frames 120 \
   --autocast-bfloat16 \
@@ -596,6 +596,70 @@ python -m sam_backend.sav_video_report \
   --root "results/thor/offline/sav/${RUN_ID}" \
   --output "results/thor/offline/sav/${RUN_ID}/sav_video_suite_summary.csv"
 ```
+
+## 10b. Run SA-V Frame-By-Frame Image Profiling
+
+This treats each annotated SA-V frame as an independent image segmentation
+sample while reusing the same fixed video/object selection. Use this to compare
+SA-V against COCO-style single-frame behavior.
+
+Point prompt mode derives a fresh positive point from the selected object's GT
+mask on each annotated frame:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.profile_sav_frames \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --model-id mobilesam_vit_t_sav_frames_point \
+  --backend mobilesam \
+  --checkpoint-path checkpoints/mobilesam/mobile_sam.pt \
+  --external-repo external/MobileSAM \
+  --mobile-sam-model-type vit_t \
+  --device cuda \
+  --prompt-mode point \
+  --max-frames 30 \
+  --csv-output "results/thor/offline/sav_frames/${RUN_ID}/mobilesam_vit_t/frames.csv" \
+  --summary-output "results/thor/offline/sav_frames/${RUN_ID}/mobilesam_vit_t/summary.json" \
+  --overlay-dir "overlays/thor/offline/sav_frames/${RUN_ID}/mobilesam_vit_t"
+```
+
+For text prompt mode, first create and fill the manual SA-V text prompt record,
+then merge it into a text-enabled manifest:
+
+```bash
+python -m sam_backend.sav_text_prompts init \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --review-dir overlays/sav/review/sav_val_fixed10 \
+  --output configs/datasets/sav_val_fixed10_text_prompts.json
+
+# Edit configs/datasets/sav_val_fixed10_text_prompts.json, then:
+python -m sam_backend.sav_text_prompts apply \
+  --manifest data/manifests/sav_val_fixed10.jsonl \
+  --prompts configs/datasets/sav_val_fixed10_text_prompts.json \
+  --output data/manifests/sav_val_fixed10_text.jsonl
+```
+
+SAM3/EfficientSAM3 can then run text and point prompts from the same fixed SA-V
+objects:
+
+```bash
+python -m sam_backend.profile_sav_frames \
+  --manifest data/manifests/sav_val_fixed10_text.jsonl \
+  --model-id sam3_sav_frames_text_point \
+  --backend sam3 \
+  --checkpoint-path checkpoints/sam3/sam3.pt \
+  --external-repo external/sam3 \
+  --device cuda \
+  --prompt-mode both \
+  --max-frames 30 \
+  --csv-output "results/thor/offline/sav_frames/${RUN_ID}/sam3/frames.csv" \
+  --summary-output "results/thor/offline/sav_frames/${RUN_ID}/sam3/summary.json" \
+  --overlay-dir "overlays/thor/offline/sav_frames/${RUN_ID}/sam3"
+```
+
+`frames_summary.csv` groups rows by video/object/prompt mode and reports mean
+IoU, latency, FPS, CUDA memory, and component timing. SAM2-family and MobileSAM
+image backends are point-only in this frame benchmark.
 
 ## 11. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
 
@@ -653,7 +717,7 @@ SA-V manually labeled text prompts:
 
 ```bash
 python -m sam_backend.profile_yoloe_edgetam \
-  --manifest data/manifests/sav_val_salient_fixed3_text.jsonl \
+  --manifest data/manifests/sav_val_fixed10_text.jsonl \
   --device cuda \
   --max-frames 240 \
   --yoloe-interval 20 \

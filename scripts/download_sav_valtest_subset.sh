@@ -72,7 +72,10 @@ payload = {
     },
     "prompt_protocol": {
         "point": "centroid of selected object's first available annotation mask",
-        "text": "not used; official SA-V val/test has no semantic object labels",
+        "frame_point": "for frame-by-frame image mode, use centroid of the selected object's mask on each annotated frame",
+        "text": "manual text_prompt merged with sam-sav-text-prompts apply; official SA-V val/test has no semantic object labels",
+        "video_point": "native SAM2-family video mode initializes from point or mask on prompt_frame_index",
+        "video_text": "text-prompt video mode uses YOLOE+EdgeTAM with a text-enabled manifest",
     },
     "samples": [
         {
