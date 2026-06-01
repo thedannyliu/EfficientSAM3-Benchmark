@@ -162,6 +162,29 @@ HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
 `HF_CA_BUNDLE` is propagated to `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
 `CURL_CA_BUNDLE` for Python, Hugging Face, curl, and related download helpers.
 
+If Python/Hugging Face auth still fails but `git` can reach Hugging Face, use
+the git-lfs checkpoint fallback:
+
+```bash
+sudo apt install -y git-lfs
+git lfs install
+
+HF_CHECKPOINT_DOWNLOAD_MODE=git \
+  HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" \
+  PYTHON_BIN=python3.12 \
+  bash scripts/setup_5090_offline_benchmark.sh
+```
+
+If git also reports a self-signed certificate error, add the same CA bundle:
+
+```bash
+HF_CHECKPOINT_DOWNLOAD_MODE=git \
+  HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
+  HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" \
+  PYTHON_BIN=python3.12 \
+  bash scripts/setup_5090_offline_benchmark.sh
+```
+
 Run:
 
 ```bash
@@ -176,6 +199,7 @@ VENV_DIR=.venv bash scripts/setup_5090_offline_benchmark.sh
 PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 bash scripts/setup_5090_offline_benchmark.sh
 HF_CA_BUNDLE=~/certs/workstation-root-ca.pem bash scripts/setup_5090_offline_benchmark.sh
+HF_CHECKPOINT_DOWNLOAD_MODE=git bash scripts/setup_5090_offline_benchmark.sh
 CHECK_HF_AUTH=0 bash scripts/setup_5090_offline_benchmark.sh
 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
 STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
@@ -289,6 +313,15 @@ SAM3 and EfficientSAM3 downloads use Hugging Face. If auth fails:
 source ~/venvs/effisam3_venv_ros/bin/activate
 hf auth login
 hf auth whoami
+```
+
+To fetch those Hugging Face checkpoints with git-lfs instead of
+`huggingface_hub`:
+
+```bash
+sudo apt install -y git-lfs
+git lfs install
+HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" bash scripts/download_hf_checkpoints_via_git.sh
 ```
 
 ## 7. Prepare Fixed Datasets

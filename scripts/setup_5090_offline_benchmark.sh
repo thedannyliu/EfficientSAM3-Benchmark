@@ -12,6 +12,7 @@ SAV_COUNT="${SAV_COUNT:-10}"
 INSTALL_DEPS="${INSTALL_DEPS:-1}"
 SETUP_REPOS="${SETUP_REPOS:-1}"
 DOWNLOAD_CHECKPOINTS="${DOWNLOAD_CHECKPOINTS:-1}"
+HF_CHECKPOINT_DOWNLOAD_MODE="${HF_CHECKPOINT_DOWNLOAD_MODE:-python}"
 CHECK_HF_AUTH="${CHECK_HF_AUTH:-1}"
 PREPARE_DATASETS="${PREPARE_DATASETS:-1}"
 PREPARE_SAV_TEXT="${PREPARE_SAV_TEXT:-1}"
@@ -89,8 +90,11 @@ if [[ "${SETUP_REPOS}" == "1" ]]; then
 fi
 
 if [[ "${DOWNLOAD_CHECKPOINTS}" == "1" ]]; then
-  if [[ "${CHECK_HF_AUTH}" == "1" ]]; then
-    python - <<'PY'
+  if [[ "${HF_CHECKPOINT_DOWNLOAD_MODE}" == "git" ]]; then
+    bash scripts/download_hf_checkpoints_via_git.sh
+  elif [[ "${HF_CHECKPOINT_DOWNLOAD_MODE}" == "python" ]]; then
+    if [[ "${CHECK_HF_AUTH}" == "1" ]]; then
+      python - <<'PY'
 import os
 
 from huggingface_hub import HfApi
@@ -112,9 +116,13 @@ except Exception as exc:
 
 print("huggingface:", user.get("name") or user.get("email") or "authenticated")
 PY
+    fi
+    bash scripts/download_sam3_checkpoint.sh
+    bash scripts/download_efficientsam3_checkpoints.sh
+  else
+    echo "ERROR: HF_CHECKPOINT_DOWNLOAD_MODE must be 'python' or 'git'." >&2
+    exit 2
   fi
-  bash scripts/download_sam3_checkpoint.sh
-  bash scripts/download_efficientsam3_checkpoints.sh
   bash scripts/download_sam2_family_checkpoints.sh
   bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
 fi
