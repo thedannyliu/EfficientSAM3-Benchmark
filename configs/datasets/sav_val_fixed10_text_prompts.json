@@ -1,0 +1,226 @@
+{
+  "prompt_protocol": {
+    "examples": [
+      "person",
+      "white car",
+      "red sign",
+      "overhead wire"
+    ],
+    "rule": "Fill text_prompt with a short noun phrase for the class/appearance, and instance_hint with how to identify the selected GT object among similar instances.",
+    "scope": "manual SA-V text labels for selected official object IDs",
+    "verification": "Text-only top-1 localization may select a different same-class instance. Use instance_hint for human review, and use GT-assisted matching only as a diagnostic metric."
+  },
+  "samples": [
+    {
+      "initial_bbox_xyxy": [
+        514,
+        394,
+        552,
+        423
+      ],
+      "initial_mask_area_ratio": 0.0010557725694444445,
+      "instance_hint": "tiny sign-like object on the far right side of the street scene, inside the blue box",
+      "object_id": "000",
+      "point": [
+        532.8150051387462,
+        408.8180883864337
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Small target; verify whether the selected object is a sign or another roadside fixture before reporting final text-prompt metrics.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_030331_000.png",
+      "sample_id": "sav_sav_030331_000",
+      "text_prompt": "small roadside sign",
+      "video_id": "sav_030331"
+    },
+    {
+      "initial_bbox_xyxy": [
+        0,
+        45,
+        1076,
+        120
+      ],
+      "initial_mask_area_ratio": 0.004209587191358025,
+      "instance_hint": "diagonal cable crossing the sky near the top of the frame",
+      "object_id": "000",
+      "point": [
+        542.296482987742,
+        85.55825409554359
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Very thin elongated object; text localization may be ambiguous with nearby cables.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_018669_000.png",
+      "sample_id": "sav_sav_018669_000",
+      "text_prompt": "overhead power line",
+      "video_id": "sav_018669"
+    },
+    {
+      "initial_bbox_xyxy": [
+        152,
+        105,
+        406,
+        209
+      ],
+      "initial_mask_area_ratio": 0.03121560534591195,
+      "instance_hint": "long rectangular sign or wall panel above the window in the restaurant scene",
+      "object_id": "000",
+      "point": [
+        278.30820084999215,
+        155.4417597985204
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "The object is a large rectangular fixture, not a person; verify label after visual review.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_018332_000.png",
+      "sample_id": "sav_sav_018332_000",
+      "text_prompt": "wall sign",
+      "video_id": "sav_018332"
+    },
+    {
+      "initial_bbox_xyxy": [
+        430,
+        827,
+        789,
+        1466
+      ],
+      "initial_mask_area_ratio": 0.04888985339506173,
+      "instance_hint": "performer on stage wearing bright green pants; selected mask covers the pants/lower body",
+      "object_id": "002",
+      "point": [
+        586.2422517706011,
+        1055.8520783601964
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Mask is clothing/lower-body region rather than the whole person; use clothing phrase for text-prompt frame mode.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_014613_002.png",
+      "sample_id": "sav_sav_014613_002",
+      "text_prompt": "green pants",
+      "video_id": "sav_014613"
+    },
+    {
+      "initial_bbox_xyxy": [
+        489,
+        673,
+        677,
+        1066
+      ],
+      "initial_mask_area_ratio": 0.022230902777777777,
+      "instance_hint": "child in the foreground; selected mask covers the right side of the white shirt",
+      "object_id": "000",
+      "point": [
+        603.2746973838345,
+        896.5213295587661
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Partial clothing mask; whole-person prompt would not match the selected GT object as closely.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_019865_000.png",
+      "sample_id": "sav_sav_019865_000",
+      "text_prompt": "white shirt",
+      "video_id": "sav_019865"
+    },
+    {
+      "initial_bbox_xyxy": [
+        483,
+        1068,
+        550,
+        1100
+      ],
+      "initial_mask_area_ratio": 0.0006828703703703704,
+      "instance_hint": "small orange fish near the center-bottom of the pond, inside the blue box",
+      "object_id": "000",
+      "point": [
+        516.5084745762712,
+        1085.2895480225989
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Small target among many fish; same-class ambiguity is expected for text-only localization.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_021132_000.png",
+      "sample_id": "sav_sav_021132_000",
+      "text_prompt": "orange fish",
+      "video_id": "sav_021132"
+    },
+    {
+      "initial_bbox_xyxy": [
+        200,
+        700,
+        416,
+        806
+      ],
+      "initial_mask_area_ratio": 0.0068291859567901235,
+      "instance_hint": "left-side wedge-shaped wooden ramp surface in the indoor skate park",
+      "object_id": "002",
+      "point": [
+        327.3380410987925,
+        744.3086646423275
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Selected object is the ramp surface, not the nearby skater.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_023216_002.png",
+      "sample_id": "sav_sav_023216_002",
+      "text_prompt": "wooden skate ramp",
+      "video_id": "sav_023216"
+    },
+    {
+      "initial_bbox_xyxy": [
+        339,
+        465,
+        446,
+        763
+      ],
+      "initial_mask_area_ratio": 0.02033203125,
+      "instance_hint": "child near the center of the birthday room; selected mask covers green pants/lower body",
+      "object_id": "002",
+      "point": [
+        391.6799018038211,
+        598.1279752374853
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Partial clothing/lower-body mask; text prompt targets clothing rather than whole child.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_016727_002.png",
+      "sample_id": "sav_sav_016727_002",
+      "text_prompt": "green pants",
+      "video_id": "sav_016727"
+    },
+    {
+      "initial_bbox_xyxy": [
+        0,
+        1670,
+        31,
+        1720
+      ],
+      "initial_mask_area_ratio": 0.0006341628086419753,
+      "instance_hint": "tiny traffic cone clipped at the lower-left image edge",
+      "object_id": "000",
+      "point": [
+        14.284410646387833,
+        1693.4980988593156
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Very small edge target; expect weak text localization.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_045787_000.png",
+      "sample_id": "sav_sav_045787_000",
+      "text_prompt": "orange traffic cone",
+      "video_id": "sav_045787"
+    },
+    {
+      "initial_bbox_xyxy": [
+        157,
+        303,
+        270,
+        481
+      ],
+      "initial_mask_area_ratio": 0.016988357843137254,
+      "instance_hint": "dancing woman on the left; selected mask covers her lower body/black pants",
+      "object_id": "000",
+      "point": [
+        224.98568530207393,
+        393.78133453561765
+      ],
+      "prompt_frame_index": 0,
+      "review_note": "Partial lower-body mask; prompt intentionally names the clothing region, not the whole person.",
+      "review_overlay": "overlays/sav/review/sav_val_fixed10/sav_sav_011944_000.png",
+      "sample_id": "sav_sav_011944_000",
+      "text_prompt": "black pants",
+      "video_id": "sav_011944"
+    }
+  ],
+  "source_manifest": "data/manifests/sav_val_fixed10.jsonl"
+}
