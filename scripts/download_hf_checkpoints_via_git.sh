@@ -5,6 +5,7 @@ OUT_DIR="${OUT_DIR:-checkpoints}"
 HF_CLONE_ROOT="${HF_CLONE_ROOT:-external/hf-checkpoints}"
 HF_TOKEN="${HF_TOKEN:-}"
 HF_CA_BUNDLE="${HF_CA_BUNDLE:-}"
+HF_GIT_TIMEOUT="${HF_GIT_TIMEOUT:-300}"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "ERROR: git is required." >&2
@@ -35,23 +36,39 @@ fi
 
 mkdir -p "${OUT_DIR}" "${HF_CLONE_ROOT}"
 
+run_git() {
+  local label="$1"
+  shift
+  echo "Running: ${label} (timeout ${HF_GIT_TIMEOUT}s)"
+  if ! env GIT_TERMINAL_PROMPT=0 timeout --foreground "${HF_GIT_TIMEOUT}" "$@"; then
+    echo "ERROR: ${label} failed or timed out." >&2
+    echo "If this is an SSL self-signed certificate error, rerun with HF_CA_BUNDLE=/path/to/root-ca.pem." >&2
+    echo "If this is an authentication error, create a new read token and pass HF_TOKEN without printing it." >&2
+    exit 2
+  fi
+}
+
 clone_or_update() {
   local repo_id="$1"
   local dest="$2"
   local url="https://huggingface.co/${repo_id}"
 
   if [[ -d "${dest}/.git" ]]; then
-    git -C "${dest}" "${repo_header_args[@]}" fetch --depth 1 origin main
+    run_git "fetch ${repo_id}" git -C "${dest}" "${repo_header_args[@]}" fetch --progress --depth 1 origin main
     git -C "${dest}" checkout -q FETCH_HEAD
+  elif [[ -e "${dest}" ]]; then
+    echo "Removing incomplete Hugging Face clone: ${dest}"
+    rm -rf "${dest}"
+    run_git "clone ${repo_id}" env GIT_LFS_SKIP_SMUDGE=1 git "${repo_header_args[@]}" clone --progress --depth 1 "${url}" "${dest}"
   else
-    GIT_LFS_SKIP_SMUDGE=1 git "${repo_header_args[@]}" clone --depth 1 "${url}" "${dest}"
+    run_git "clone ${repo_id}" env GIT_LFS_SKIP_SMUDGE=1 git "${repo_header_args[@]}" clone --progress --depth 1 "${url}" "${dest}"
   fi
 }
 
 lfs_pull() {
   local dest="$1"
   local include_csv="$2"
-  git -C "${dest}" "${repo_header_args[@]}" lfs pull --include "${include_csv}" --exclude ""
+  run_git "git-lfs pull ${dest}" git -C "${dest}" "${repo_header_args[@]}" lfs pull --include "${include_csv}" --exclude ""
 }
 
 copy_file() {

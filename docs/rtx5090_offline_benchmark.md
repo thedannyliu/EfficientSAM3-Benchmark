@@ -169,20 +169,35 @@ the git-lfs checkpoint fallback:
 sudo apt install -y git-lfs
 git lfs install
 
+read -rsp "HF token: " HF_TOKEN
+echo
 HF_CHECKPOINT_DOWNLOAD_MODE=git \
-  HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" \
+  HF_TOKEN="${HF_TOKEN}" \
   PYTHON_BIN=python3.12 \
   bash scripts/setup_5090_offline_benchmark.sh
+unset HF_TOKEN
 ```
 
 If git also reports a self-signed certificate error, add the same CA bundle:
 
 ```bash
+read -rsp "HF token: " HF_TOKEN
+echo
 HF_CHECKPOINT_DOWNLOAD_MODE=git \
   HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
-  HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" \
+  HF_TOKEN="${HF_TOKEN}" \
   PYTHON_BIN=python3.12 \
   bash scripts/setup_5090_offline_benchmark.sh
+unset HF_TOKEN
+```
+
+The git fallback has a 300 second timeout per clone/fetch/LFS step. Override it
+with `HF_GIT_TIMEOUT=900` on slow networks. If a previous run was interrupted,
+remove the partial clone before retrying:
+
+```bash
+rm -rf external/hf-checkpoints/facebook__sam3
+rm -rf external/hf-checkpoints/Simon7108528__EfficientSAM3
 ```
 
 Run:
@@ -321,7 +336,10 @@ To fetch those Hugging Face checkpoints with git-lfs instead of
 ```bash
 sudo apt install -y git-lfs
 git lfs install
-HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx" bash scripts/download_hf_checkpoints_via_git.sh
+read -rsp "HF token: " HF_TOKEN
+echo
+HF_TOKEN="${HF_TOKEN}" bash scripts/download_hf_checkpoints_via_git.sh
+unset HF_TOKEN
 ```
 
 ## 7. Prepare Fixed Datasets
