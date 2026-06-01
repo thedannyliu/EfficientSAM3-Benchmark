@@ -41,15 +41,51 @@ python3.12 --version || python3 --version
 git --version
 ```
 
-Install basic tools if missing:
+Install basic tools first:
 
 ```bash
 sudo apt update
-sudo apt install -y git git-lfs wget curl python3.12 python3.12-venv python3.12-dev
+sudo apt install -y git git-lfs wget curl
 ```
 
-If `python3.12` is not available from apt on your workstation, use any Python
-3.12 installation and pass it to the setup script with `PYTHON_BIN=/path/to/python3.12`.
+Then provide Python 3.12 with one of the options below.
+
+Option A, Ubuntu 22.04 with deadsnakes PPA:
+
+```bash
+sudo apt update
+sudo apt install -y software-properties-common
+sudo add-apt-repository -y ppa:deadsnakes/ppa
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3.12-dev
+python3.12 --version
+```
+
+Option B, Ubuntu 24.04 or any system whose apt repository provides Python 3.12:
+
+```bash
+sudo apt install -y python3.12 python3.12-venv python3.12-dev
+python3.12 --version
+```
+
+Option C, conda or mamba when apt does not provide Python 3.12 or when you do
+not want to add a PPA:
+
+```bash
+conda create -y -n effisam3-5090 python=3.12
+conda activate effisam3-5090
+PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
+```
+
+Option D, any existing Python 3.12 installation:
+
+```bash
+/path/to/python3.12 --version
+PYTHON_BIN=/path/to/python3.12 bash scripts/setup_5090_offline_benchmark.sh
+```
+
+The setup script intentionally refuses Python versions other than 3.12 because
+`pyproject.toml` requires `>=3.12,<3.13`.
 
 ## 2. Get The Repository
 
@@ -98,6 +134,7 @@ Useful overrides:
 ```bash
 PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
 VENV_DIR=.venv bash scripts/setup_5090_offline_benchmark.sh
+PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 bash scripts/setup_5090_offline_benchmark.sh
 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
 STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
@@ -125,7 +162,8 @@ PY
 Use this only if you do not want the setup script.
 
 ```bash
-python3.12 -m venv .venv
+PYTHON_BIN="${PYTHON_BIN:-python3.12}"
+"${PYTHON_BIN}" -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -r requirements.txt

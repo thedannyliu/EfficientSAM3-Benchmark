@@ -23,6 +23,17 @@ if [[ -z "${PYTHON_BIN}" ]]; then
   fi
 fi
 
+"${PYTHON_BIN}" - <<'PY'
+import sys
+
+if sys.version_info[:2] != (3, 12):
+    raise SystemExit(
+        "ERROR: Python 3.12 is required. "
+        f"Got {sys.version.split()[0]}. "
+        "Install Python 3.12 or rerun with PYTHON_BIN=/path/to/python3.12."
+    )
+PY
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
