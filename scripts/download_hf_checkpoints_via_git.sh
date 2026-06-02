@@ -3,6 +3,7 @@ set -euo pipefail
 
 OUT_DIR="${OUT_DIR:-checkpoints}"
 HF_CLONE_ROOT="${HF_CLONE_ROOT:-external/hf-checkpoints}"
+HF_USERNAME="${HF_USERNAME:-}"
 HF_TOKEN="${HF_TOKEN:-}"
 HF_CA_BUNDLE="${HF_CA_BUNDLE:-}"
 HF_GIT_TIMEOUT="${HF_GIT_TIMEOUT:-300}"
@@ -30,7 +31,28 @@ if [[ -n "${HF_CA_BUNDLE}" ]]; then
 fi
 
 repo_header_args=()
-if [[ -n "${HF_TOKEN}" ]]; then
+askpass_file=""
+if [[ -n "${HF_USERNAME}" && -z "${HF_TOKEN}" ]]; then
+  echo "ERROR: HF_USERNAME requires HF_TOKEN." >&2
+  exit 2
+elif [[ -n "${HF_USERNAME}" && -n "${HF_TOKEN}" ]]; then
+  export HF_USERNAME HF_TOKEN
+  askpass_file="$(mktemp)"
+  cat > "${askpass_file}" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  *Username*) printf '%s\n' "${HF_USERNAME}" ;;
+  *Password*) printf '%s\n' "${HF_TOKEN}" ;;
+  *) printf '\n' ;;
+esac
+EOF
+  chmod 700 "${askpass_file}"
+  export GIT_ASKPASS="${askpass_file}"
+  trap '[[ -n "${askpass_file}" ]] && rm -f "${askpass_file}"' EXIT
+  echo "Hugging Face git auth: basic username/token via GIT_ASKPASS"
+elif [[ -n "${HF_TOKEN}" ]]; then
+  echo "Hugging Face git auth: bearer token header"
+  echo "If this fails but interactive git works, rerun with HF_USERNAME set."
   repo_header_args=(-c "http.extraHeader=Authorization: Bearer ${HF_TOKEN}")
 fi
 

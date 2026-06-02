@@ -173,30 +173,55 @@ gpu: NVIDIA GeForce RTX 5090
 ### 3.2 Test Hugging Face Git Access With SAM3
 
 Use `facebook/sam3` as the smallest useful test. This does not download model
-weights; it only checks whether git can read the repo HEAD with your token.
+weights; it only checks whether git can read the repo HEAD.
 
 ```bash
-read -rsp "HF token: " HF_TOKEN
-echo
+tmp="$(mktemp)"
 
 GIT_TERMINAL_PROMPT=0 \
-  git -c "http.extraHeader=Authorization: Bearer ${HF_TOKEN}" \
+  git ls-remote https://huggingface.co/facebook/sam3 HEAD \
+  > /tmp/hf_sam3_stdout.txt 2>"${tmp}"
+code=$?
+
+echo "exit_code=${code}"
+if grep -qiE "SSL|certificate|self.signed|CERTIFICATE_VERIFY_FAILED" "${tmp}"; then
+  echo "category=ssl"
+elif grep -qiE "Authentication failed|could not read Username|terminal prompts disabled|401|403|access denied|Invalid username or password" "${tmp}"; then
+  echo "category=auth"
+elif grep -qiE "Repository not found|not found" "${tmp}"; then
+  echo "category=repo_or_gated_access"
+elif grep -qiE "Connection|proxy|CONNECT|Failed to connect|Could not resolve" "${tmp}"; then
+  echo "category=network_or_proxy"
+else
+  echo "category=unknown"
+fi
+rm -f "${tmp}"
+```
+
+For a gated repo, `category=auth` is expected before credentials are provided.
+Now test the same Git Basic auth path that works with `git clone`. When Git
+prompts, enter the Hugging Face username, then paste the read token as the
+password:
+
+```bash
+git -c credential.helper= \
+  -c core.askPass= \
   ls-remote https://huggingface.co/facebook/sam3 HEAD
 
 echo "exit_code=$?"
-unset HF_TOKEN
 ```
 
-Success looks like:
+Success looks like this:
 
 ```text
 <commit_sha>	HEAD
 exit_code=0
 ```
 
-If this returns `exit_code=0`, continue to checkpoint download. If it fails
-with `401`, `403`, or a gated-repo message, check that the token has read
-access and that the Hugging Face account has accepted access for:
+If the interactive Basic auth test returns `exit_code=0`, continue to
+checkpoint download. If it fails with `401`, `403`, or a gated-repo message,
+check that the token has read access and that the Hugging Face account has
+accepted access for:
 
 ```text
 https://huggingface.co/facebook/sam3
@@ -218,13 +243,16 @@ sudo apt install -y git-lfs
 git lfs install
 git lfs version
 
+read -rp "HF username: " HF_USERNAME
 read -rsp "HF token: " HF_TOKEN
 echo
 
-HF_TOKEN="${HF_TOKEN}" \
+HF_USERNAME="${HF_USERNAME}" \
+  HF_TOKEN="${HF_TOKEN}" \
   HF_GIT_TIMEOUT=900 \
   bash scripts/download_hf_checkpoints_via_git.sh
 
+unset HF_USERNAME
 unset HF_TOKEN
 ```
 
@@ -359,23 +387,45 @@ set -o pipefail
 
 ### 6.1 Verify SAM3 Git Access
 
-Use `facebook/sam3` as the first test. This is the same access path used by the
-download script, but it does not download LFS files yet.
+Use `facebook/sam3` as the first test. Start with a no-token classifier so
+`exit_code=128` is easier to interpret:
 
 ```bash
-read -rsp "HF token: " HF_TOKEN
-echo
+tmp="$(mktemp)"
 
 GIT_TERMINAL_PROMPT=0 \
-  git -c "http.extraHeader=Authorization: Bearer ${HF_TOKEN}" \
-  ls-remote https://huggingface.co/facebook/sam3 HEAD 2>&1 \
-  | tee logs/rtx5090_debug/git_ls_remote_sam3.log
+  git ls-remote https://huggingface.co/facebook/sam3 HEAD \
+  > /tmp/hf_sam3_stdout.txt 2>"${tmp}"
+code=$?
 
-echo "exit_code=${PIPESTATUS[0]}"
-unset HF_TOKEN
+echo "exit_code=${code}" | tee logs/rtx5090_debug/git_ls_remote_sam3_category.log
+if grep -qiE "SSL|certificate|self.signed|CERTIFICATE_VERIFY_FAILED" "${tmp}"; then
+  echo "category=ssl" | tee -a logs/rtx5090_debug/git_ls_remote_sam3_category.log
+elif grep -qiE "Authentication failed|could not read Username|terminal prompts disabled|401|403|access denied|Invalid username or password" "${tmp}"; then
+  echo "category=auth" | tee -a logs/rtx5090_debug/git_ls_remote_sam3_category.log
+elif grep -qiE "Repository not found|not found" "${tmp}"; then
+  echo "category=repo_or_gated_access" | tee -a logs/rtx5090_debug/git_ls_remote_sam3_category.log
+elif grep -qiE "Connection|proxy|CONNECT|Failed to connect|Could not resolve" "${tmp}"; then
+  echo "category=network_or_proxy" | tee -a logs/rtx5090_debug/git_ls_remote_sam3_category.log
+else
+  echo "category=unknown" | tee -a logs/rtx5090_debug/git_ls_remote_sam3_category.log
+fi
+rm -f "${tmp}"
 ```
 
-Continue only if `exit_code=0`.
+If the category is `auth`, run the interactive Basic auth test. When Git
+prompts, enter the Hugging Face username, then paste the read token as the
+password:
+
+```bash
+git -c credential.helper= \
+  -c core.askPass= \
+  ls-remote https://huggingface.co/facebook/sam3 HEAD
+
+echo "exit_code=$?"
+```
+
+Continue only if the interactive Basic auth test returns `exit_code=0`.
 
 ### 6.2 Download SAM3 And EfficientSAM3
 
@@ -384,14 +434,17 @@ sudo apt install -y git-lfs
 git lfs install
 git lfs version
 
+read -rp "HF username: " HF_USERNAME
 read -rsp "HF token: " HF_TOKEN
 echo
 
-HF_TOKEN="${HF_TOKEN}" \
+HF_USERNAME="${HF_USERNAME}" \
+  HF_TOKEN="${HF_TOKEN}" \
   HF_GIT_TIMEOUT=900 \
   bash scripts/download_hf_checkpoints_via_git.sh 2>&1 \
   | tee logs/rtx5090_debug/download_hf_git_lfs.log
 
+unset HF_USERNAME
 unset HF_TOKEN
 ```
 
