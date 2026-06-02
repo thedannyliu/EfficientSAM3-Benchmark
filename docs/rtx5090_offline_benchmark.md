@@ -111,9 +111,149 @@ git rev-parse HEAD
 Generated data, checkpoints, external repos, results, and overlays are ignored.
 Do not commit local datasets, checkpoints, TensorRT engines, or videos.
 
-## 3. One-Command Setup
+## 3. Recommended Debug Setup
 
-The one-command setup does the repeatable workstation work:
+For the first RTX 5090 workstation bring-up, do not start by running the full
+setup with checkpoint and dataset downloads enabled. Build the Python
+environment first, then debug Hugging Face checkpoint download one step at a
+time.
+
+Assumptions for this path:
+
+- workstation is Ubuntu 22.04
+- GPU is RTX 5090
+- shell is already at the repo root
+- Python 3.12 is available as `python3.12`
+- Hugging Face checkpoints should end up under `checkpoints/`
+
+First create the virtual environment and install the repo, but skip
+checkpoints, datasets, and smoke tests:
+
+```bash
+PYTHON_BIN=python3.12 \
+  DOWNLOAD_CHECKPOINTS=0 \
+  PREPARE_DATASETS=0 \
+  PREPARE_SAV_TEXT=0 \
+  RUN_SMOKE=0 \
+  bash scripts/setup_5090_offline_benchmark.sh
+```
+
+Activate the environment in every terminal used for this repo:
+
+```bash
+source ~/venvs/effisam3_venv_ros/bin/activate
+```
+
+Verify that the setup is using the expected Python and CUDA stack:
+
+```bash
+which python
+python --version
+python - <<'PY'
+import torch
+print("torch:", torch.__version__)
+print("cuda:", torch.cuda.is_available())
+print("gpu:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "no cuda")
+PY
+```
+
+Expected result:
+
+```text
+python: .../venvs/effisam3_venv_ros/bin/python
+python version: 3.12.x
+cuda: True
+gpu: NVIDIA GeForce RTX 5090
+```
+
+Now log in to Hugging Face. Use a read token from
+`https://huggingface.co/settings/tokens`.
+
+```bash
+hf auth login
+hf auth whoami
+```
+
+If `hf auth whoami` fails, stop here and fix auth before running any checkpoint
+script. Do not rerun the full setup yet.
+
+Confirm that Python can see the same Hugging Face login:
+
+```bash
+python - <<'PY'
+from huggingface_hub import HfApi
+
+user = HfApi().whoami()
+print(user.get("name") or user.get("email") or "authenticated")
+PY
+```
+
+Confirm that the two gated Hugging Face repos are reachable from Python:
+
+```bash
+python - <<'PY'
+from huggingface_hub import HfApi
+
+api = HfApi()
+for repo_id in ("facebook/sam3", "Simon7108528/EfficientSAM3"):
+    info = api.model_info(repo_id)
+    print(repo_id, "ok", info.sha[:12])
+PY
+```
+
+If this fails with `401`, `403`, `RepositoryNotFoundError`, or a gated-repo
+message, open these pages in a browser while logged in, request or accept access
+if Hugging Face asks for it, then rerun the command above:
+
+```text
+https://huggingface.co/facebook/sam3
+https://huggingface.co/Simon7108528/EfficientSAM3
+```
+
+If this fails with `CERTIFICATE_VERIFY_FAILED` or
+`self-signed certificate in certificate chain`, the workstation is behind an
+HTTPS-inspecting proxy or has a local root CA that Python does not trust. Get
+the workstation root CA PEM from IT or the machine administrator, save it here,
+and verify that it is readable:
+
+```bash
+mkdir -p ~/certs
+# Put the root CA PEM at this exact path before continuing.
+openssl x509 -in ~/certs/workstation-root-ca.pem -noout -subject -issuer -dates
+```
+
+Then rerun the Hugging Face repo reachability check with the CA bundle:
+
+```bash
+export HF_CA_BUNDLE=~/certs/workstation-root-ca.pem
+export SSL_CERT_FILE="${HF_CA_BUNDLE}"
+export REQUESTS_CA_BUNDLE="${HF_CA_BUNDLE}"
+export CURL_CA_BUNDLE="${HF_CA_BUNDLE}"
+
+python - <<'PY'
+from huggingface_hub import HfApi
+
+api = HfApi()
+for repo_id in ("facebook/sam3", "Simon7108528/EfficientSAM3"):
+    info = api.model_info(repo_id)
+    print(repo_id, "ok", info.sha[:12])
+PY
+```
+
+After auth and repo reachability both pass, download checkpoints manually as
+described in [Download Checkpoints](#6-download-checkpoints). After all expected
+checkpoint files exist, finish the remaining setup:
+
+```bash
+PYTHON_BIN=python3.12 \
+  DOWNLOAD_CHECKPOINTS=0 \
+  PREPARE_DATASETS=1 \
+  PREPARE_SAV_TEXT=1 \
+  RUN_SMOKE=1 \
+  bash scripts/setup_5090_offline_benchmark.sh
+```
+
+The full setup script normally does all of this repeatable workstation work:
 
 - creates `~/venvs/effisam3_venv_ros`
 - installs `requirements.txt`
@@ -123,102 +263,6 @@ The one-command setup does the repeatable workstation work:
 - prepares COCO fixed10 and SA-V fixed10
 - reapplies tracked SA-V fixed10 text prompts
 - runs a lightweight null-backend smoke check
-
-Checkpoint download requires Hugging Face auth for SAM3 and EfficientSAM3.
-For a first-time setup, create a read token at
-`https://huggingface.co/settings/tokens`, then either export it for this shell:
-
-```bash
-export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxx"
-PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
-```
-
-Or create the environment first, log in interactively, and rerun setup:
-
-```bash
-PYTHON_BIN=python3.12 DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
-source ~/venvs/effisam3_venv_ros/bin/activate
-hf auth login
-hf auth whoami
-PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
-```
-
-If `hf auth whoami` fails with `CERTIFICATE_VERIFY_FAILED` or
-`self-signed certificate in certificate chain`, the workstation is behind an
-HTTPS-inspecting proxy or has a local root CA that Python does not trust yet.
-Get the workstation's trusted root CA from IT or the machine administrator,
-save it as a PEM file, then rerun with:
-
-```bash
-mkdir -p ~/certs
-# Put the organization/root CA PEM at ~/certs/workstation-root-ca.pem first.
-openssl x509 -in ~/certs/workstation-root-ca.pem -noout -subject -issuer -dates
-
-HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
-  PYTHON_BIN=python3.12 \
-  bash scripts/setup_5090_offline_benchmark.sh
-```
-
-`HF_CA_BUNDLE` is propagated to `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, and
-`CURL_CA_BUNDLE` for Python, Hugging Face, curl, and related download helpers.
-
-If Python/Hugging Face auth still fails but `git` can reach Hugging Face, use
-the git-lfs checkpoint fallback:
-
-```bash
-sudo apt install -y git-lfs
-git lfs install
-
-read -rsp "HF token: " HF_TOKEN
-echo
-HF_CHECKPOINT_DOWNLOAD_MODE=git \
-  HF_TOKEN="${HF_TOKEN}" \
-  PYTHON_BIN=python3.12 \
-  bash scripts/setup_5090_offline_benchmark.sh
-unset HF_TOKEN
-```
-
-If git also reports a self-signed certificate error, add the same CA bundle:
-
-```bash
-read -rsp "HF token: " HF_TOKEN
-echo
-HF_CHECKPOINT_DOWNLOAD_MODE=git \
-  HF_CA_BUNDLE=~/certs/workstation-root-ca.pem \
-  HF_TOKEN="${HF_TOKEN}" \
-  PYTHON_BIN=python3.12 \
-  bash scripts/setup_5090_offline_benchmark.sh
-unset HF_TOKEN
-```
-
-The git fallback has a 300 second timeout per clone/fetch/LFS step. Override it
-with `HF_GIT_TIMEOUT=900` on slow networks. If a previous run was interrupted,
-remove the partial clone before retrying:
-
-```bash
-rm -rf external/hf-checkpoints/facebook__sam3
-rm -rf external/hf-checkpoints/Simon7108528__EfficientSAM3
-```
-
-Run:
-
-```bash
-bash scripts/setup_5090_offline_benchmark.sh
-```
-
-Useful overrides:
-
-```bash
-PYTHON_BIN=python3.12 bash scripts/setup_5090_offline_benchmark.sh
-VENV_DIR=.venv bash scripts/setup_5090_offline_benchmark.sh
-PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
-DOWNLOAD_CHECKPOINTS=0 PREPARE_DATASETS=0 bash scripts/setup_5090_offline_benchmark.sh
-HF_CA_BUNDLE=~/certs/workstation-root-ca.pem bash scripts/setup_5090_offline_benchmark.sh
-HF_CHECKPOINT_DOWNLOAD_MODE=git bash scripts/setup_5090_offline_benchmark.sh
-CHECK_HF_AUTH=0 bash scripts/setup_5090_offline_benchmark.sh
-RUN_SMOKE=0 bash scripts/setup_5090_offline_benchmark.sh
-STORAGE_LIMIT_GIB=300 bash scripts/setup_5090_offline_benchmark.sh
-```
 
 After setup, activate the environment in every terminal:
 
@@ -292,13 +336,162 @@ external/MobileSAM
 
 ## 6. Download Checkpoints
 
+Run checkpoint downloads one group at a time. This makes the failure point
+obvious and avoids repeating work that already succeeded.
+
+Start from a clean shell at the repo root:
+
 ```bash
 source ~/venvs/effisam3_venv_ros/bin/activate
+mkdir -p logs/rtx5090_debug
+set -o pipefail
+```
 
-bash scripts/download_sam3_checkpoint.sh
-bash scripts/download_efficientsam3_checkpoints.sh
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
+If the Hugging Face reachability check in section 3 required a CA bundle,
+export it again in this shell before downloading:
+
+```bash
+export HF_CA_BUNDLE=~/certs/workstation-root-ca.pem
+export SSL_CERT_FILE="${HF_CA_BUNDLE}"
+export REQUESTS_CA_BUNDLE="${HF_CA_BUNDLE}"
+export CURL_CA_BUNDLE="${HF_CA_BUNDLE}"
+```
+
+Confirm Hugging Face auth again:
+
+```bash
+hf auth whoami
+python - <<'PY'
+from huggingface_hub import HfApi
+
+user = HfApi().whoami()
+print(user.get("name") or user.get("email") or "authenticated")
+PY
+```
+
+### 6.1 Download SAM3 First
+
+SAM3 uses the Hugging Face repo `facebook/sam3`. Download it before touching
+EfficientSAM3:
+
+```bash
+HF_HUB_VERBOSITY=debug \
+  bash scripts/download_sam3_checkpoint.sh 2>&1 \
+  | tee logs/rtx5090_debug/download_sam3.log
+```
+
+Verify the output:
+
+```bash
+ls -lh checkpoints/sam3/
+python - <<'PY'
+from pathlib import Path
+
+required = {
+    "checkpoints/sam3/config.json": 1,
+    "checkpoints/sam3/sam3.pt": 1024 * 1024,
+}
+
+for path_str, min_bytes in required.items():
+    path = Path(path_str)
+    if not path.exists():
+        raise SystemExit(f"missing: {path}")
+    size = path.stat().st_size
+    print(path, size)
+    if size < min_bytes:
+        raise SystemExit(f"too small, likely incomplete: {path}")
+PY
+```
+
+Do not continue until this verification passes.
+
+### 6.2 Download EfficientSAM3 Second
+
+EfficientSAM3 uses the Hugging Face repo `Simon7108528/EfficientSAM3`.
+
+```bash
+HF_HUB_VERBOSITY=debug \
+  bash scripts/download_efficientsam3_checkpoints.sh 2>&1 \
+  | tee logs/rtx5090_debug/download_efficientsam3.log
+```
+
+Verify the output:
+
+```bash
+ls -lh checkpoints/stage1_sam3p1/
+ls -lh checkpoints/stage1_all_converted/
+python - <<'PY'
+from pathlib import Path
+
+required = [
+    "checkpoints/stage1_sam3p1/efficient_sam3p1_efficientvit_s_mobileclip_s0_ctx16.pt",
+    "checkpoints/stage1_sam3p1/efficient_sam3p1_efficientvit_l_mobileclip_s0_ctx16.pt",
+    "checkpoints/stage1_all_converted/efficient_sam3_efficientvit-b0_mobileclip_s1.pth",
+    "checkpoints/stage1_all_converted/efficient_sam3_efficientvit-b2_mobileclip_s1.pth",
+]
+
+for path_str in required:
+    path = Path(path_str)
+    if not path.exists():
+        raise SystemExit(f"missing: {path}")
+    size = path.stat().st_size
+    print(path, size)
+    if size < 1024 * 1024:
+        raise SystemExit(f"too small, likely incomplete: {path}")
+PY
+```
+
+Do not continue until this verification passes.
+
+### 6.3 If Hugging Face Python Download Still Fails
+
+Only use this fallback after 6.1 or 6.2 fails. Keep the same terminal and same
+venv active.
+
+Install git-lfs:
+
+```bash
+sudo apt install -y git-lfs
+git lfs install
+git lfs version
+```
+
+Remove only partial Hugging Face clones from previous failed git-lfs attempts:
+
+```bash
+rm -rf external/hf-checkpoints/facebook__sam3
+rm -rf external/hf-checkpoints/Simon7108528__EfficientSAM3
+```
+
+Run the git-lfs fallback with a longer timeout:
+
+```bash
+read -rsp "HF token: " HF_TOKEN
+echo
+HF_TOKEN="${HF_TOKEN}" \
+  HF_GIT_TIMEOUT=900 \
+  bash scripts/download_hf_checkpoints_via_git.sh 2>&1 \
+  | tee logs/rtx5090_debug/download_hf_git_lfs.log
+unset HF_TOKEN
+```
+
+Then rerun the verification commands from 6.1 and 6.2. If the git-lfs log says
+`CERTIFICATE_VERIFY_FAILED` or `self-signed certificate in certificate chain`,
+go back to the CA-bundle step in [Recommended Debug Setup](#3-recommended-debug-setup)
+and rerun the fallback with `HF_CA_BUNDLE=~/certs/workstation-root-ca.pem`.
+
+### 6.4 Download The Remaining Checkpoints
+
+After SAM3 and EfficientSAM3 pass verification, download the remaining model
+assets:
+
+```bash
+bash scripts/download_sam2_family_checkpoints.sh 2>&1 \
+  | tee logs/rtx5090_debug/download_sam2_family.log
+
+bash scripts/download_yoloe_edgetam_mobilesam_assets.sh 2>&1 \
+  | tee logs/rtx5090_debug/download_yoloe_edgetam_mobilesam.log
+
 bash scripts/check_storage_budget.sh 300 data checkpoints external
 ```
 
@@ -320,26 +513,6 @@ checkpoints/efficienttam/efficienttam_s.pt
 checkpoints/yoloe/yoloe-26m-seg.pt
 checkpoints/edgetam/edgetam.pt
 checkpoints/mobilesam/mobile_sam.pt
-```
-
-SAM3 and EfficientSAM3 downloads use Hugging Face. If auth fails:
-
-```bash
-source ~/venvs/effisam3_venv_ros/bin/activate
-hf auth login
-hf auth whoami
-```
-
-To fetch those Hugging Face checkpoints with git-lfs instead of
-`huggingface_hub`:
-
-```bash
-sudo apt install -y git-lfs
-git lfs install
-read -rsp "HF token: " HF_TOKEN
-echo
-HF_TOKEN="${HF_TOKEN}" bash scripts/download_hf_checkpoints_via_git.sh
-unset HF_TOKEN
 ```
 
 ## 7. Prepare Fixed Datasets
