@@ -20,6 +20,7 @@ setup(
         "console_scripts": [
             "camera_stream_node = sam_benchmark_ros.camera_stream_node:main",
             "live_viewer_node = sam_benchmark_ros.live_viewer_node:main",
+            "mobile_sam_interactive_node = sam_benchmark_ros.mobile_sam_interactive_node:main",
             "overlay_video_recorder_node = sam_benchmark_ros.overlay_video_recorder_node:main",
             "result_recorder_node = sam_benchmark_ros.result_recorder_node:main",
             "sam_backend_node = sam_benchmark_ros.sam_backend_node:main",

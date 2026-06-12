@@ -109,11 +109,17 @@ sudo apt update
 sudo apt install -y \
   ros-jazzy-ros-base \
   ros-jazzy-cv-bridge \
+  ros-jazzy-realsense2-camera \
+  ros-jazzy-realsense2-description \
   ros-jazzy-sensor-msgs \
   ros-jazzy-std-msgs \
   python3-opencv \
   python3-colcon-common-extensions
 ```
+
+If the RealSense packages are not available from APT on Thor, build the
+official `realsense-ros` wrapper from source in a separate ROS workspace and
+source that workspace before this repo's ROS workspace.
 
 Use the repo helper in every ROS terminal:
 
@@ -157,6 +163,7 @@ Expected entries include:
 ```text
 camera_stream_node
 live_viewer_node
+mobile_sam_interactive_node
 video_stream_node
 sam_backend_node
 result_recorder_node
@@ -267,7 +274,88 @@ ros2 topic echo /sam/result_json --once
 Use `videos/test2.mov` or another local video path by changing
 `video_path:=...`.
 
-## 5. Start The Camera Publisher
+## 5. Run MobileSAM Interactive RealSense Stream
+
+Use this path for the Intel RealSense D455f hardware demo. The D455f is used as
+an RGB ROS camera source in v1; depth is intentionally disabled.
+
+Connect the camera through a USB3 port and check that Thor sees it:
+
+```bash
+lsusb | grep -i realsense || true
+dmesg | tail -n 50
+```
+
+Terminal A, start the official RealSense ROS wrapper with RGB enabled:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=false \
+  rgb_camera.color_profile:=1280x720x30
+```
+
+Verify the RGB topic. If your wrapper uses a different namespace, use the topic
+reported by `ros2 topic list | grep color`.
+
+```bash
+ros2 topic list | grep color
+ros2 topic hz /camera/camera/color/image_raw
+```
+
+Terminal B, run the interactive MobileSAM node:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_t \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+The MobileSAM window shows:
+
+```text
+left: live RealSense RGB frame     right: MobileSAM mask overlay
+```
+
+Controls:
+
+```text
+left click on the left image: initialize or reset the point prompt
+r: clear current tracking state
+q or Esc: exit
+```
+
+Tracking behavior:
+
+```text
+first click -> MobileSAM point prompt
+next frames -> previous mask bbox becomes the next MobileSAM box prompt
+new click -> reset and track the clicked object
+empty mask -> tracking lost until the next click
+```
+
+Verify the outputs:
+
+```bash
+ros2 topic hz /segmentation_mask
+ros2 topic hz /segmented_image
+ros2 topic echo /sam/result_json --once
+```
+
+## 6. Start The Camera Publisher
 
 Terminal A, simple OpenCV camera index:
 
@@ -300,7 +388,7 @@ ros2 topic hz /image
 ros2 topic echo /image/header --once
 ```
 
-## 6. Run A Null Backend Smoke Test
+## 7. Run A Null Backend Smoke Test
 
 Terminal B:
 
@@ -347,7 +435,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
 
 Proceed to real models only after the null CSV and overlay MP4 are created.
 
-## 7. Run SAM3 Text-Prompt Camera Benchmark
+## 8. Run SAM3 Text-Prompt Camera Benchmark
 
 Stop the null backend. Keep the camera publisher running.
 
@@ -387,7 +475,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p max_frames:=300
 ```
 
-## 8. Run EfficientSAM3 Text-Prompt Camera Benchmark
+## 9. Run EfficientSAM3 Text-Prompt Camera Benchmark
 
 EfficientSAM3 weak image / weak text:
 
@@ -480,7 +568,7 @@ results/thor/ros_camera/es3p1_weak_image_weak_text/
 overlays/thor/ros_camera/es3p1_weak_image_weak_text/
 ```
 
-## 9. Run Point-Prompt Camera Benchmarks
+## 10. Run Point-Prompt Camera Benchmarks
 
 Point prompt is fixed relative to the incoming image when `point_normalized` is
 true. `point_x:=0.5 -p point_y:=0.5` means the center of the frame.
@@ -565,7 +653,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-## 10. Read The ROS Profiling Output
+## 11. Read The ROS Profiling Output
 
 Per-frame CSV:
 
@@ -604,7 +692,7 @@ Overlay MP4:
 overlays/thor/ros_camera/<model>/overlay.mp4
 ```
 
-## 11. Benchmark Checklist
+## 12. Benchmark Checklist
 
 For each ROS camera run, record:
 

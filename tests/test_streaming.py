@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from sam_backend.streaming import masks_to_mono8, parse_tegrastats_gr3d
+from sam_backend.streaming import left_panel_click_to_image_point, masks_to_bbox_xyxy, masks_to_mono8, parse_tegrastats_gr3d
 
 
 class StreamingHelpersTest(unittest.TestCase):
@@ -27,6 +27,19 @@ class StreamingHelpersTest(unittest.TestCase):
         self.assertEqual(mask.dtype, np.uint8)
         self.assertEqual(mask.shape, (3, 4))
         self.assertEqual(int(mask.max()), 0)
+
+    def test_masks_to_bbox_xyxy(self) -> None:
+        mask = np.zeros((5, 6), dtype=np.uint8)
+        mask[1:4, 2:5] = 1
+
+        self.assertEqual(masks_to_bbox_xyxy(mask, (5, 6)), (2.0, 1.0, 4.0, 3.0))
+        self.assertIsNone(masks_to_bbox_xyxy(mask, (5, 6), min_area=100))
+        self.assertIsNone(masks_to_bbox_xyxy([], (5, 6)))
+
+    def test_left_panel_click_to_image_point(self) -> None:
+        self.assertEqual(left_panel_click_to_image_point(10, 5, (20, 30)), (10.0, 5.0))
+        self.assertIsNone(left_panel_click_to_image_point(30, 5, (20, 30)))
+        self.assertIsNone(left_panel_click_to_image_point(10, 20, (20, 30)))
 
     def test_parse_tegrastats_gr3d(self) -> None:
         line = "RAM 4388/62801MB CPU [1%@729] GR3D_FREQ 42%@306 EMC_FREQ 3%@2133"
