@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from sam_backend import BackendConfig, resolve_backend_config
+from sam_backend.backends import _resolve_autocast_dtype
 
 
 class BackendConfigTest(unittest.TestCase):
@@ -29,6 +30,15 @@ class BackendConfigTest(unittest.TestCase):
 
         self.assertEqual(config.backbone_type, "tinyvit")
         self.assertEqual(config.model_name, "11m")
+
+    def test_resolves_autocast_dtype_aliases(self) -> None:
+        class TorchModule:
+            bfloat16 = "bf16"
+            float16 = "fp16"
+
+        self.assertEqual(_resolve_autocast_dtype(TorchModule, "bfloat16"), "bf16")
+        self.assertEqual(_resolve_autocast_dtype(TorchModule, "fp16"), "fp16")
+        self.assertIsNone(_resolve_autocast_dtype(TorchModule, "none"))
 
 
 if __name__ == "__main__":

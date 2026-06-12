@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 import sys
@@ -39,6 +40,7 @@ class BackendConfig:
     text_encoder_pos_embed_table_size: int | None = None
     interpolate_pos_embed: bool = False
     enable_inst_interactivity: bool = False
+    autocast_dtype: str = "bfloat16"
     model_config: str | None = None
     external_repo: str | None = None
     mobile_sam_model_type: str = "vit_t"
@@ -108,7 +110,11 @@ class Sam3ImageBackend:
         pil_image = _as_pil_image(image)
         self._synchronize()
         start = perf_counter()
-        with self.torch.inference_mode():
+        with self.torch.inference_mode(), _autocast_context(
+            self.torch,
+            self.config.device,
+            self.config.autocast_dtype,
+        ):
             state = self.processor.set_image(pil_image)
             output = self._run_prompt(state, prompt)
         self._synchronize()
@@ -304,6 +310,7 @@ def resolve_backend_config(config: BackendConfig) -> BackendConfig:
         text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
         interpolate_pos_embed=config.interpolate_pos_embed,
         enable_inst_interactivity=config.enable_inst_interactivity,
+        autocast_dtype=config.autocast_dtype,
         model_config=config.model_config,
         external_repo=config.external_repo,
         mobile_sam_model_type=config.mobile_sam_model_type,
@@ -324,6 +331,29 @@ def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str] |
         "efficient_sam3_efficientvit_l": ("efficientvit", "b2"),
     }
     return mapping.get(stem)
+
+
+def _autocast_context(torch_module: Any, device: str | None, dtype_name: str) -> Any:
+    cuda = getattr(torch_module, "cuda", None)
+    if cuda is None or not cuda.is_available():
+        return nullcontext()
+    if device is not None and not str(device).startswith("cuda"):
+        return nullcontext()
+    dtype = _resolve_autocast_dtype(torch_module, dtype_name)
+    if dtype is None:
+        return nullcontext()
+    return torch_module.autocast("cuda", dtype=dtype)
+
+
+def _resolve_autocast_dtype(torch_module: Any, dtype_name: str) -> Any:
+    normalized = dtype_name.strip().lower()
+    if normalized in {"", "none", "false", "off", "float32", "fp32"}:
+        return None
+    if normalized in {"bfloat16", "bf16"}:
+        return torch_module.bfloat16
+    if normalized in {"float16", "fp16", "half"}:
+        return torch_module.float16
+    raise ValueError("autocast_dtype must be one of: bfloat16, float16, float32, none")
 
 
 def _as_pil_image(image: Any) -> Image.Image:

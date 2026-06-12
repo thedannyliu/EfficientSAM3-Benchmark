@@ -27,6 +27,7 @@ class SamBackendNode(Node):
         self.declare_parameter("text_encoder_context_length", 77)
         self.declare_parameter("text_encoder_pos_embed_table_size", 0)
         self.declare_parameter("interpolate_pos_embed", False)
+        self.declare_parameter("autocast_dtype", "bfloat16")
         self.declare_parameter("model_config", "")
         self.declare_parameter("external_repo", "")
         self.declare_parameter("mobile_sam_model_type", "vit_t")
@@ -51,6 +52,7 @@ class SamBackendNode(Node):
         text_encoder_context_length = int(self.get_parameter("text_encoder_context_length").value)
         text_encoder_pos_embed_table_size = int(self.get_parameter("text_encoder_pos_embed_table_size").value) or None
         interpolate_pos_embed = bool(self.get_parameter("interpolate_pos_embed").value)
+        autocast_dtype = str(self.get_parameter("autocast_dtype").value)
         model_config = self.get_parameter("model_config").value or None
         external_repo = self.get_parameter("external_repo").value or None
         mobile_sam_model_type = self.get_parameter("mobile_sam_model_type").value
@@ -73,6 +75,7 @@ class SamBackendNode(Node):
                 text_encoder_context_length=text_encoder_context_length,
                 text_encoder_pos_embed_table_size=text_encoder_pos_embed_table_size,
                 interpolate_pos_embed=interpolate_pos_embed,
+                autocast_dtype=autocast_dtype,
                 model_config=model_config,
                 external_repo=external_repo,
                 mobile_sam_model_type=mobile_sam_model_type,
