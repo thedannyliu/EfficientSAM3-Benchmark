@@ -365,6 +365,26 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
+Distilled RepViT-S image encoder checkpoint:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/efficient_sam3_repvit_s.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
+`efficient_sam3_repvit_s.pt` filename. You can still pass those parameters
+explicitly if you want the run command to show the architecture.
+
 For other variants, change checkpoint and model parameters:
 
 ```text

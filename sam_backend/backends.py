@@ -68,41 +68,41 @@ class NullBackend:
 
 class Sam3ImageBackend:
     def __init__(self, config: BackendConfig) -> None:
-        self.config = config
+        self.config = resolve_backend_config(config)
         _prepend_repo_path(config.external_repo)
         self.torch = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         processor_mod = _import_required("sam3.model.sam3_image_processor")
 
-        if config.backend == "sam3":
+        if self.config.backend == "sam3":
             self.model = builder.build_sam3_image_model(
-                checkpoint_path=config.checkpoint_path,
-                device=config.device,
-                enable_inst_interactivity=config.enable_inst_interactivity,
+                checkpoint_path=self.config.checkpoint_path,
+                device=self.config.device,
+                enable_inst_interactivity=self.config.enable_inst_interactivity,
             )
-        elif config.backend == "efficientsam3":
-            if not config.checkpoint_path:
+        elif self.config.backend == "efficientsam3":
+            if not self.config.checkpoint_path:
                 raise ValueError("--checkpoint-path is required for EfficientSAM3")
             self.model = builder.build_efficientsam3_image_model(
-                checkpoint_path=config.checkpoint_path,
-                device=config.device,
-                backbone_type=config.backbone_type,
-                model_name=config.model_name,
-                text_encoder_type=config.text_encoder_type,
-                text_encoder_context_length=config.text_encoder_context_length,
-                text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
-                interpolate_pos_embed=config.interpolate_pos_embed,
-                enable_inst_interactivity=config.enable_inst_interactivity,
+                checkpoint_path=self.config.checkpoint_path,
+                device=self.config.device,
+                backbone_type=self.config.backbone_type,
+                model_name=self.config.model_name,
+                text_encoder_type=self.config.text_encoder_type,
+                text_encoder_context_length=self.config.text_encoder_context_length,
+                text_encoder_pos_embed_table_size=self.config.text_encoder_pos_embed_table_size,
+                interpolate_pos_embed=self.config.interpolate_pos_embed,
+                enable_inst_interactivity=self.config.enable_inst_interactivity,
             )
         else:
-            raise ValueError(f"unsupported SAM backend: {config.backend}")
+            raise ValueError(f"unsupported SAM backend: {self.config.backend}")
 
-        if config.device and hasattr(self.model, "to"):
-            self.model = self.model.to(config.device)
+        if self.config.device and hasattr(self.model, "to"):
+            self.model = self.model.to(self.config.device)
         if hasattr(self.model, "eval"):
             self.model.eval()
 
-        self.processor = processor_mod.Sam3Processor(self.model, device=config.device or "cuda")
+        self.processor = processor_mod.Sam3Processor(self.model, device=self.config.device or "cuda")
 
     def predict(self, image: Any, prompt: Prompt) -> Prediction:
         pil_image = _as_pil_image(image)
@@ -272,6 +272,7 @@ class MobileSamPointImageBackend:
 
 
 def create_backend(config: BackendConfig) -> SegmentationBackend:
+    config = resolve_backend_config(config)
     if config.backend == "null":
         return NullBackend()
     if config.backend in {"sam3", "efficientsam3"}:
@@ -283,6 +284,46 @@ def create_backend(config: BackendConfig) -> SegmentationBackend:
     if config.backend == "mobilesam":
         return MobileSamPointImageBackend(config)
     raise ValueError(f"unknown backend: {config.backend}")
+
+
+def resolve_backend_config(config: BackendConfig) -> BackendConfig:
+    if config.backend != "efficientsam3" or not config.checkpoint_path:
+        return config
+    resolved = _infer_efficientsam3_image_config(config.checkpoint_path)
+    if resolved is None:
+        return config
+    backbone_type, model_name = resolved
+    return BackendConfig(
+        backend=config.backend,
+        checkpoint_path=config.checkpoint_path,
+        device=config.device,
+        backbone_type=backbone_type,
+        model_name=model_name,
+        text_encoder_type=config.text_encoder_type,
+        text_encoder_context_length=config.text_encoder_context_length,
+        text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
+        interpolate_pos_embed=config.interpolate_pos_embed,
+        enable_inst_interactivity=config.enable_inst_interactivity,
+        model_config=config.model_config,
+        external_repo=config.external_repo,
+        mobile_sam_model_type=config.mobile_sam_model_type,
+    )
+
+
+def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str] | None:
+    stem = Path(checkpoint_path).stem
+    mapping = {
+        "efficient_sam3_repvit_s": ("repvit", "m0.9"),
+        "efficient_sam3_repvit_m": ("repvit", "m1.1"),
+        "efficient_sam3_repvit_l": ("repvit", "m2.3"),
+        "efficient_sam3_tinyvit_s": ("tinyvit", "5m"),
+        "efficient_sam3_tinyvit_m": ("tinyvit", "11m"),
+        "efficient_sam3_tinyvit_l": ("tinyvit", "21m"),
+        "efficient_sam3_efficientvit_s": ("efficientvit", "b0"),
+        "efficient_sam3_efficientvit_m": ("efficientvit", "b1"),
+        "efficient_sam3_efficientvit_l": ("efficientvit", "b2"),
+    }
+    return mapping.get(stem)
 
 
 def _as_pil_image(image: Any) -> Image.Image:
