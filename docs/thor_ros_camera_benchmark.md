@@ -1,4 +1,4 @@
-# Jetson Thor ROS Camera Benchmark and Profiling
+# Jetson Thor ROS Video Streaming Benchmark and Profiling
 
 This guide runs the live ROS camera pipeline on Jetson Thor:
 
@@ -11,7 +11,7 @@ camera_stream_node -> /image
                           -> /segmented_image
 result_recorder_node -> CSV + summary CSV
 overlay_video_recorder_node -> overlay MP4
-live_viewer_node -> left: original stream, right: SAM mask overlay
+live_viewer_node -> left: original stream, right: segmentation mask overlay
 ```
 
 Use this path after the offline benchmark works. The ROS numbers include model
@@ -20,6 +20,23 @@ latency plus callback and transport overhead.
 For the first video-streaming demo, use a recorded video as the ROS frame
 publisher. This is still a live ROS topic pipeline: the video file only replaces
 the physical camera as the image source.
+
+Supported Terminal B backends in this guide:
+
+```text
+SAM3 reference:
+  backend=sam3
+  checkpoint_path=checkpoints/sam3/sam3.pt
+
+Distilled RepViT-S EfficientSAM3:
+  backend=efficientsam3
+  checkpoint_path=checkpoints/efficient_sam3_repvit_s.pt
+  inferred backbone_type=repvit
+  inferred model_name=m0.9
+```
+
+If you are already inside `~/EfficientSAM3-Benchmark`, skip repeated
+`cd EfficientSAM3-Benchmark` lines in the command blocks.
 
 ## 1. Prepare The Same Environment As Offline
 
@@ -146,12 +163,12 @@ result_recorder_node
 overlay_video_recorder_node
 ```
 
-## 4. Run The SAM3 Video Streaming Demo
+## 4. Run The SAM3 Or RepViT-S Video Streaming Demo
 
 This demo shows one live OpenCV window:
 
 ```text
-left: original video stream     right: SAM3 segmentation mask overlay
+left: original video stream     right: segmentation mask overlay
 ```
 
 It also publishes machine-readable and visual segmentation topics:
@@ -174,7 +191,7 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p frame_id:=video
 ```
 
-Terminal B, run SAM3 on each incoming ROS frame:
+Terminal B option 1, run SAM3 on each incoming ROS frame:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -189,12 +206,13 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p prompt:=monitor \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image
 ```
 
-Alternative Terminal B, run the distilled RepViT-S EfficientSAM3 checkpoint on
-the same incoming ROS frames:
+Terminal B option 2, run the distilled RepViT-S EfficientSAM3 checkpoint on the
+same incoming ROS frames:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -209,6 +227,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p prompt:=monitor \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image
 ```
@@ -216,6 +235,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
 The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. Use either the SAM3 command or this
 RepViT-S command for Terminal B, not both at the same time.
+
+Both backend commands publish the same ROS output topics, so Terminal C does not
+change when switching between SAM3 and RepViT-S.
 
 Terminal C, open the live side-by-side viewer:
 
@@ -229,7 +251,7 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json
 ```
 
-The viewer overlays FPS, per-frame SAM latency, callback/end-to-end latency,
+The viewer overlays FPS, per-frame backend latency, callback/end-to-end latency,
 CUDA memory, and Jetson GPU utilization when `tegrastats` is available. Press
 `q` or `Esc` in the viewer window to close it.
 
@@ -401,6 +423,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p prompt:=monitor \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image
 ```
@@ -408,6 +431,23 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
 The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. You can still pass those parameters
 explicitly if you want the run command to show the architecture.
+
+For RepViT-S camera benchmark recording, use separate output folders:
+
+```bash
+mkdir -p results/thor/ros_camera/repvit_s overlays/thor/ros_camera/repvit_s
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p csv_output:=results/thor/ros_camera/repvit_s/results.csv \
+  -p summary_output:=results/thor/ros_camera/repvit_s/summary.csv \
+  -p max_messages:=300
+
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/repvit_s/overlay.mp4 \
+  -p fps:=30.0 \
+  -p max_frames:=300
+```
 
 For other variants, change checkpoint and model parameters:
 
@@ -434,6 +474,8 @@ es3_strong_image_strong_available_text:
 Use separate output folders per variant, for example:
 
 ```text
+results/thor/ros_camera/repvit_s/
+overlays/thor/ros_camera/repvit_s/
 results/thor/ros_camera/es3p1_weak_image_weak_text/
 overlays/thor/ros_camera/es3p1_weak_image_weak_text/
 ```
@@ -569,9 +611,10 @@ For each ROS camera run, record:
 ```text
 git branch and commit
 JetPack/L4T version
-camera source: index or GStreamer pipeline
-camera resolution and FPS
+source type: recorded video, camera index, or GStreamer pipeline
+source path/index/pipeline, resolution, and FPS
 model ID and checkpoint path
+backend, backbone_type, and model_name
 prompt mode and prompt value
 result CSV path
 summary CSV path
