@@ -170,7 +170,7 @@ result_recorder_node
 overlay_video_recorder_node
 ```
 
-## 4. Run The SAM3 Or RepViT-S Video Streaming Demo
+## 4. Run The Video Streaming Demo
 
 This demo shows one live OpenCV window:
 
@@ -197,6 +197,8 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p fps:=15.0 \
   -p frame_id:=video
 ```
+
+Choose one Terminal B backend option.
 
 Terminal B option 1, run SAM3 on each incoming ROS frame:
 
@@ -243,10 +245,30 @@ The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. Use either the SAM3 command or this
 RepViT-S command for Terminal B, not both at the same time.
 
-Both backend commands publish the same ROS output topics, so Terminal C does not
-change when switching between SAM3 and RepViT-S.
+Terminal B option 3, run interactive MobileSAM on the same incoming ROS video
+frames:
 
-Terminal C, open the live side-by-side viewer:
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_t \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For MobileSAM, click the left side of the MobileSAM window to initialize the
+point prompt. Later frames use the previous mask bounding box as the next box
+prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
+
+For SAM3 or RepViT-S, Terminal C opens the live side-by-side viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -258,9 +280,11 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json
 ```
 
-The viewer overlays FPS, per-frame backend latency, callback/end-to-end latency,
-CUDA memory, and Jetson GPU utilization when `tegrastats` is available. Press
-`q` or `Esc` in the viewer window to close it.
+Skip Terminal C when using MobileSAM because `mobile_sam_interactive_node`
+already opens the interactive side-by-side window. The viewer overlays FPS,
+per-frame backend latency, callback/end-to-end latency, CUDA memory, and Jetson
+GPU utilization when `tegrastats` is available. Press `q` or `Esc` in the viewer
+window to close it.
 
 Verify the output topics:
 
