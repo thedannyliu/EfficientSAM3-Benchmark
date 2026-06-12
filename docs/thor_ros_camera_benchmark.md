@@ -7,12 +7,19 @@ camera_stream_node -> /image
 /image -> sam_backend_node -> /sam/result_json
                          \
                           -> /sam/overlay
+                          -> /segmentation_mask
+                          -> /segmented_image
 result_recorder_node -> CSV + summary CSV
 overlay_video_recorder_node -> overlay MP4
+live_viewer_node -> left: original stream, right: SAM mask overlay
 ```
 
 Use this path after the offline benchmark works. The ROS numbers include model
 latency plus callback and transport overhead.
+
+For the first video-streaming demo, use a recorded video as the ROS frame
+publisher. This is still a live ROS topic pipeline: the video file only replaces
+the physical camera as the image source.
 
 ## 1. Prepare The Same Environment As Offline
 
@@ -132,13 +139,89 @@ Expected entries include:
 
 ```text
 camera_stream_node
+live_viewer_node
 video_stream_node
 sam_backend_node
 result_recorder_node
 overlay_video_recorder_node
 ```
 
-## 4. Start The Camera Publisher
+## 4. Run The SAM3 Video Streaming Demo
+
+This demo shows one live OpenCV window:
+
+```text
+left: original video stream     right: SAM3 segmentation mask overlay
+```
+
+It also publishes machine-readable and visual segmentation topics:
+
+```text
+/segmentation_mask   sensor_msgs/Image mono8
+/segmented_image     sensor_msgs/Image rgb8
+```
+
+Terminal A, publish a recorded video into ROS:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros video_stream_node --ros-args \
+  -p video_path:=videos/test1.mov \
+  -p image_topic:=/image \
+  -p fps:=15.0 \
+  -p frame_id:=video
+```
+
+Terminal B, run SAM3 on each incoming ROS frame:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p external_repo:=external/sam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Terminal C, open the live side-by-side viewer:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros live_viewer_node --ros-args \
+  -p image_topic:=/image \
+  -p segmented_image_topic:=/segmented_image \
+  -p result_topic:=/sam/result_json
+```
+
+The viewer overlays FPS, per-frame SAM latency, callback/end-to-end latency,
+CUDA memory, and Jetson GPU utilization when `tegrastats` is available. Press
+`q` or `Esc` in the viewer window to close it.
+
+Verify the output topics:
+
+```bash
+ros2 topic hz /image
+ros2 topic hz /segmentation_mask
+ros2 topic hz /segmented_image
+ros2 topic echo /sam/result_json --once
+```
+
+Use `videos/test2.mov` or another local video path by changing
+`video_path:=...`.
+
+## 5. Start The Camera Publisher
 
 Terminal A, simple OpenCV camera index:
 
@@ -171,7 +254,7 @@ ros2 topic hz /image
 ros2 topic echo /image/header --once
 ```
 
-## 5. Run A Null Backend Smoke Test
+## 6. Run A Null Backend Smoke Test
 
 Terminal B:
 
@@ -184,7 +267,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p device:=cpu \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 Terminal C, record 100 result messages:
@@ -216,7 +301,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
 
 Proceed to real models only after the null CSV and overlay MP4 are created.
 
-## 6. Run SAM3 Text-Prompt Camera Benchmark
+## 7. Run SAM3 Text-Prompt Camera Benchmark
 
 Stop the null backend. Keep the camera publisher running.
 
@@ -235,7 +320,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p prompt:=person \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 Terminals C and D:
@@ -254,7 +341,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p max_frames:=300
 ```
 
-## 7. Run EfficientSAM3 Text-Prompt Camera Benchmark
+## 8. Run EfficientSAM3 Text-Prompt Camera Benchmark
 
 EfficientSAM3 weak image / weak text:
 
@@ -273,7 +360,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p prompt:=person \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 For other variants, change checkpoint and model parameters:
@@ -305,7 +394,7 @@ results/thor/ros_camera/es3p1_weak_image_weak_text/
 overlays/thor/ros_camera/es3p1_weak_image_weak_text/
 ```
 
-## 8. Run Point-Prompt Camera Benchmarks
+## 9. Run Point-Prompt Camera Benchmarks
 
 Point prompt is fixed relative to the incoming image when `point_normalized` is
 true. `point_x:=0.5 -p point_y:=0.5` means the center of the frame.
@@ -325,7 +414,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p point_normalized:=true \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 Efficient-SAM2.1 tiny:
@@ -343,7 +434,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p point_normalized:=true \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 EfficientTAM-Ti:
@@ -361,7 +454,9 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p point_normalized:=true \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
 MobileSAM:
@@ -379,10 +474,12 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p point_normalized:=true \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
 ```
 
-## 9. Read The ROS Profiling Output
+## 10. Read The ROS Profiling Output
 
 Per-frame CSV:
 
@@ -421,7 +518,7 @@ Overlay MP4:
 overlays/thor/ros_camera/<model>/overlay.mp4
 ```
 
-## 10. Benchmark Checklist
+## 11. Benchmark Checklist
 
 For each ROS camera run, record:
 

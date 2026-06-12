@@ -12,6 +12,7 @@ from std_msgs.msg import String
 from sam_backend import BackendConfig, Prompt, create_backend
 from sam_backend.overlay import overlay_prediction, to_numpy
 from sam_backend.profiling import component_timer, cuda_memory_mb, parameter_counts
+from sam_backend.streaming import masks_to_mono8
 
 
 class SamBackendNode(Node):
@@ -38,6 +39,8 @@ class SamBackendNode(Node):
         self.declare_parameter("image_topic", "/image")
         self.declare_parameter("result_topic", "/sam/result_json")
         self.declare_parameter("overlay_topic", "")
+        self.declare_parameter("mask_topic", "")
+        self.declare_parameter("segmented_image_topic", "")
 
         backend_name = self.get_parameter("backend").value
         checkpoint_path = self.get_parameter("checkpoint_path").value or None
@@ -82,12 +85,22 @@ class SamBackendNode(Node):
         image_topic = self.get_parameter("image_topic").value
         result_topic = self.get_parameter("result_topic").value
         overlay_topic = self.get_parameter("overlay_topic").value
+        mask_topic = self.get_parameter("mask_topic").value
+        segmented_image_topic = self.get_parameter("segmented_image_topic").value
         self.publisher = self.create_publisher(String, result_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
+        self.mask_publisher = self.create_publisher(Image, mask_topic, 10) if mask_topic else None
+        self.segmented_image_publisher = (
+            self.create_publisher(Image, segmented_image_topic, 10) if segmented_image_topic else None
+        )
         self.subscription = self.create_subscription(Image, image_topic, self.on_image, 10)
         self.get_logger().info(f"listening on {image_topic}, publishing {result_topic}")
         if overlay_topic:
             self.get_logger().info(f"publishing overlays on {overlay_topic}")
+        if mask_topic:
+            self.get_logger().info(f"publishing mono8 masks on {mask_topic}")
+        if segmented_image_topic:
+            self.get_logger().info(f"publishing segmented images on {segmented_image_topic}")
 
     def on_image(self, msg: Image) -> None:
         callback_start = perf_counter()
@@ -135,11 +148,19 @@ class SamBackendNode(Node):
             **self.params,
         }
         self.publisher.publish(String(data=json.dumps(result)))
-        if self.overlay_publisher is not None:
+        if self.mask_publisher is not None:
+            mask = masks_to_mono8(prediction.masks, frame.shape[:2])
+            mask_msg = self.bridge.cv2_to_imgmsg(mask, encoding="mono8")
+            mask_msg.header = msg.header
+            self.mask_publisher.publish(mask_msg)
+        if self.overlay_publisher is not None or self.segmented_image_publisher is not None:
             overlay = overlay_prediction(frame, prediction.masks, prediction.boxes, prediction.scores)
             overlay_msg = self.bridge.cv2_to_imgmsg(overlay, encoding="rgb8")
             overlay_msg.header = msg.header
-            self.overlay_publisher.publish(overlay_msg)
+            if self.overlay_publisher is not None:
+                self.overlay_publisher.publish(overlay_msg)
+            if self.segmented_image_publisher is not None:
+                self.segmented_image_publisher.publish(overlay_msg)
         self.frame_index += 1
 
     def _resolve_prompt_mode(self, value: str) -> str:
