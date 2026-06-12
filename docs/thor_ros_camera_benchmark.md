@@ -193,6 +193,30 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
+Alternative Terminal B, run the distilled RepViT-S EfficientSAM3 checkpoint on
+the same incoming ROS frames:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/efficient_sam3_repvit_s.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
+`efficient_sam3_repvit_s.pt` filename. Use either the SAM3 command or this
+RepViT-S command for Terminal B, not both at the same time.
+
 Terminal C, open the live side-by-side viewer:
 
 ```bash
