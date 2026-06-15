@@ -298,7 +298,7 @@ ros2 topic echo /sam/result_json --once
 Use `videos/test2.mov` or another local video path by changing
 `video_path:=...`.
 
-## 5. Run MobileSAM Interactive RealSense Stream
+## 5. Run SAM3, EfficientSAM3, Or MobileSAM RealSense Stream
 
 Use this path for the Intel RealSense D455f hardware demo. The D455f is used as
 an RGB ROS camera source in v1; depth is intentionally disabled.
@@ -330,7 +330,68 @@ ros2 topic list | grep color
 ros2 topic hz /camera/camera/color/image_raw
 ```
 
-Terminal B, run the interactive MobileSAM node:
+Choose one Terminal B backend option.
+
+Terminal B option 1, run SAM3 text-prompt segmentation on the RealSense RGB
+stream:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p external_repo:=external/sam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Terminal B option 2, run EfficientSAM3 text-prompt segmentation on the same
+RealSense RGB stream:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/stage1_sam3p1/efficient_sam3p1_efficientvit_s_mobileclip_s0_ctx16.pt \
+  -p device:=cuda \
+  -p backbone_type:=efficientvit \
+  -p model_name:=b0 \
+  -p text_encoder_type:=MobileCLIP-S0 \
+  -p text_encoder_context_length:=16 \
+  -p text_encoder_pos_embed_table_size:=16 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+For SAM3 or EfficientSAM3, Terminal C opens the live side-by-side viewer:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros live_viewer_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p segmented_image_topic:=/segmented_image \
+  -p result_topic:=/sam/result_json
+```
+
+Terminal B option 3, run the interactive MobileSAM node:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -348,7 +409,8 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-The MobileSAM window shows:
+The MobileSAM window shows its own side-by-side view, so do not start Terminal C
+when using this option:
 
 ```text
 left: live RealSense RGB frame     right: MobileSAM mask overlay
