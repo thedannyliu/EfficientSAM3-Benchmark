@@ -25,6 +25,7 @@ setup(
             "result_recorder_node = sam_benchmark_ros.result_recorder_node:main",
             "sam_backend_node = sam_benchmark_ros.sam_backend_node:main",
             "video_stream_node = sam_benchmark_ros.video_stream_node:main",
+            "yoloe_text_backend_node = sam_benchmark_ros.yoloe_text_backend_node:main",
         ],
     },
 )

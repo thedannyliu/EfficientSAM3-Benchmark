@@ -33,6 +33,11 @@ Distilled RepViT-S EfficientSAM3:
   checkpoint_path=checkpoints/efficient_sam3_repvit_s.pt
   inferred backbone_type=repvit
   inferred model_name=m0.9
+
+YOLOE open-vocabulary segmentation:
+  node=yoloe_text_backend_node
+  weights=checkpoints/yoloe/yoloe-26m-seg.pt
+  prompt=monitor
 ```
 
 If you are already inside `~/EfficientSAM3-Benchmark`, skip repeated
@@ -168,6 +173,7 @@ video_stream_node
 sam_backend_node
 result_recorder_node
 overlay_video_recorder_node
+yoloe_text_backend_node
 ```
 
 ## 4. Run The Video Streaming Demo
@@ -268,7 +274,32 @@ For MobileSAM, click the left side of the MobileSAM window to initialize the
 point prompt. Later frames use the previous mask bounding box as the next box
 prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
 
-For SAM3 or RepViT-S, Terminal C opens the live side-by-side viewer:
+Terminal B option 4, run YOLOE open-vocabulary segmentation with a text prompt
+on the same incoming ROS frames:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
+  -p image_topic:=/image \
+  -p weights:=checkpoints/yoloe/yoloe-26m-seg.pt \
+  -p device:=cuda \
+  -p prompt:=monitor \
+  -p imgsz:=640 \
+  -p conf:=0.25 \
+  -p iou:=0.7 \
+  -p max_det:=20 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+YOLOE is the text-prompt YOLO path in this repo. It runs per-frame
+open-vocabulary segmentation, not video tracking.
+
+For SAM3, RepViT-S, or YOLOE, Terminal C opens the live side-by-side viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -298,7 +329,7 @@ ros2 topic echo /sam/result_json --once
 Use `videos/test2.mov` or another local video path by changing
 `video_path:=...`.
 
-## 5. Run SAM3, EfficientSAM3, Or MobileSAM RealSense Stream
+## 5. Run SAM3, EfficientSAM3, YOLOE, Or MobileSAM RealSense Stream
 
 Use this path for the Intel RealSense D455f hardware demo. The D455f is used as
 an RGB ROS camera source in v1; depth is intentionally disabled.
@@ -379,7 +410,30 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-For SAM3 or EfficientSAM3, Terminal C opens the live side-by-side viewer:
+Terminal B option 3, run YOLOE open-vocabulary segmentation with a text prompt
+on the RealSense RGB stream:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p weights:=checkpoints/yoloe/yoloe-26m-seg.pt \
+  -p device:=cuda \
+  -p prompt:=monitor \
+  -p imgsz:=640 \
+  -p conf:=0.25 \
+  -p iou:=0.7 \
+  -p max_det:=20 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For SAM3, EfficientSAM3, or YOLOE, Terminal C opens the live side-by-side
+viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -391,7 +445,7 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json
 ```
 
-Terminal B option 3, run the interactive MobileSAM node:
+Terminal B option 4, run the interactive MobileSAM node:
 
 ```bash
 cd EfficientSAM3-Benchmark
