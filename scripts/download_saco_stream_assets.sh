@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRATCH_ROOT="${SAM_BENCH_SCRATCH:-/storage/scratch1/9/eliu354/efficientsam3-benchmark}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export SAM_BENCH_SCRATCH="${SAM_BENCH_SCRATCH:-${repo_root}}"
+SCRATCH_ROOT="${SAM_BENCH_SCRATCH}"
 CHECKPOINT_DIR="${SCRATCH_ROOT}/checkpoints"
 EXTERNAL_DIR="${SCRATCH_ROOT}/external"
 
@@ -63,7 +65,7 @@ from huggingface_hub import hf_hub_download
 import os
 import shutil
 
-root = Path(os.environ.get("SAM_BENCH_SCRATCH", "/storage/scratch1/9/eliu354/efficientsam3-benchmark"))
+root = Path(os.environ["SAM_BENCH_SCRATCH"])
 dst = root / "checkpoints" / "sam3p1" / "sam3.1_multiplex.pt"
 if dst.exists():
     print(f"exists: {dst}")

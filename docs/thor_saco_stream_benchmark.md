@@ -6,7 +6,8 @@ uses the same repository checkout and Thor Python/ROS environment as
 checkpoints, suite commands, and overlay outputs.
 
 The benchmark writes quantitative CSV/JSON results and one overlay MP4 per
-model/video. Large assets should stay on scratch, not in the Git workspace.
+model/video. Large assets stay under ignored local directories in this repo
+unless you explicitly override the asset root.
 
 ## 1. Get The Repository
 
@@ -65,28 +66,32 @@ export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
 source scripts/source_thor_ros_env.sh
 ```
 
-## 3. Use Scratch For Large Assets
+## 3. Use Repo-Local Asset Directories
 
-Default scratch root:
+By default, the Thor setup script stores checkpoints, external repos, SA-Co
+annotations, media symlinks, results, and overlays under this repository. These
+directories are ignored by git.
 
 ```bash
-export SAM_BENCH_SCRATCH=/storage/scratch1/9/eliu354/efficientsam3-benchmark
+cd EfficientSAM3-Benchmark
 ```
 
 Expected layout:
 
 ```text
-$SAM_BENCH_SCRATCH/
+EfficientSAM3-Benchmark/
 ├── checkpoints/
 ├── external/
-└── data/
-    ├── annotation/
-    └── media/saco_sav/JPEGImages_24fps/
+├── data/
+│   ├── annotation/
+│   └── media/saco_sav/JPEGImages_24fps/
+├── results/
+└── overlays/
 ```
 
 If full SA-V frames already exist somewhere else from the old setup, pass that
-path as `SAV_JPEG_ROOT`. The setup script will symlink it into the scratch
-layout:
+path as `SAV_JPEG_ROOT`. The setup script will symlink it into the local
+`data/media/saco_sav/` layout:
 
 ```bash
 SAV_JPEG_ROOT=/path/to/full/JPEGImages_24fps \
@@ -97,12 +102,15 @@ The old `sav_val_fixed10` subset is useful for smoke tests, but it is not
 enough for the default fixed20 SA-Co/VEval benchmark unless all selected videos
 happen to overlap.
 
+If you intentionally want assets outside the repo, set `SAM_BENCH_SCRATCH` to
+that external root before running the setup script. This is optional on Thor.
+
 ## 4. One-Command Setup
 
 The setup script reuses the active Thor venv, installs only missing Python
 packages without replacing Jetson PyTorch, downloads the new stream benchmark
-assets to scratch, downloads SA-Co/VEval-SAV annotations, builds a fixed
-manifest, and runs a null-backend smoke test with overlay output.
+assets, downloads SA-Co/VEval-SAV annotations, builds a fixed manifest, and
+runs a null-backend smoke test with overlay output.
 
 ```bash
 bash scripts/setup_thor_saco_stream_benchmark.sh
@@ -111,7 +119,7 @@ bash scripts/setup_thor_saco_stream_benchmark.sh
 Useful environment knobs:
 
 ```text
-SAM_BENCH_SCRATCH=/storage/scratch1/9/eliu354/efficientsam3-benchmark
+SAM_BENCH_SCRATCH=$PWD
 SACO_SPLIT=val
 SACO_COUNT=20
 SACO_SEED=20260617
@@ -225,8 +233,8 @@ For a direct EV-M smoke test on Thor, use the same equivalent builder settings:
 ```bash
 python -m sam_backend.thor_pipeline_smoke \
   --backend efficientsam3 \
-  --external-repo "$SAM_BENCH_SCRATCH/external/efficientsam3" \
-  --checkpoint-path "$SAM_BENCH_SCRATCH/checkpoints/efficientsam3_ft/efficientsam3_efficientvit.pt" \
+  --external-repo external/efficientsam3 \
+  --checkpoint-path checkpoints/efficientsam3_ft/efficientsam3_efficientvit.pt \
   --device cuda \
   --backbone-type efficientvit \
   --model-name b1 \

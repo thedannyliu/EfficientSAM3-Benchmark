@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_root}"
 
-export SAM_BENCH_SCRATCH="${SAM_BENCH_SCRATCH:-/storage/scratch1/9/eliu354/efficientsam3-benchmark}"
+export SAM_BENCH_SCRATCH="${SAM_BENCH_SCRATCH:-${repo_root}}"
 export THOR_VENV="${THOR_VENV:-${HOME}/venvs/effisam3_venv_ros}"
 export THOR_ROS_SETUP="${THOR_ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
 export SAM3_SOURCE="${SAM3_SOURCE:-${HOME}/efficientsam3/sam3}"
@@ -151,7 +151,7 @@ Thor SA-Co stream benchmark setup complete.
 Manifest:
   ${SACO_MANIFEST}
 
-Scratch:
+Asset root:
   ${SAM_BENCH_SCRATCH}
 
 Run full suite:
