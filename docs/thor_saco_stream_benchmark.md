@@ -1,27 +1,51 @@
 # Jetson Thor SA-Co/VEval Stream Benchmark
 
-This guide runs the new SA-Co/VEval-SAV stream benchmark on Jetson Thor. It is
-intended to sit on top of the environment, datasets, and checkpoints prepared
-by `docs/thor_offline_benchmark.md`.
+This guide runs the new SA-Co/VEval-SAV stream benchmark on Jetson Thor. It
+uses the same repository checkout and Thor Python/ROS environment as
+`docs/thor_offline_benchmark.md`, then adds the SA-Co/VEval stream data,
+checkpoints, suite commands, and overlay outputs.
 
 The benchmark writes quantitative CSV/JSON results and one overlay MP4 per
 model/video. Large assets should stay on scratch, not in the Git workspace.
 
-## 1. Reuse The Existing Thor Environment
+## 1. Get The Repository
 
-Use the same environment from the Thor offline guide:
+```bash
+git clone git@github.com:thedannyliu/EfficientSAM3-Benchmark.git
+cd EfficientSAM3-Benchmark
+git fetch origin
+git checkout main
+```
+
+If the repo already exists on Thor:
 
 ```bash
 cd EfficientSAM3-Benchmark
-export THOR_VENV=~/venvs/effisam3_venv_ros
-export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-export SAM3_SOURCE=~/efficientsam3/sam3
-source scripts/source_thor_ros_env.sh
+git checkout main
+git pull
 ```
 
-Verify CUDA before running real models:
+## 2. Use One Thor Environment
+
+Install JetPack and the NVIDIA-provided PyTorch/torchvision wheels that match
+the Thor JetPack release first. Do not let generic PyPI replace them.
+This guide uses the shared Thor helper from `docs/thor_setup.md`; it expects
+ROS Jazzy at `THOR_ROS_SETUP` even for offline runs.
 
 ```bash
+sudo apt update
+sudo apt install -y python3-opencv
+
+python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
+export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+
+python -m pip install -U pip
+
+# Follow NVIDIA's Jetson PyTorch page for the exact wheel URLs for this Thor.
+# Then verify CUDA before installing this repo:
 python - <<'PY'
 import torch
 print(torch.__version__)
@@ -30,7 +54,18 @@ print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "no cuda")
 PY
 ```
 
-## 2. Use Scratch For Large Assets
+If this environment already exists from `docs/thor_offline_benchmark.md`, reuse
+it instead of recreating it:
+
+```bash
+cd EfficientSAM3-Benchmark
+export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+```
+
+## 3. Use Scratch For Large Assets
 
 Default scratch root:
 
@@ -62,7 +97,7 @@ The old `sav_val_fixed10` subset is useful for smoke tests, but it is not
 enough for the default fixed20 SA-Co/VEval benchmark unless all selected videos
 happen to overlap.
 
-## 3. One-Command Setup
+## 4. One-Command Setup
 
 The setup script reuses the active Thor venv, installs only missing Python
 packages without replacing Jetson PyTorch, downloads the new stream benchmark
@@ -97,7 +132,7 @@ results/thor/saco_stream/smoke/null/frames.csv
 overlays/thor/saco_stream/smoke/null/<source_id>/overlay.mp4
 ```
 
-## 4. Dry-Run The Full Suite
+## 5. Dry-Run The Full Suite
 
 Print commands without loading models:
 
@@ -113,7 +148,7 @@ RUN_SUITE=1 DRY_RUN=1 \
 bash scripts/setup_thor_saco_stream_benchmark.sh
 ```
 
-## 5. Run The Full Offline Stream Suite
+## 6. Run The Full Offline Stream Suite
 
 Run all available models and save overlay MP4s:
 
@@ -145,7 +180,7 @@ The summary reports stream mode, effective FPS, latency, mIoU, mask F1/AP-style
 threshold summaries, presence accuracy, CUDA memory, and links to overlay and
 prediction artifacts.
 
-## 6. Model Matrix
+## 7. Model Matrix
 
 The default suite includes:
 
@@ -169,7 +204,7 @@ efficientsam3_tv_m_text_bbox_chain
 request. `sam3_ref` uses the available `sam3.pt`; `sam3p1_ref` uses
 `sam3.1_multiplex.pt` when Hugging Face access is available.
 
-## 7. EfficientSAM3 Full-Model Load Settings
+## 8. EfficientSAM3 Full-Model Load Settings
 
 The `efficientsam3_ft/*.pt` checkpoints are full EfficientSAM3 models with a
 lightweight image encoder and MobileCLIP-S0 LiteText encoder. They must be
@@ -205,7 +240,7 @@ python -m sam_backend.thor_pipeline_smoke \
   --overlay-output overlays/thor/saco_stream/ev_m_smoke.mp4
 ```
 
-## 8. Recorded ROS Stream Timing
+## 9. Recorded ROS Stream Timing
 
 For end-to-end ROS timing, use the same manifest and publish one selected video
 at 30 FPS with `video_stream_node`. Then start the matching backend and record
