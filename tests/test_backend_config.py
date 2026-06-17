@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 
 from sam_backend import BackendConfig, resolve_backend_config
-from sam_backend.backends import _resolve_autocast_dtype
+from sam_backend.backends import _prepend_repo_path, _resolve_autocast_dtype
 
 
 class BackendConfigTest(unittest.TestCase):
@@ -17,6 +20,20 @@ class BackendConfigTest(unittest.TestCase):
 
         self.assertEqual(config.backbone_type, "repvit")
         self.assertEqual(config.model_name, "m0.9")
+
+    def test_resolves_full_efficientsam3_checkpoint_text_encoder(self) -> None:
+        config = resolve_backend_config(
+            BackendConfig(
+                backend="efficientsam3",
+                checkpoint_path="checkpoints/efficientsam3_ft/efficientsam3_efficientvit.pt",
+            )
+        )
+
+        self.assertEqual(config.backbone_type, "efficientvit")
+        self.assertEqual(config.model_name, "b1")
+        self.assertEqual(config.text_encoder_type, "MobileCLIP-S0")
+        self.assertEqual(config.text_encoder_context_length, 16)
+        self.assertEqual(config.text_encoder_pos_embed_table_size, 16)
 
     def test_leaves_unknown_checkpoint_filename_unchanged(self) -> None:
         config = resolve_backend_config(
@@ -39,6 +56,21 @@ class BackendConfigTest(unittest.TestCase):
         self.assertEqual(_resolve_autocast_dtype(TorchModule, "bfloat16"), "bf16")
         self.assertEqual(_resolve_autocast_dtype(TorchModule, "fp16"), "fp16")
         self.assertIsNone(_resolve_autocast_dtype(TorchModule, "none"))
+
+    def test_prepend_repo_path_handles_nested_efficientsam3_layout(self) -> None:
+        original_path = list(sys.path)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "sam3" / "sam3").mkdir(parents=True)
+            (root / "sam3" / "sam3" / "model_builder.py").write_text("", encoding="utf-8")
+
+            try:
+                _prepend_repo_path(str(root))
+
+                self.assertEqual(sys.path[0], str(root / "sam3"))
+                self.assertEqual(sys.path[1], str(root))
+            finally:
+                sys.path[:] = original_path
 
 
 if __name__ == "__main__":

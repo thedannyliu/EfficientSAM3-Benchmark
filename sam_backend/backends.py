@@ -87,6 +87,7 @@ class Sam3ImageBackend:
                 raise ValueError("--checkpoint-path is required for EfficientSAM3")
             self.model = builder.build_efficientsam3_image_model(
                 checkpoint_path=self.config.checkpoint_path,
+                load_from_HF=False,
                 device=self.config.device,
                 backbone_type=self.config.backbone_type,
                 model_name=self.config.model_name,
@@ -287,7 +288,7 @@ def create_backend(config: BackendConfig) -> SegmentationBackend:
         return Sam2PointImageBackend(config, "sam2")
     if config.backend == "efficienttam":
         return Sam2PointImageBackend(config, "efficient_track_anything")
-    if config.backend == "mobilesam":
+    if config.backend in {"mobilesam", "sam1"}:
         return MobileSamPointImageBackend(config)
     raise ValueError(f"unknown backend: {config.backend}")
 
@@ -298,16 +299,20 @@ def resolve_backend_config(config: BackendConfig) -> BackendConfig:
     resolved = _infer_efficientsam3_image_config(config.checkpoint_path)
     if resolved is None:
         return config
-    backbone_type, model_name = resolved
+    backbone_type, model_name, text_encoder_type, context_length, pos_embed_table_size = resolved
     return BackendConfig(
         backend=config.backend,
         checkpoint_path=config.checkpoint_path,
         device=config.device,
         backbone_type=backbone_type,
         model_name=model_name,
-        text_encoder_type=config.text_encoder_type,
-        text_encoder_context_length=config.text_encoder_context_length,
-        text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size,
+        text_encoder_type=config.text_encoder_type or text_encoder_type,
+        text_encoder_context_length=(
+            context_length
+            if context_length is not None and config.text_encoder_context_length == 77
+            else config.text_encoder_context_length
+        ),
+        text_encoder_pos_embed_table_size=config.text_encoder_pos_embed_table_size or pos_embed_table_size,
         interpolate_pos_embed=config.interpolate_pos_embed,
         enable_inst_interactivity=config.enable_inst_interactivity,
         autocast_dtype=config.autocast_dtype,
@@ -317,18 +322,21 @@ def resolve_backend_config(config: BackendConfig) -> BackendConfig:
     )
 
 
-def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str] | None:
+def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str, str | None, int | None, int | None] | None:
     stem = Path(checkpoint_path).stem
     mapping = {
-        "efficient_sam3_repvit_s": ("repvit", "m0.9"),
-        "efficient_sam3_repvit_m": ("repvit", "m1.1"),
-        "efficient_sam3_repvit_l": ("repvit", "m2.3"),
-        "efficient_sam3_tinyvit_s": ("tinyvit", "5m"),
-        "efficient_sam3_tinyvit_m": ("tinyvit", "11m"),
-        "efficient_sam3_tinyvit_l": ("tinyvit", "21m"),
-        "efficient_sam3_efficientvit_s": ("efficientvit", "b0"),
-        "efficient_sam3_efficientvit_m": ("efficientvit", "b1"),
-        "efficient_sam3_efficientvit_l": ("efficientvit", "b2"),
+        "efficient_sam3_repvit_s": ("repvit", "m0.9", None, None, None),
+        "efficient_sam3_repvit_m": ("repvit", "m1.1", None, None, None),
+        "efficient_sam3_repvit_l": ("repvit", "m2.3", None, None, None),
+        "efficient_sam3_tinyvit_s": ("tinyvit", "5m", None, None, None),
+        "efficient_sam3_tinyvit_m": ("tinyvit", "11m", None, None, None),
+        "efficient_sam3_tinyvit_l": ("tinyvit", "21m", None, None, None),
+        "efficient_sam3_efficientvit_s": ("efficientvit", "b0", None, None, None),
+        "efficient_sam3_efficientvit_m": ("efficientvit", "b1", None, None, None),
+        "efficient_sam3_efficientvit_l": ("efficientvit", "b2", None, None, None),
+        "efficientsam3_efficientvit": ("efficientvit", "b1", "MobileCLIP-S0", 16, 16),
+        "efficientsam3_repvit": ("repvit", "m1.1", "MobileCLIP-S0", 16, 16),
+        "efficientsam3_tinyvit": ("tinyvit", "11m", "MobileCLIP-S0", 16, 16),
     }
     return mapping.get(stem)
 
@@ -382,9 +390,15 @@ def _import_required(module_name: str) -> Any:
 def _prepend_repo_path(repo_path: str | None) -> None:
     if not repo_path:
         return
-    path = str(Path(repo_path).resolve())
-    if Path(path).exists() and path not in sys.path:
-        sys.path.insert(0, path)
+    root = Path(repo_path).resolve()
+    candidates = [root]
+    nested_sam3_parent = root / "sam3"
+    if (nested_sam3_parent / "sam3" / "model_builder.py").exists():
+        candidates.insert(0, nested_sam3_parent)
+    for candidate in reversed(candidates):
+        path = str(candidate)
+        if candidate.exists() and path not in sys.path:
+            sys.path.insert(0, path)
 
 
 def _default_external_repo(backend: str) -> str | None:
@@ -393,6 +407,7 @@ def _default_external_repo(backend: str) -> str | None:
         "efficient-sam2": "external/Efficient-SAM2",
         "efficienttam": "external/EfficientTAM",
         "mobilesam": "external/MobileSAM",
+        "sam1": "external/MobileSAM",
     }
     path = defaults.get(backend)
     if path and Path(path).exists():
