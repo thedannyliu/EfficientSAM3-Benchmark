@@ -16,6 +16,7 @@ FIELDS = [
     "latency_ms",
     "callback_total_ms",
     "end_to_end_ms",
+    "tracking_fps",
     "image_encoder_ms",
     "text_encoder_ms",
     "prompt_encoder_ms",
@@ -76,9 +77,12 @@ SUMMARY_FIELDS = [
     "p95_latency_ms",
     "mean_latency_fps",
     "mean_callback_total_ms",
+    "mean_callback_fps",
     "p95_callback_total_ms",
     "mean_end_to_end_ms",
+    "mean_end_to_end_fps",
     "p95_end_to_end_ms",
+    "mean_tracking_fps",
     "mean_image_encoder_ms",
     "mean_text_encoder_ms",
     "mean_prompt_encoder_ms",
@@ -128,6 +132,7 @@ class ResultRecorderNode(Node):
             "latency_ms": data.get("latency_ms"),
             "callback_total_ms": data.get("callback_total_ms"),
             "end_to_end_ms": data.get("end_to_end_ms"),
+            "tracking_fps": data.get("tracking_fps"),
             "image_encoder_ms": data.get("image_encoder_ms"),
             "text_encoder_ms": data.get("text_encoder_ms"),
             "prompt_encoder_ms": data.get("prompt_encoder_ms"),
@@ -207,6 +212,7 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     latency = _values(rows, "latency_ms")
     callback = _values(rows, "callback_total_ms")
     end_to_end = _values(rows, "end_to_end_ms")
+    tracking_fps = _values(rows, "tracking_fps")
     image = _values(rows, "image_encoder_ms")
     text = _values(rows, "text_encoder_ms")
     prompt = _values(rows, "prompt_encoder_ms")
@@ -221,16 +227,21 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     masks = _values(rows, "mask_count")
     scores = _values(rows, "score_max")
     mean_latency = mean(latency) if latency else None
+    mean_callback = mean(callback) if callback else None
+    mean_end_to_end = mean(end_to_end) if end_to_end else None
     return {
         "frames": len(rows),
         "mean_latency_ms": mean_latency,
         "p50_latency_ms": _percentile(latency, 0.50),
         "p95_latency_ms": _percentile(latency, 0.95),
         "mean_latency_fps": 1000.0 / mean_latency if mean_latency and mean_latency > 0 else "",
-        "mean_callback_total_ms": mean(callback) if callback else "",
+        "mean_callback_total_ms": mean_callback if mean_callback else "",
+        "mean_callback_fps": 1000.0 / mean_callback if mean_callback and mean_callback > 0 else "",
         "p95_callback_total_ms": _percentile(callback, 0.95),
-        "mean_end_to_end_ms": mean(end_to_end) if end_to_end else "",
+        "mean_end_to_end_ms": mean_end_to_end if mean_end_to_end else "",
+        "mean_end_to_end_fps": 1000.0 / mean_end_to_end if mean_end_to_end and mean_end_to_end > 0 else "",
         "p95_end_to_end_ms": _percentile(end_to_end, 0.95),
+        "mean_tracking_fps": mean(tracking_fps) if tracking_fps else "",
         "mean_image_encoder_ms": mean(image) if image else "",
         "mean_text_encoder_ms": mean(text) if text else "",
         "mean_prompt_encoder_ms": mean(prompt) if prompt else "",

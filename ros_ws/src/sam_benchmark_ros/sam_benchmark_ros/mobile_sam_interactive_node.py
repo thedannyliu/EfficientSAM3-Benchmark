@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from time import perf_counter
 from typing import Any
 
@@ -26,6 +27,7 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("mask_topic", "/segmentation_mask")
         self.declare_parameter("segmented_image_topic", "/segmented_image")
         self.declare_parameter("overlay_topic", "/sam/overlay")
+        self.declare_parameter("backend", "mobilesam")
         self.declare_parameter("checkpoint_path", "checkpoints/mobilesam/mobile_sam.pt")
         self.declare_parameter("external_repo", "external/MobileSAM")
         self.declare_parameter("device", "cuda")
@@ -43,10 +45,15 @@ class MobileSamInteractiveNode(Node):
         self.latest_display: np.ndarray | None = None
         self.latest_result: dict[str, Any] = {"tracking_state": "waiting_for_click"}
         self.frame_index = 0
+        self.result_times: deque[float] = deque(maxlen=60)
+        self.backend_name = str(self.get_parameter("backend").value)
+        if self.backend_name not in {"mobilesam", "sam1"}:
+            raise ValueError("backend must be one of: mobilesam, sam1")
+        self.model_label = _model_label(self.backend_name, str(self.get_parameter("mobile_sam_model_type").value))
 
         self.backend = create_backend(
             BackendConfig(
-                backend="mobilesam",
+                backend=self.backend_name,
                 checkpoint_path=str(self.get_parameter("checkpoint_path").value),
                 device=str(self.get_parameter("device").value),
                 external_repo=str(self.get_parameter("external_repo").value),
@@ -72,7 +79,7 @@ class MobileSamInteractiveNode(Node):
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(self.window_name, self.on_mouse)
-        self.get_logger().info(f"listening on {image_topic}; click the left image to initialize MobileSAM")
+        self.get_logger().info(f"listening on {image_topic}; click the left image to initialize {self.model_label}")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
         if event != cv2.EVENT_LBUTTONDOWN or self.latest_frame is None:
@@ -93,7 +100,16 @@ class MobileSamInteractiveNode(Node):
         if prompt is None:
             mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             overlay = _status_overlay(frame, "Click left image to initialize")
-            result = self._result(msg, "waiting_for_click", "", None, 0.0, (perf_counter() - callback_start) * 1000.0)
+            callback_total_ms = (perf_counter() - callback_start) * 1000.0
+            result = self._result(
+                msg,
+                "waiting_for_click",
+                "",
+                None,
+                0.0,
+                callback_total_ms,
+                self._end_to_end_ms(msg),
+            )
         else:
             prediction_start = perf_counter()
             prediction = self.backend.predict(frame, prompt)
@@ -119,10 +135,13 @@ class MobileSamInteractiveNode(Node):
                 prompt,
                 latency_ms,
                 (perf_counter() - callback_start) * 1000.0,
+                self._end_to_end_ms(msg),
                 bbox=next_bbox,
                 prediction=prediction,
             )
-        self.latest_display = _side_by_side(frame, overlay, result)
+        self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
+        result["tracking_fps"] = self._tracking_fps()
+        self.latest_display = _side_by_side(frame, overlay, result, self.model_label)
         self._publish(msg, mask, overlay, result)
         self.frame_index += 1
 
@@ -137,7 +156,7 @@ class MobileSamInteractiveNode(Node):
             self.pending_point = None
             self.tracking_bbox = None
             self.latest_result = {"tracking_state": "waiting_for_click"}
-            self.get_logger().info("reset MobileSAM tracking state")
+            self.get_logger().info(f"reset {self.model_label} tracking state")
 
     def _next_prompt(self) -> Prompt | None:
         if self.pending_point is not None:
@@ -156,6 +175,7 @@ class MobileSamInteractiveNode(Node):
         prompt: Prompt | None,
         latency_ms: float,
         callback_total_ms: float,
+        end_to_end_ms: float,
         bbox: tuple[float, float, float, float] | None = None,
         prediction: object | None = None,
     ) -> dict[str, Any]:
@@ -166,7 +186,7 @@ class MobileSamInteractiveNode(Node):
             "frame_index": self.frame_index,
             "stamp": {"sec": msg.header.stamp.sec, "nanosec": msg.header.stamp.nanosec},
             "frame_id": msg.header.frame_id,
-            "backend": "mobilesam",
+            "backend": self.backend_name,
             "tracking_state": state,
             "prompt_mode": prompt_mode,
             "point_x": point[0] if point else "",
@@ -177,6 +197,7 @@ class MobileSamInteractiveNode(Node):
             "box_y2": bbox[3] if bbox else "",
             "latency_ms": latency_ms,
             "callback_total_ms": callback_total_ms,
+            "end_to_end_ms": end_to_end_ms,
             "mask_count": _safe_len(getattr(prediction, "masks", None)),
             "box_count": 1 if bbox else 0,
             "score_max": float(scores.max()) if scores.size else None,
@@ -196,18 +217,32 @@ class MobileSamInteractiveNode(Node):
             self.overlay_publisher.publish(overlay_msg)
         self.result_publisher.publish(String(data=json.dumps(result)))
 
+    def _end_to_end_ms(self, msg: Image) -> float:
+        now_msg = self.get_clock().now().to_msg()
+        return _stamp_delta_ms(msg.header.stamp.sec, msg.header.stamp.nanosec, now_msg.sec, now_msg.nanosec)
+
+    def _tracking_fps(self) -> float | str:
+        if len(self.result_times) < 2:
+            return ""
+        duration = self.result_times[-1] - self.result_times[0]
+        if duration <= 0:
+            return ""
+        return (len(self.result_times) - 1) / duration
+
     def destroy_node(self) -> bool:
         cv2.destroyAllWindows()
         return super().destroy_node()
 
 
-def _side_by_side(frame_rgb: np.ndarray, overlay_rgb: np.ndarray, result: dict[str, Any]) -> np.ndarray:
+def _side_by_side(
+    frame_rgb: np.ndarray, overlay_rgb: np.ndarray, result: dict[str, Any], model_label: str
+) -> np.ndarray:
     if frame_rgb.shape[:2] != overlay_rgb.shape[:2]:
         overlay_rgb = cv2.resize(overlay_rgb, (frame_rgb.shape[1], frame_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
     combined = np.hstack([frame_rgb, overlay_rgb])
     combined_bgr = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
     _draw_text(combined_bgr, "Original - click here", (16, 32))
-    _draw_text(combined_bgr, "MobileSAM mask", (frame_rgb.shape[1] + 16, 32))
+    _draw_text(combined_bgr, f"{model_label} mask", (frame_rgb.shape[1] + 16, 32))
     _draw_metrics(combined_bgr, frame_rgb.shape[1] + 16, 64, result)
     return combined_bgr
 
@@ -222,8 +257,10 @@ def _draw_metrics(image_bgr: np.ndarray, x: int, y: int, result: dict[str, Any])
     lines = [
         f"State: {result.get('tracking_state', 'n/a')}",
         f"Prompt: {result.get('prompt_mode') or 'n/a'}",
+        f"FPS: {_format_float(result.get('tracking_fps'))}",
         f"Latency: {_format_float(result.get('latency_ms'))} ms",
         f"Callback: {_format_float(result.get('callback_total_ms'))} ms",
+        f"End-to-end: {_format_float(result.get('end_to_end_ms'))} ms",
         f"CUDA: {_format_float(result.get('cuda_allocated_mb'))} MB",
     ]
     cv2.rectangle(image_bgr, (x - 8, y - 22), (x + 360, y + 24 * len(lines)), (0, 0, 0), -1)
@@ -256,6 +293,18 @@ def _safe_len(value: object) -> int:
         return len(value)  # type: ignore[arg-type]
     except TypeError:
         return 0
+
+
+def _stamp_delta_ms(start_sec: int, start_nanosec: int, end_sec: int, end_nanosec: int) -> float:
+    start_ns = start_sec * 1_000_000_000 + start_nanosec
+    end_ns = end_sec * 1_000_000_000 + end_nanosec
+    return (end_ns - start_ns) / 1_000_000.0
+
+
+def _model_label(backend_name: str, model_type: str) -> str:
+    if backend_name == "sam1":
+        return f"SAM1-{model_type.removeprefix('vit_').upper()}"
+    return "MobileSAM"
 
 
 def main() -> None:

@@ -24,9 +24,24 @@ the physical camera as the image source.
 Supported Terminal B backends in this guide:
 
 ```text
-SAM3 reference:
+SAM3 reference per-frame text segmentation:
   backend=sam3
   checkpoint_path=checkpoints/sam3/sam3.pt
+
+SAM3 native clip tracking:
+  node=sam3_native_clip_node
+  checkpoint_path=checkpoints/sam3/sam3.pt
+  prompt=monitor
+
+MobileSAM live bbox-chain tracking:
+  node=mobile_sam_interactive_node
+  backend=mobilesam
+  checkpoint_path=checkpoints/mobilesam/mobile_sam.pt
+
+SAM1-H live bbox-chain tracking:
+  node=mobile_sam_interactive_node
+  backend=sam1
+  checkpoint_path=checkpoints/mobilesam/sam_vit_h_4b8939.pth
 
 Distilled RepViT-S EfficientSAM3:
   backend=efficientsam3
@@ -38,6 +53,24 @@ YOLOE open-vocabulary segmentation:
   node=yoloe_text_backend_node
   weights=checkpoints/yoloe/yoloe-26m-seg.pt
   prompt=monitor
+```
+
+Camera-stream support matrix:
+
+```text
+MobileSAM:
+  live interactive point prompt -> mask -> bbox -> next-frame box prompt
+  overlay window shows FPS, backend latency, callback latency, and end-to-end latency
+
+SAM1-H:
+  same live interactive bbox-chain path as MobileSAM, with backend=sam1 and vit_h weights
+  overlay window shows FPS, backend latency, callback latency, and end-to-end latency
+
+SAM3:
+  live ROS camera path uses per-frame text-prompt segmentation through sam_backend_node
+  native video tracking uses sam3_native_clip_node, which first captures a fixed
+  camera clip, materializes it as a frame folder, then starts the native SAM3
+  tracking session
 ```
 
 If you are already inside `~/EfficientSAM3-Benchmark`, skip repeated
@@ -169,6 +202,7 @@ Expected entries include:
 camera_stream_node
 live_viewer_node
 mobile_sam_interactive_node
+sam3_native_clip_node
 video_stream_node
 sam_backend_node
 result_recorder_node
@@ -226,6 +260,32 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
+Terminal B option 1b, run SAM3 native tracking on a fixed camera/video clip.
+Start Terminal C and the recorder terminals before this command if you want to
+see and save every published tracking frame:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+This node first captures `clip_frames` frames, then starts SAM3 native video
+tracking on the materialized frame folder. The reported end-to-end latency
+therefore includes capture time plus native tracking time; use it separately
+from the per-frame live SAM3 numbers above.
+
 Terminal B option 2, run the distilled RepViT-S EfficientSAM3 checkpoint on the
 same incoming ROS frames:
 
@@ -251,8 +311,8 @@ The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. Use either the SAM3 command or this
 RepViT-S command for Terminal B, not both at the same time.
 
-Terminal B option 3, run interactive MobileSAM on the same incoming ROS video
-frames:
+Terminal B option 3, run interactive MobileSAM bbox-chain tracking on the same
+incoming ROS video frames:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -260,6 +320,7 @@ source scripts/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/image \
+  -p backend:=mobilesam \
   -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
   -p external_repo:=external/MobileSAM \
   -p device:=cuda \
@@ -274,7 +335,32 @@ For MobileSAM, click the left side of the MobileSAM window to initialize the
 point prompt. Later frames use the previous mask bounding box as the next box
 prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
 
-Terminal B option 4, run YOLOE open-vocabulary segmentation with a text prompt
+Terminal B option 4, run SAM1-H bbox-chain tracking with the same interactive
+node:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
+  -p backend:=sam1 \
+  -p checkpoint_path:=checkpoints/mobilesam/sam_vit_h_4b8939.pth \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_h \
+  -p window_name:="SAM1-H ROS Video" \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For SAM1-H, click the left side of the SAM1-H window to initialize the point
+prompt. Later frames use the previous mask bounding box as the next box prompt.
+Press `r` to reset tracking, or `q`/`Esc` to exit.
+
+Terminal B option 5, run YOLOE open-vocabulary segmentation with a text prompt
 on the same incoming ROS frames:
 
 ```bash
@@ -299,7 +385,8 @@ ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
 YOLOE is the text-prompt YOLO path in this repo. It runs per-frame
 open-vocabulary segmentation, not video tracking.
 
-For SAM3, RepViT-S, or YOLOE, Terminal C opens the live side-by-side viewer:
+For SAM3 per-frame, SAM3 native clip tracking, RepViT-S, or YOLOE, Terminal C
+opens the live side-by-side viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -311,11 +398,11 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json
 ```
 
-Skip Terminal C when using MobileSAM because `mobile_sam_interactive_node`
-already opens the interactive side-by-side window. The viewer overlays FPS,
-per-frame backend latency, callback/end-to-end latency, CUDA memory, and Jetson
-GPU utilization when `tegrastats` is available. Press `q` or `Esc` in the viewer
-window to close it.
+Skip Terminal C when using MobileSAM or SAM1-H because
+`mobile_sam_interactive_node` already opens the interactive side-by-side window.
+The viewer overlays FPS, per-frame backend latency, callback/end-to-end latency,
+CUDA memory, and Jetson GPU utilization when `tegrastats` is available. Press
+`q` or `Esc` in the viewer window to close it.
 
 Verify the output topics:
 
@@ -329,7 +416,7 @@ ros2 topic echo /sam/result_json --once
 Use `videos/test2.mov` or another local video path by changing
 `video_path:=...`.
 
-## 5. Run SAM3, EfficientSAM3, YOLOE, Or MobileSAM RealSense Stream
+## 5. Run SAM3, EfficientSAM3, YOLOE, MobileSAM, Or SAM1-H RealSense Stream
 
 Use this path for the Intel RealSense D455f hardware demo. The D455f is used as
 an RGB ROS camera source in v1; depth is intentionally disabled.
@@ -384,6 +471,32 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
+Terminal B option 1b, run SAM3 native tracking on a fixed RealSense RGB clip.
+Start Terminal C and the recorder terminals before this command if you want to
+see and save every published tracking frame:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+This is SAM3's native tracking mode on a materialized camera clip. It is not an
+unbounded online tracker; the upstream SAM3 predictor starts from a video or
+frame folder, so this node captures the clip first and publishes tracking
+results after propagation begins.
+
 Terminal B option 2, run EfficientSAM3 text-prompt segmentation on the same
 RealSense RGB stream:
 
@@ -432,8 +545,8 @@ ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For SAM3, EfficientSAM3, or YOLOE, Terminal C opens the live side-by-side
-viewer:
+For SAM3 per-frame, SAM3 native clip tracking, EfficientSAM3, or YOLOE,
+Terminal C opens the live side-by-side viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -445,7 +558,7 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json
 ```
 
-Terminal B option 4, run the interactive MobileSAM node:
+Terminal B option 4, run interactive MobileSAM bbox-chain tracking:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -453,6 +566,7 @@ source scripts/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
+  -p backend:=mobilesam \
   -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
   -p external_repo:=external/MobileSAM \
   -p device:=cuda \
@@ -463,11 +577,31 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-The MobileSAM window shows its own side-by-side view, so do not start Terminal C
-when using this option:
+Terminal B option 5, run SAM1-H bbox-chain tracking:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p backend:=sam1 \
+  -p checkpoint_path:=checkpoints/mobilesam/sam_vit_h_4b8939.pth \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_h \
+  -p window_name:="SAM1-H RealSense" \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+The MobileSAM/SAM1-H window shows its own side-by-side view, so do not start
+Terminal C when using these options:
 
 ```text
-left: live RealSense RGB frame     right: MobileSAM mask overlay
+left: live RealSense RGB frame     right: MobileSAM or SAM1-H mask overlay
 ```
 
 Controls:
@@ -481,8 +615,8 @@ q or Esc: exit
 Tracking behavior:
 
 ```text
-first click -> MobileSAM point prompt
-next frames -> previous mask bbox becomes the next MobileSAM box prompt
+first click -> point prompt
+next frames -> previous mask bbox becomes the next box prompt
 new click -> reset and track the clicked object
 empty mask -> tracking lost until the next click
 ```
@@ -591,7 +725,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p checkpoint_path:=checkpoints/sam3/sam3.pt \
   -p device:=cuda \
   -p prompt_mode:=text \
-  -p prompt:=person \
+  -p prompt:=monitor \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
@@ -615,7 +749,54 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p max_frames:=300
 ```
 
-## 9. Run EfficientSAM3 Text-Prompt Camera Benchmark
+## 9. Run SAM3 Native Clip Tracking Camera Benchmark
+
+Stop the per-frame SAM3 backend. Keep the camera publisher running. Start the
+recorder terminals before Terminal B because `sam3_native_clip_node` publishes
+after it finishes capturing the clip.
+
+Terminal C, record native tracking results:
+
+```bash
+mkdir -p results/thor/ros_camera/sam3_native_clip overlays/thor/ros_camera/sam3_native_clip
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p csv_output:=results/thor/ros_camera/sam3_native_clip/results.csv \
+  -p summary_output:=results/thor/ros_camera/sam3_native_clip/summary.csv \
+  -p max_messages:=120
+```
+
+Terminal D, record native tracking overlays:
+
+```bash
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/sam3_native_clip/overlay.mp4 \
+  -p fps:=30.0 \
+  -p max_frames:=120
+```
+
+Terminal B, capture a 120-frame camera clip and run SAM3 native tracking:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+This is the SAM3 native tracking path. Do not compare its end-to-end latency
+directly against per-frame live backends unless you explicitly want the
+capture-then-track delay included.
+
+## 10. Run EfficientSAM3 Text-Prompt Camera Benchmark
 
 EfficientSAM3 weak image / weak text:
 
@@ -631,7 +812,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p text_encoder_context_length:=16 \
   -p text_encoder_pos_embed_table_size:=16 \
   -p prompt_mode:=text \
-  -p prompt:=person \
+  -p prompt:=monitor \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
@@ -708,7 +889,7 @@ results/thor/ros_camera/es3p1_weak_image_weak_text/
 overlays/thor/ros_camera/es3p1_weak_image_weak_text/
 ```
 
-## 10. Run Point-Prompt Camera Benchmarks
+## 11. Run Point-Prompt And Bbox-Chain Camera Benchmarks
 
 Point prompt is fixed relative to the incoming image when `point_normalized` is
 true. `point_x:=0.5 -p point_y:=0.5` means the center of the frame.
@@ -773,27 +954,91 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-MobileSAM:
+MobileSAM bbox-chain tracking:
+
+Terminal C, record results:
 
 ```bash
-ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+mkdir -p results/thor/ros_camera/mobilesam_bbox_chain overlays/thor/ros_camera/mobilesam_bbox_chain
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p csv_output:=results/thor/ros_camera/mobilesam_bbox_chain/results.csv \
+  -p summary_output:=results/thor/ros_camera/mobilesam_bbox_chain/summary.csv \
+  -p max_messages:=300
+```
+
+Terminal D, record overlays:
+
+```bash
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/mobilesam_bbox_chain/overlay.mp4 \
+  -p fps:=30.0 \
+  -p max_frames:=300
+```
+
+Terminal B, run the bbox-chain node:
+
+```bash
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
   -p backend:=mobilesam \
-  -p external_repo:=external/MobileSAM \
   -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
+  -p external_repo:=external/MobileSAM \
   -p mobile_sam_model_type:=vit_t \
   -p device:=cuda \
-  -p prompt_mode:=point \
-  -p point_x:=0.5 \
-  -p point_y:=0.5 \
-  -p point_normalized:=true \
-  -p image_topic:=/image \
+  -p window_name:="MobileSAM Camera" \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image
 ```
 
-## 11. Read The ROS Profiling Output
+SAM1-H bbox-chain tracking:
+
+Terminal C, record results:
+
+```bash
+mkdir -p results/thor/ros_camera/sam1_h_bbox_chain overlays/thor/ros_camera/sam1_h_bbox_chain
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p csv_output:=results/thor/ros_camera/sam1_h_bbox_chain/results.csv \
+  -p summary_output:=results/thor/ros_camera/sam1_h_bbox_chain/summary.csv \
+  -p max_messages:=300
+```
+
+Terminal D, record overlays:
+
+```bash
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/sam1_h_bbox_chain/overlay.mp4 \
+  -p fps:=30.0 \
+  -p max_frames:=300
+```
+
+Terminal B, run the bbox-chain node:
+
+```bash
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
+  -p backend:=sam1 \
+  -p checkpoint_path:=checkpoints/mobilesam/sam_vit_h_4b8939.pth \
+  -p external_repo:=external/MobileSAM \
+  -p mobile_sam_model_type:=vit_h \
+  -p device:=cuda \
+  -p window_name:="SAM1-H Camera" \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+For MobileSAM and SAM1-H, click the left side of the model window once to
+initialize tracking. The node records the first prompt as a point prompt and
+uses the previous predicted mask bbox as the next frame's box prompt.
+
+## 12. Read The ROS Profiling Output
 
 Per-frame CSV:
 
@@ -813,6 +1058,7 @@ Important fields:
 latency_ms                 backend.predict() latency
 callback_total_ms          full ROS callback including conversion and overlay publish
 end_to_end_ms              image timestamp to result publish timestamp
+tracking_fps               rolling publish/tracking FPS when emitted by the backend node
 image_encoder_ms
 text_encoder_ms
 prompt_encoder_ms
@@ -826,13 +1072,17 @@ params_*
 weight_*_bytes
 ```
 
+Summary CSV also reports `mean_latency_fps`, `mean_callback_fps`,
+`mean_end_to_end_fps`, and `mean_tracking_fps` when the source rows contain the
+needed timing fields.
+
 Overlay MP4:
 
 ```text
 overlays/thor/ros_camera/<model>/overlay.mp4
 ```
 
-## 12. Benchmark Checklist
+## 13. Benchmark Checklist
 
 For each ROS camera run, record:
 
@@ -849,6 +1099,7 @@ summary CSV path
 overlay MP4 path
 mean/p95 callback_total_ms
 mean/p95 end_to_end_ms
+mean_callback_fps, mean_end_to_end_fps, and mean_tracking_fps when present
 CUDA peak memory
 params_total and weight_total_bytes
 ```

@@ -168,7 +168,7 @@ class SamBackendNode(Node):
 
     def _resolve_prompt_mode(self, value: str) -> str:
         if value == "auto":
-            if self.backend_name in {"sam2", "efficient-sam2", "efficienttam", "mobilesam"}:
+            if self.backend_name in {"sam1", "sam2", "efficient-sam2", "efficienttam", "mobilesam"}:
                 return "point"
             return "text"
         if value not in {"text", "point"}:

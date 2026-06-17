@@ -23,6 +23,7 @@ setup(
             "mobile_sam_interactive_node = sam_benchmark_ros.mobile_sam_interactive_node:main",
             "overlay_video_recorder_node = sam_benchmark_ros.overlay_video_recorder_node:main",
             "result_recorder_node = sam_benchmark_ros.result_recorder_node:main",
+            "sam3_native_clip_node = sam_benchmark_ros.sam3_native_clip_node:main",
             "sam_backend_node = sam_benchmark_ros.sam_backend_node:main",
             "video_stream_node = sam_benchmark_ros.video_stream_node:main",
             "yoloe_text_backend_node = sam_benchmark_ros.yoloe_text_backend_node:main",
