@@ -15,7 +15,20 @@ export THOR_ROS_SETUP="${THOR_ROS_SETUP:-/opt/ros/jazzy/setup.bash}"
 export THOR_VENV="${THOR_VENV:-${HOME}/venvs/effisam3_venv_ros}"
 export SAM3_SOURCE="${SAM3_SOURCE:-${HOME}/efficientsam3/sam3}"
 
-source "${THOR_ROS_SETUP}"
+_source_without_nounset() {
+  local setup_file="$1"
+  local had_nounset=0
+  if [[ $- == *u* ]]; then
+    had_nounset=1
+    set +u
+  fi
+  source "${setup_file}"
+  if [[ "${had_nounset}" == "1" ]]; then
+    set -u
+  fi
+}
+
+_source_without_nounset "${THOR_ROS_SETUP}"
 source "${THOR_VENV}/bin/activate"
 
 _venv_site="$("${THOR_VENV}/bin/python" - <<'PY'
@@ -43,8 +56,9 @@ fi
 _prepend_pythonpath "${_repo_root}"
 
 if [[ -f "${_repo_root}/ros_ws/install/setup.bash" ]]; then
-  source "${_repo_root}/ros_ws/install/setup.bash"
+  _source_without_nounset "${_repo_root}/ros_ws/install/setup.bash"
 fi
 
+unset -f _source_without_nounset
 unset -f _prepend_pythonpath
 unset _script_dir _repo_root _venv_site
