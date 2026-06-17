@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 
 from sam_backend.backends import Prompt
-from sam_backend.profile_saco_stream import BBoxChainState, _decode_uncompressed_rle, profile_saco_stream
+from sam_backend.profile_saco_stream import BBoxChainState, _decode_uncompressed_rle, _initial_prompt_frame_index, profile_saco_stream
 from sam_backend.saco_manifest import build_saco_veval_manifest
 from sam_backend.saco_stream_suite import run_suite
 
@@ -74,17 +74,36 @@ class SacoStreamTests(unittest.TestCase):
     def test_bbox_chain_uses_initial_prompt_then_box(self) -> None:
         state = BBoxChainState(initial_prompt=Prompt(points=[(2.0, 3.0)], labels=[1]), bbox_min_area=1)
 
-        prompt, mode = state.next_prompt()
+        prompt, mode = state.next_prompt(0)
         self.assertEqual(mode, "point")
         self.assertEqual(prompt.points, [(2.0, 3.0)])
 
         mask = np.zeros((5, 6), dtype=np.uint8)
         mask[1:4, 2:5] = 1
         state.update([mask], mask.shape)
-        prompt, mode = state.next_prompt()
+        prompt, mode = state.next_prompt(1)
 
         self.assertEqual(mode, "box")
         self.assertEqual(prompt.boxes, [(2.0, 1.0, 4.0, 3.0)])
+
+    def test_bbox_chain_can_delay_initial_prompt_until_visible_gt(self) -> None:
+        mask = np.zeros((5, 6), dtype=np.uint8)
+        mask[1:4, 2:5] = 1
+        state = BBoxChainState(
+            initial_prompt=Prompt(points=[(3.0, 2.0)], labels=[1]),
+            bbox_min_area=1,
+            initial_prompt_frame_index=2,
+        )
+
+        prompt, mode = state.next_prompt(0)
+        self.assertIsNone(prompt)
+        self.assertEqual(mode, "pre_prompt")
+
+        prompt, mode = state.next_prompt(2)
+        self.assertEqual(mode, "point")
+        self.assertEqual(prompt.points, [(3.0, 2.0)])
+
+        self.assertEqual(_initial_prompt_frame_index("point", {2: mask}, 4, {"source_id": "sample"}), 2)
 
     def test_uncompressed_rle_decode(self) -> None:
         decoded = _decode_uncompressed_rle([2, 3, 7], (3, 4))

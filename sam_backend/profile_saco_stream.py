@@ -93,10 +93,13 @@ SUMMARY_FIELDS = [
 class BBoxChainState:
     initial_prompt: Prompt
     bbox_min_area: int = 25
+    initial_prompt_frame_index: int = 0
     tracking_bbox: tuple[float, float, float, float] | None = None
     used_initial_prompt: bool = False
 
-    def next_prompt(self) -> tuple[Prompt | None, str]:
+    def next_prompt(self, frame_index: int) -> tuple[Prompt | None, str]:
+        if frame_index < self.initial_prompt_frame_index:
+            return None, "pre_prompt"
         if not self.used_initial_prompt:
             self.used_initial_prompt = True
             if self.initial_prompt.text:
@@ -217,9 +220,15 @@ def _profile_bbox_chain_source(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
     frame_paths = _frame_paths(item, args.max_frames)
     gt_masks = _gt_masks_by_frame(item)
-    first_gt = gt_masks.get(0)
-    initial_prompt = _initial_prompt(args, item, first_gt)
-    state = BBoxChainState(initial_prompt=initial_prompt, bbox_min_area=args.bbox_min_area)
+    prompt_type = _resolved_prompt_type(args)
+    prompt_frame_index = _initial_prompt_frame_index(prompt_type, gt_masks, len(frame_paths), item)
+    prompt_gt = gt_masks.get(prompt_frame_index)
+    initial_prompt = _initial_prompt(args, item, prompt_gt, prompt_type)
+    state = BBoxChainState(
+        initial_prompt=initial_prompt,
+        bbox_min_area=args.bbox_min_area,
+        initial_prompt_frame_index=prompt_frame_index,
+    )
 
     writer = None
     overlay_video = ""
@@ -229,7 +238,7 @@ def _profile_bbox_chain_source(
     try:
         for frame_offset, frame_path in enumerate(frame_paths):
             frame_rgb = _read_rgb(frame_path)
-            prompt, prompt_mode = state.next_prompt()
+            prompt, prompt_mode = state.next_prompt(frame_offset)
             prediction = Prediction(masks=[], boxes=[], scores=[], latency_ms=0.0, metadata={})
             profile = {}
             callback_start = perf_counter()
@@ -460,14 +469,36 @@ def _profile_native_sam3_source(args: argparse.Namespace, item: dict[str, Any], 
     return rows, _pred_entries_for_item(item, pred_masks, pred_scores), overlay_video
 
 
-def _initial_prompt(args: argparse.Namespace, item: dict[str, Any], gt_mask: np.ndarray | None) -> Prompt:
+def _resolved_prompt_type(args: argparse.Namespace) -> str:
     prompt_type = args.prompt_type
     if prompt_type == "auto":
         prompt_type = "point" if args.backend in {"mobilesam", "sam1", "sam2", "efficient-sam2", "efficienttam"} else "text"
+    return prompt_type
+
+
+def _initial_prompt_frame_index(
+    prompt_type: str,
+    gt_masks: dict[int, np.ndarray],
+    frame_count: int,
+    item: dict[str, Any],
+) -> int:
+    if prompt_type == "text":
+        return 0
+    for frame_idx in sorted(gt_masks):
+        if frame_idx >= frame_count:
+            break
+        mask = gt_masks[frame_idx]
+        if mask is not None and bool(mask.any()):
+            return frame_idx
+    raise ValueError(f"point prompt requested for {item['source_id']} but no GT mask is available in the profiled frames")
+
+
+def _initial_prompt(args: argparse.Namespace, item: dict[str, Any], gt_mask: np.ndarray | None, prompt_type: str | None = None) -> Prompt:
+    prompt_type = prompt_type or _resolved_prompt_type(args)
     if prompt_type == "text":
         return Prompt(text=item.get("text_prompt") or item.get("noun_phrase") or args.prompt)
     if gt_mask is None:
-        raise ValueError(f"point prompt requested for {item['source_id']} but no first-frame GT mask is available")
+        raise ValueError(f"point prompt requested for {item['source_id']} but no prompt-frame GT mask is available")
     return Prompt(points=[_mask_centroid(gt_mask)], labels=[1])
 
 
