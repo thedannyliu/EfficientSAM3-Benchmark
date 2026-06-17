@@ -102,6 +102,12 @@ The old `sav_val_fixed10` subset is useful for smoke tests, but it is not
 enough for the default fixed20 SA-Co/VEval benchmark unless all selected videos
 happen to overlap.
 
+If `SAV_JPEG_ROOT` is not provided and `data/media/saco_sav/JPEGImages_24fps`
+does not exist yet, the setup script downloads the official SA-V split archive
+and extracts only the videos selected by the SA-Co fixed manifest. The archive
+is cached under `data/sa-v/_archives` while extracting and removed afterward
+unless `KEEP_SAV_ARCHIVE=1` is set.
+
 If you intentionally want assets outside the repo, set `SAM_BENCH_SCRATCH` to
 that external root before running the setup script. This is optional on Thor.
 If an old shell still exports an unwritable `/storage/...` path, clear it first:
@@ -118,7 +124,8 @@ The setup/download scripts also fall back to the repo-local asset root when
 The setup script reuses the active Thor venv, installs only missing Python
 packages without replacing Jetson PyTorch, downloads the new stream benchmark
 assets, downloads SA-Co/VEval-SAV annotations, builds a fixed manifest, and
-runs a null-backend smoke test with overlay output.
+downloads the selected SA-V frames if needed, then runs a null-backend smoke
+test with overlay output.
 
 ```bash
 bash scripts/setup_thor_saco_stream_benchmark.sh
@@ -136,6 +143,7 @@ SAV_JPEG_ROOT=/path/to/existing/JPEGImages_24fps
 INSTALL_DEPS=1
 DOWNLOAD_ASSETS=1
 DOWNLOAD_SACO_ANNOTATION=1
+DOWNLOAD_SACO_MEDIA=1
 PREPARE_MANIFEST=1
 RUN_NULL_SMOKE=1
 ```

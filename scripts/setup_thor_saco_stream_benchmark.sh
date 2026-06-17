@@ -18,6 +18,7 @@ export SAM3_SOURCE="${SAM3_SOURCE:-${HOME}/efficientsam3/sam3}"
 INSTALL_DEPS="${INSTALL_DEPS:-1}"
 DOWNLOAD_ASSETS="${DOWNLOAD_ASSETS:-1}"
 DOWNLOAD_SACO_ANNOTATION="${DOWNLOAD_SACO_ANNOTATION:-1}"
+DOWNLOAD_SACO_MEDIA="${DOWNLOAD_SACO_MEDIA:-1}"
 PREPARE_MANIFEST="${PREPARE_MANIFEST:-1}"
 RUN_NULL_SMOKE="${RUN_NULL_SMOKE:-1}"
 RUN_SUITE="${RUN_SUITE:-0}"
@@ -74,29 +75,40 @@ if [[ "${DOWNLOAD_SACO_ANNOTATION}" == "1" && ! -f "${SACO_ANNOTATION}" ]]; then
     --local-dir "${SAM_BENCH_SCRATCH}/data"
 fi
 
-if [[ ! -d "${SACO_SAV_MEDIA_ROOT}" ]]; then
-  if [[ -n "${SAV_JPEG_ROOT:-}" && -d "${SAV_JPEG_ROOT}" ]]; then
-    mkdir -p "$(dirname "${SACO_SAV_MEDIA_ROOT}")"
-    ln -sfn "${SAV_JPEG_ROOT}" "${SACO_SAV_MEDIA_ROOT}"
-  elif [[ -d "data/sa-v/sav_${SACO_SPLIT}/JPEGImages_24fps" ]]; then
-    mkdir -p "$(dirname "${SACO_SAV_MEDIA_ROOT}")"
-    ln -sfn "${repo_root}/data/sa-v/sav_${SACO_SPLIT}/JPEGImages_24fps" "${SACO_SAV_MEDIA_ROOT}"
-  else
-    cat >&2 <<EOF
+if [[ "${PREPARE_MANIFEST}" == "1" ]]; then
+  if [[ ! -d "${SACO_SAV_MEDIA_ROOT}" ]]; then
+    if [[ -n "${SAV_JPEG_ROOT:-}" && -d "${SAV_JPEG_ROOT}" ]]; then
+      mkdir -p "$(dirname "${SACO_SAV_MEDIA_ROOT}")"
+      ln -sfn "${SAV_JPEG_ROOT}" "${SACO_SAV_MEDIA_ROOT}"
+    elif [[ -d "data/sa-v/sav_${SACO_SPLIT}/JPEGImages_24fps" ]]; then
+      mkdir -p "$(dirname "${SACO_SAV_MEDIA_ROOT}")"
+      ln -sfn "${repo_root}/data/sa-v/sav_${SACO_SPLIT}/JPEGImages_24fps" "${SACO_SAV_MEDIA_ROOT}"
+    elif [[ "${DOWNLOAD_SACO_MEDIA}" == "1" ]]; then
+      sam-prepare-saco-veval-sav-subset \
+        --annotation "${SACO_ANNOTATION}" \
+        --media-root "${SACO_SAV_MEDIA_ROOT}" \
+        --count "${SACO_COUNT}" \
+        --seed "${SACO_SEED}" \
+        --output "${SACO_MANIFEST}"
+      bash scripts/download_saco_sav_media.sh "${SACO_MANIFEST}" "${SACO_SAV_MEDIA_ROOT}" "${SACO_SPLIT}"
+    else
+      cat >&2 <<EOF
 ERROR: SA-Co/VEval-SAV media root is missing:
   ${SACO_SAV_MEDIA_ROOT}
 
-Provide the full merged SA-V JPEGImages_24fps root with:
+Either let the setup script download the selected SA-V frames:
+  DOWNLOAD_SACO_MEDIA=1 bash scripts/setup_thor_saco_stream_benchmark.sh
+
+Or provide an existing JPEGImages_24fps root:
   SAV_JPEG_ROOT=/path/to/JPEGImages_24fps bash scripts/setup_thor_saco_stream_benchmark.sh
 
 The fixed10 SA-V subset is not enough for a 20-video SA-Co/VEval manifest unless
 the selected SA-Co videos happen to overlap.
 EOF
-    exit 2
+      exit 2
+    fi
   fi
-fi
 
-if [[ "${PREPARE_MANIFEST}" == "1" ]]; then
   sam-prepare-saco-veval-sav-subset \
     --annotation "${SACO_ANNOTATION}" \
     --media-root "${SACO_SAV_MEDIA_ROOT}" \
