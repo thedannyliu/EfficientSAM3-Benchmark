@@ -66,6 +66,7 @@ SUMMARY_FIELDS = [
     "backend",
     "stream_mode",
     "sources",
+    "eval_start_frame",
     "frames",
     "positive_frames",
     "mean_iou",
@@ -148,7 +149,7 @@ def profile_saco_stream(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.pred_json:
         args.pred_json.write_text(json.dumps(pred_entries) + "\n", encoding="utf-8")
-    official_eval_json = _run_official_eval(args) if args.pred_json and args.gt_annotation_file and args.official_eval_json else ""
+    official_eval_json = _run_official_eval(args, frame_rows) if args.pred_json and args.gt_annotation_file and args.official_eval_json else ""
 
     summary_rows = [_summary_row(args, frame_rows, overlay_videos, params, memory, official_eval_json)]
     summary_csv = args.csv_output.with_name(args.csv_output.stem + "_summary.csv")
@@ -166,6 +167,7 @@ def profile_saco_stream(args: argparse.Namespace) -> dict[str, Any]:
         "pred_json": str(args.pred_json) if args.pred_json else "",
         "official_eval_json": official_eval_json,
         "sources": len({row["source_id"] for row in frame_rows}),
+        "eval_start_frame": _eval_start_frame(frame_rows),
         "frames": len(frame_rows),
         "mean_iou": _mean([row["iou"] for row in frame_rows]),
         "effective_fps": _fps(_mean([row["callback_total_ms"] for row in frame_rows])),
@@ -227,7 +229,6 @@ def _profile_bbox_chain_source(
     state = BBoxChainState(
         initial_prompt=initial_prompt,
         bbox_min_area=args.bbox_min_area,
-        initial_prompt_frame_index=prompt_frame_index,
     )
 
     writer = None
@@ -236,7 +237,7 @@ def _profile_bbox_chain_source(
     pred_masks: list[np.ndarray | None] = []
     pred_scores: list[float] = []
     try:
-        for frame_offset, frame_path in enumerate(frame_paths):
+        for frame_offset, frame_path in enumerate(frame_paths[prompt_frame_index:], start=prompt_frame_index):
             frame_rgb = _read_rgb(frame_path)
             prompt, prompt_mode = state.next_prompt(frame_offset)
             prediction = Prediction(masks=[], boxes=[], scores=[], latency_ms=0.0, metadata={})
@@ -354,7 +355,9 @@ def _profile_native_sam2_source(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
     frame_dir = _materialize_frame_dir(item)
     gt_masks = _gt_masks_by_frame(item)
-    point = _mask_centroid(gt_masks.get(0)) if gt_masks.get(0) is not None else (0.5 * item["width"], 0.5 * item["height"])
+    frame_count = len(_frame_paths(item, args.max_frames))
+    prompt_frame_index = _initial_prompt_frame_index("point", gt_masks, frame_count, item)
+    point = _mask_centroid(gt_masks[prompt_frame_index])
     rows = []
     pred_masks: list[np.ndarray | None] = []
     pred_scores: list[float] = []
@@ -366,13 +369,14 @@ def _profile_native_sam2_source(
         sync_fn(torch_module)
         predictor.add_new_points_or_box(
             inference_state=state,
-            frame_idx=0,
+            frame_idx=prompt_frame_index,
             obj_id=1,
             points=np.asarray([point], dtype=np.float32),
             labels=np.asarray([1], dtype=np.int32),
         )
-        iterator = predictor.propagate_in_video(state, start_frame_idx=0, max_frame_num_to_track=args.max_frames or None)
-        for _ in range(args.max_frames if args.max_frames > 0 else len(item["file_names"])):
+        max_to_track = (frame_count - prompt_frame_index) if args.max_frames > 0 else None
+        iterator = predictor.propagate_in_video(state, start_frame_idx=prompt_frame_index, max_frame_num_to_track=max_to_track)
+        for _ in range(max_to_track if max_to_track is not None else len(item["file_names"])):
             start = perf_counter()
             try:
                 frame_idx, out_obj_ids, out_mask_logits = next(iterator)
@@ -541,6 +545,7 @@ def _summary_row(args: argparse.Namespace, rows: list[dict[str, Any]], overlays:
         "backend": args.backend,
         "stream_mode": args.stream_mode,
         "sources": len({row["source_id"] for row in rows}),
+        "eval_start_frame": _eval_start_frame(rows),
         "frames": len(rows),
         "positive_frames": sum(1 for row in rows if row.get("is_positive")),
         "mean_iou": _mean(ious),
@@ -564,8 +569,16 @@ def _summary_row(args: argparse.Namespace, rows: list[dict[str, Any]], overlays:
     }
 
 
-def _run_official_eval(args: argparse.Namespace) -> str:
+def _eval_start_frame(rows: list[dict[str, Any]]) -> int | str:
+    frame_indices = [int(row["frame_index"]) for row in rows if row.get("frame_index") not in ("", None)]
+    return min(frame_indices) if frame_indices else ""
+
+
+def _run_official_eval(args: argparse.Namespace, rows: list[dict[str, Any]]) -> str:
     assert args.pred_json is not None and args.gt_annotation_file is not None and args.official_eval_json is not None
+    eval_start = _eval_start_frame(rows)
+    if eval_start not in ("", 0):
+        return f"skipped: eval starts at frame {eval_start}"
     args.official_eval_json.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,

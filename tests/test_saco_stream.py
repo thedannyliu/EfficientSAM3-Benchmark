@@ -190,6 +190,85 @@ class SacoStreamTests(unittest.TestCase):
                 rows = list(csv.DictReader(f))
             self.assertEqual(rows[0]["prompt_mode"], "text")
 
+    def test_point_stream_profile_starts_at_first_visible_gt_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "media" / "sav_a"
+            media.mkdir(parents=True)
+            for idx in range(2):
+                frame = np.zeros((16, 20, 3), dtype=np.uint8)
+                frame[:, :, 1] = 80 + idx
+                self.assertTrue(cv2.imwrite(str(media / f"{idx:05d}.jpg"), frame))
+
+            manifest = tmp / "manifest.jsonl"
+            row = {
+                "dataset": "saco-veval-sav",
+                "source_id": "sav_a_7",
+                "video_id": 1,
+                "video_name": "sav_a",
+                "category_id": 7,
+                "noun_phrase": "green square",
+                "text_prompt": "green square",
+                "is_positive": True,
+                "media_root": str(tmp / "media"),
+                "file_names": ["sav_a/00000.jpg", "sav_a/00001.jpg"],
+                "height": 16,
+                "width": 20,
+                "length": 2,
+                "annotations": [
+                    {
+                        "id": 10,
+                        "video_id": 1,
+                        "category_id": 7,
+                        "segmentations": [
+                            {"size": [16, 20], "counts": [320]},
+                            {"size": [16, 20], "counts": [85, 20, 215]},
+                        ],
+                    }
+                ],
+            }
+            manifest.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            args = argparse.Namespace(
+                manifest=manifest,
+                limit=0,
+                max_frames=2,
+                model_id="null_point",
+                backend="null",
+                stream_mode="bbox_chain",
+                prompt_type="point",
+                prompt="",
+                checkpoint_path=None,
+                device="cpu",
+                model_config=None,
+                external_repo=None,
+                backbone_type="efficientvit",
+                model_name="b0",
+                text_encoder_type=None,
+                text_encoder_context_length=77,
+                text_encoder_pos_embed_table_size=None,
+                interpolate_pos_embed=False,
+                mobile_sam_model_type="vit_t",
+                bbox_min_area=1,
+                input_fps=30.0,
+                csv_output=tmp / "frames.csv",
+                summary_output=tmp / "summary.json",
+                pred_json=tmp / "pred.json",
+                gt_annotation_file=None,
+                official_eval_json=None,
+                overlay_root=None,
+                overlay_fps=30.0,
+            )
+
+            summary = profile_saco_stream(args)
+
+            self.assertEqual(summary["eval_start_frame"], 1)
+            self.assertEqual(summary["frames"], 1)
+            with (tmp / "frames.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(rows[0]["frame_index"], "1")
+            self.assertEqual(rows[0]["prompt_mode"], "point")
+
     def test_suite_skip_missing_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -213,6 +292,31 @@ class SacoStreamTests(unittest.TestCase):
 
             self.assertEqual(rows[0]["status"], "skipped")
             self.assertIn("sam3.1_multiplex.pt", rows[0]["message"])
+
+    def test_suite_efficientsam3_uses_text_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            manifest = tmp / "manifest.jsonl"
+            manifest.write_text("", encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=manifest,
+                gt_annotation_file=None,
+                models=["efficientsam3_ev_m_text_bbox_chain"],
+                device="cpu",
+                max_frames=1,
+                input_fps=30.0,
+                output_dir=tmp / "out",
+                overlay_dir=tmp / "overlay",
+                scratch_root=tmp / "scratch",
+                skip_missing=False,
+                dry_run=True,
+            )
+
+            rows = run_suite(args)
+
+            self.assertEqual(rows[0]["status"], "dry-run")
+            self.assertIn("--prompt-type text", rows[0]["message"])
+            self.assertIn("--text-encoder-type MobileCLIP-S0", rows[0]["message"])
 
 
 if __name__ == "__main__":
