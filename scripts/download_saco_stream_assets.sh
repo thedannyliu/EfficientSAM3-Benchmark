@@ -2,7 +2,13 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export SAM_BENCH_SCRATCH="${SAM_BENCH_SCRATCH:-${repo_root}}"
+requested_asset_root="${SAM_BENCH_SCRATCH:-${repo_root}}"
+if ! mkdir -p "${requested_asset_root}" 2>/dev/null || [[ ! -w "${requested_asset_root}" ]]; then
+  echo "WARNING: SAM_BENCH_SCRATCH is not writable: ${requested_asset_root}" >&2
+  echo "WARNING: falling back to repo-local asset root: ${repo_root}" >&2
+  requested_asset_root="${repo_root}"
+fi
+export SAM_BENCH_SCRATCH="${requested_asset_root}"
 SCRATCH_ROOT="${SAM_BENCH_SCRATCH}"
 CHECKPOINT_DIR="${SCRATCH_ROOT}/checkpoints"
 EXTERNAL_DIR="${SCRATCH_ROOT}/external"

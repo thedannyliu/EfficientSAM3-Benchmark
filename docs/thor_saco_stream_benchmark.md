@@ -104,6 +104,14 @@ happen to overlap.
 
 If you intentionally want assets outside the repo, set `SAM_BENCH_SCRATCH` to
 that external root before running the setup script. This is optional on Thor.
+If an old shell still exports an unwritable `/storage/...` path, clear it first:
+
+```bash
+unset SAM_BENCH_SCRATCH
+```
+
+The setup/download scripts also fall back to the repo-local asset root when
+`SAM_BENCH_SCRATCH` is set but not writable.
 
 ## 4. One-Command Setup
 
