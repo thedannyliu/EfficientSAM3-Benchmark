@@ -101,7 +101,6 @@ RUN_ROS=1
 DRY_RUN=0
 SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame"
 ROS_MODELS="mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native"
-ROS_MODELS=all
 ROS_VIDEO_PATH=/path/to/existing/video.mp4
 ROS_PROMPT=monitor
 ROS_INITIAL_POINT_X=0.5
@@ -432,22 +431,22 @@ Run the default ROS video-stream set:
 bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
 ```
 
-The default ROS set is intentionally smaller than the full offline matrix:
+The default ROS set runs every currently supported ROS video-stream model:
 
 ```text
 mobilesam_vit_t_bbox_chain
+sam1_vit_b_bbox_chain
+sam1_vit_l_bbox_chain
 sam1_vit_h_bbox_chain
+sam3_ref_text_bbox_chain
 sam3_ref_native
+sam3p1_ref_native
+efficientsam3_ev_m_text_bbox_chain
+efficientsam3_rv_m_text_bbox_chain
+efficientsam3_tv_m_text_bbox_chain
 ```
 
-Run every ROS-supported model:
-
-```bash
-ROS_MODELS=all \
-  bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
-```
-
-Or pass an explicit subset:
+Pass an explicit subset for a faster first pass:
 
 ```bash
 bash scripts/run_thor_ros_saco_stream_suite.sh \

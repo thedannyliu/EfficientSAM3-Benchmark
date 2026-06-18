@@ -57,7 +57,7 @@ elif [[ -n "${ROS_MODELS:-}" ]]; then
   # shellcheck disable=SC2206
   MODELS=(${ROS_MODELS})
 else
-  MODELS=(mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native)
+  MODELS=("${ROS_SUPPORTED_MODELS[@]}")
 fi
 
 source scripts/source_thor_ros_env.sh
