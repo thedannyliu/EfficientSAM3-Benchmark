@@ -28,6 +28,49 @@ end_to_end_ms    full per-frame benchmark step
 effective_fps    1000 / mean_end_to_end_ms
 ```
 
+## Quick One-Command Run
+
+Use this path when Thor already has the venv, external repos, checkpoints, and
+SA-Co/SA-V assets from earlier setup. The script will reuse existing assets,
+download missing lightweight pieces, run a null smoke test, then run every
+configured model in both `video` and `image_per_frame` modes.
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+git checkout main
+git pull
+
+export THOR_VENV=~/venvs/effisam3_venv_ros
+export SAM3_SOURCE=~/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+unset SAM_BENCH_SCRATCH
+
+bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
+The one-command output goes to:
+
+```text
+results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
+overlays/thor/saco_video_image_per_frame/<run_id>/<model_id>/<source_id>/overlay.mp4
+```
+
+For a command-only check without loading models:
+
+```bash
+DRY_RUN=1 bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
+For a smaller first pass:
+
+```bash
+SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame sam1_vit_h_bbox_chain sam1_vit_h_image_per_frame mobilesam_vit_t_bbox_chain mobilesam_vit_t_image_per_frame" \
+MAX_FRAMES=60 \
+bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
 ## 1. Get The Repository
 
 ```bash
