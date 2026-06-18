@@ -20,7 +20,7 @@ if [[ -n "${ROS_RUN_ID:-}" ]]; then
   args+=(--ros-root "${ros_base}/${ROS_RUN_ID}")
 fi
 
-sam-saco-model-summary "${args[@]}"
+python -m sam_backend.saco_model_summary "${args[@]}"
 
 cat <<EOF
 Model-wise SA-Co summary written to:
