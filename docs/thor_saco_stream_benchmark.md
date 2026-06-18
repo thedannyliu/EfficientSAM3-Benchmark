@@ -9,11 +9,23 @@ The benchmark writes quantitative CSV/JSON results and one overlay MP4 per
 model/video. Large assets stay under ignored local directories in this repo
 unless you explicitly override the asset root.
 
-Two model families of runs are available:
+The benchmark now has two execution layers:
+
+```text
+offline SA-Co:
+  quality metrics plus offline timing on SA-Co/SA-V frames
+
+ROS video stream:
+  video_stream_node -> backend node -> result/overlay recorders
+  deployment timing on the existing ROS video pipeline
+```
+
+Offline SA-Co has two model families of runs:
 
 ```text
 video:
-  native video tracking where supported, otherwise bbox-chain stream tracking
+  offline native video tracking where supported, otherwise offline bbox-chain
+  stream tracking
 
 image_per_frame:
   independent image inference on each SA-Co frame, with no previous-frame bbox
@@ -32,8 +44,12 @@ effective_fps    1000 / mean_end_to_end_ms
 
 Use this path when Thor already has the venv, external repos, checkpoints, and
 SA-Co/SA-V assets from earlier setup. The script will reuse existing assets,
-download missing lightweight pieces, run a null smoke test, then run every
-configured model in both `video` and `image_per_frame` modes.
+download missing lightweight pieces, run a null smoke test, then run:
+
+```text
+1. offline SA-Co video + image_per_frame suite
+2. ROS video stream pipeline timing on a materialized SA-Co clip
+```
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -55,6 +71,11 @@ results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
 overlays/thor/saco_video_image_per_frame/<run_id>/<model_id>/<source_id>/overlay.mp4
+
+results/thor/ros_saco_stream/<run_id>/ros_saco_stream_summary.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/results.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/summary.csv
+overlays/thor/ros_saco_stream/<run_id>/<model_id>/overlay.mp4
 ```
 
 For a command-only check without loading models:
@@ -67,8 +88,24 @@ For a smaller first pass:
 
 ```bash
 SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame sam1_vit_h_bbox_chain sam1_vit_h_image_per_frame mobilesam_vit_t_bbox_chain mobilesam_vit_t_image_per_frame" \
+ROS_MODELS="sam3_ref_native sam1_vit_h_bbox_chain mobilesam_vit_t_bbox_chain" \
 MAX_FRAMES=60 \
 bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
+Useful one-command switches:
+
+```text
+RUN_OFFLINE=1
+RUN_ROS=1
+DRY_RUN=0
+SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame"
+ROS_MODELS="mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native"
+ROS_MODELS=all
+ROS_VIDEO_PATH=/path/to/existing/video.mp4
+ROS_PROMPT=monitor
+ROS_INITIAL_POINT_X=0.5
+ROS_INITIAL_POINT_Y=0.5
 ```
 
 ## 1. Get The Repository
@@ -250,14 +287,14 @@ SACO_MODE_SET=image_per_frame RUN_SUITE=1 DRY_RUN=0 \
   bash scripts/setup_thor_saco_stream_benchmark.sh
 ```
 
-Run both video modes and independent image-per-frame modes for all supported
-models:
+Run offline video modes, offline image-per-frame modes, and the ROS video stream
+pipeline:
 
 ```bash
 bash scripts/run_thor_saco_video_and_image_per_frame.sh
 ```
 
-Dry-run the one-command video + image-per-frame suite:
+Dry-run the one-command offline + ROS suite:
 
 ```bash
 DRY_RUN=1 bash scripts/run_thor_saco_video_and_image_per_frame.sh
@@ -270,17 +307,21 @@ SACO_COUNT=20
 MAX_FRAMES=120
 INPUT_FPS=30.0
 SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame"
+ROS_MODELS="mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native"
 OUTPUT_DIR=results/thor/saco_video_image_per_frame/<run_id>
 OVERLAY_DIR=overlays/thor/saco_video_image_per_frame/<run_id>
+ROS_OUTPUT_DIR=results/thor/ros_saco_stream/<run_id>
+ROS_OVERLAY_DIR=overlays/thor/ros_saco_stream/<run_id>
+ROS_VIDEO_PATH=/path/to/existing/video.mp4
 ```
 
 Or run a smaller first pass:
 
 ```bash
 SACO_MODELS="mobilesam_vit_t_bbox_chain sam2p1_hiera_tiny_native sam3_ref_text_bbox_chain efficientsam3_ev_m_text_bbox_chain" \
+ROS_MODELS="mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native" \
 MAX_FRAMES=60 \
-RUN_SUITE=1 DRY_RUN=0 \
-bash scripts/setup_thor_saco_stream_benchmark.sh
+bash scripts/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 Important outputs:
@@ -380,26 +421,54 @@ python -m sam_backend.thor_pipeline_smoke \
 
 ## 9. Recorded ROS Stream Timing
 
-For end-to-end ROS timing, use the same manifest and publish one selected video
-at 30 FPS with `video_stream_node`. Then start the matching backend and record
-result/overlay topics.
+For end-to-end ROS timing, use the same manifest and publish one selected SA-Co
+clip at 30 FPS with `video_stream_node`. The runner materializes the first
+manifest video into an MP4 unless `ROS_VIDEO_PATH` points to an existing video.
+It then starts one backend at a time and records result/overlay topics.
 
-The helper prints recorder commands:
+Run the default ROS video-stream set:
+
+```bash
+bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
+```
+
+The default ROS set is intentionally smaller than the full offline matrix:
+
+```text
+mobilesam_vit_t_bbox_chain
+sam1_vit_h_bbox_chain
+sam3_ref_native
+```
+
+Run every ROS-supported model:
+
+```bash
+ROS_MODELS=all \
+  bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
+```
+
+Or pass an explicit subset:
 
 ```bash
 bash scripts/run_thor_ros_saco_stream_suite.sh \
   data/manifests/saco_veval_sav_fixed20.jsonl \
-  sam3_ref_text_bbox_chain
+  mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native
 ```
 
 Recorders write:
 
 ```text
-results/thor/ros_saco/<model_id>/results.csv
-results/thor/ros_saco/<model_id>/summary.csv
-overlays/thor/ros_saco/<model_id>/overlay.mp4
+results/thor/ros_saco_stream/<run_id>/ros_saco_stream_summary.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/results.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/summary.csv
+overlays/thor/ros_saco_stream/<run_id>/<model_id>/overlay.mp4
 ```
 
-Use the offline stream suite first. The ROS path measures transport/callback
-overhead and should be treated as deployment timing, not the primary quality
-evaluation.
+For SAM1-H and MobileSAM, the ROS runner uses `mobile_sam_interactive_node` in
+headless auto-start mode: the first frame gets a point prompt at
+`ROS_INITIAL_POINT_X`, `ROS_INITIAL_POINT_Y`, and later frames use
+mask-to-bounding-box chaining. SAM3 uses `sam3_native_clip_node`, which captures
+`ROS_CLIP_FRAMES` frames from the ROS stream and then runs native tracking.
+
+Use the offline stream suite for mIoU/AP/accuracy. The ROS path measures
+transport/callback overhead and deployment timing on the ROS video pipeline.

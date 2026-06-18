@@ -35,10 +35,20 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("window_name", "MobileSAM RealSense")
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("bbox_min_area", 25)
+        self.declare_parameter("enable_display", True)
+        self.declare_parameter("auto_start", False)
+        self.declare_parameter("initial_point_x", 0.5)
+        self.declare_parameter("initial_point_y", 0.5)
+        self.declare_parameter("initial_point_normalized", True)
 
         self.bridge = CvBridge()
         self.window_name = str(self.get_parameter("window_name").value)
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
+        self.enable_display = bool(self.get_parameter("enable_display").value)
+        self.auto_start = bool(self.get_parameter("auto_start").value)
+        self.initial_point_x = float(self.get_parameter("initial_point_x").value)
+        self.initial_point_y = float(self.get_parameter("initial_point_y").value)
+        self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.pending_point: tuple[float, float] | None = None
         self.tracking_bbox: tuple[float, float, float, float] | None = None
         self.latest_frame: np.ndarray | None = None
@@ -75,11 +85,16 @@ class MobileSamInteractiveNode(Node):
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
         self.image_subscription = self.create_subscription(Image, image_topic, self.on_image, 1)
-        self.timer = self.create_timer(1.0 / display_fps, self.display)
+        self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
 
-        cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
-        cv2.setMouseCallback(self.window_name, self.on_mouse)
-        self.get_logger().info(f"listening on {image_topic}; click the left image to initialize {self.model_label}")
+        if self.enable_display:
+            cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
+            cv2.setMouseCallback(self.window_name, self.on_mouse)
+            self.get_logger().info(f"listening on {image_topic}; click the left image to initialize {self.model_label}")
+        elif self.auto_start:
+            self.get_logger().info(f"listening on {image_topic}; auto-starting {self.model_label} from initial point")
+        else:
+            self.get_logger().info(f"listening on {image_topic}; display disabled and waiting for an external prompt")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
         if event != cv2.EVENT_LBUTTONDOWN or self.latest_frame is None:
@@ -165,6 +180,14 @@ class MobileSamInteractiveNode(Node):
             return Prompt(points=[point], labels=[1])
         if self.tracking_bbox is not None:
             return Prompt(boxes=[self.tracking_bbox])
+        if self.auto_start and self.latest_frame is not None:
+            self.auto_start = False
+            height, width = self.latest_frame.shape[:2]
+            if self.initial_point_normalized:
+                point = (self.initial_point_x * float(width), self.initial_point_y * float(height))
+            else:
+                point = (self.initial_point_x, self.initial_point_y)
+            return Prompt(points=[point], labels=[1])
         return None
 
     def _result(
@@ -230,7 +253,8 @@ class MobileSamInteractiveNode(Node):
         return (len(self.result_times) - 1) / duration
 
     def destroy_node(self) -> bool:
-        cv2.destroyAllWindows()
+        if self.enable_display:
+            cv2.destroyAllWindows()
         return super().destroy_node()
 
 
