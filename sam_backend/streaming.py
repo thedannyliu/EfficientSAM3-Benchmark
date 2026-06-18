@@ -41,3 +41,14 @@ def parse_tegrastats_gr3d(line: str) -> float | None:
     if match is None:
         return None
     return float(match.group(1))
+
+
+def parse_text_prompts(prompt: str, prompts: str = "") -> list[str]:
+    raw = prompts.strip()
+    if not raw:
+        return [prompt.strip()] if prompt.strip() else []
+    if re.search(r"[,;\n]", raw):
+        values = re.split(r"[,;\n]+", raw)
+    else:
+        values = raw.split()
+    return [value.strip() for value in values if value.strip()]

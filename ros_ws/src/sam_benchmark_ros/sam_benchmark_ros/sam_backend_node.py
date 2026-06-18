@@ -12,7 +12,7 @@ from std_msgs.msg import String
 from sam_backend import BackendConfig, Prompt, create_backend
 from sam_backend.overlay import overlay_prediction, to_numpy
 from sam_backend.profiling import component_timer, cuda_memory_mb, parameter_counts
-from sam_backend.streaming import masks_to_mono8
+from sam_backend.streaming import masks_to_mono8, parse_text_prompts
 
 
 class SamBackendNode(Node):
@@ -33,6 +33,7 @@ class SamBackendNode(Node):
         self.declare_parameter("mobile_sam_model_type", "vit_t")
         self.declare_parameter("prompt_mode", "auto")
         self.declare_parameter("prompt", "person")
+        self.declare_parameter("prompts", "")
         self.declare_parameter("point_x", 0.5)
         self.declare_parameter("point_y", 0.5)
         self.declare_parameter("point_normalized", True)
@@ -59,6 +60,9 @@ class SamBackendNode(Node):
         self.backend_name = str(backend_name)
         self.prompt_mode = self._resolve_prompt_mode(str(self.get_parameter("prompt_mode").value))
         self.prompt_text = str(self.get_parameter("prompt").value)
+        self.prompt_texts = parse_text_prompts(self.prompt_text, str(self.get_parameter("prompts").value))
+        if self.prompt_mode == "text" and not self.prompt_texts:
+            raise ValueError("prompt or prompts must provide at least one text prompt")
         self.point_x = float(self.get_parameter("point_x").value)
         self.point_y = float(self.get_parameter("point_y").value)
         self.point_normalized = bool(self.get_parameter("point_normalized").value)
@@ -141,7 +145,8 @@ class SamBackendNode(Node):
             "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
             "other_ms": max(0.0, callback_total_ms - component_total_ms),
             "prompt_mode": self.prompt_mode,
-            "prompt_text": self.prompt_text if self.prompt_mode == "text" else "",
+            "prompt_text": ",".join(self.prompt_texts) if self.prompt_mode == "text" else "",
+            "prompt_count": len(self.prompt_texts) if self.prompt_mode == "text" else "",
             "point_x": prompt.points[0][0] if prompt.points else "",
             "point_y": prompt.points[0][1] if prompt.points else "",
             "mask_count": _safe_len(prediction.masks),
@@ -177,6 +182,8 @@ class SamBackendNode(Node):
 
     def _make_prompt(self, frame: object) -> Prompt:
         if self.prompt_mode == "text":
+            if len(self.prompt_texts) > 1:
+                return Prompt(texts=self.prompt_texts)
             return Prompt(text=self.prompt_text)
         height, width = frame.shape[:2]  # type: ignore[attr-defined]
         if self.point_normalized:

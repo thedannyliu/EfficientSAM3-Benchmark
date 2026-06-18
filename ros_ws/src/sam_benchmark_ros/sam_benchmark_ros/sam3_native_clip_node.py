@@ -17,7 +17,7 @@ from std_msgs.msg import String
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.overlay import overlay_prediction
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
-from sam_backend.streaming import masks_to_mono8
+from sam_backend.streaming import masks_to_mono8, parse_text_prompts
 
 
 class Sam3NativeClipNode(Node):
@@ -31,12 +31,16 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("checkpoint_path", "checkpoints/sam3/sam3.pt")
         self.declare_parameter("external_repo", "external/sam3")
         self.declare_parameter("prompt", "monitor")
+        self.declare_parameter("prompts", "")
         self.declare_parameter("clip_frames", 120)
         self.declare_parameter("frame_dir", "results/thor/ros_camera/sam3_native_clip/frames")
         self.declare_parameter("version", "sam3")
 
         self.bridge = CvBridge()
         self.prompt = str(self.get_parameter("prompt").value)
+        self.prompt_texts = parse_text_prompts(self.prompt, str(self.get_parameter("prompts").value))
+        if not self.prompt_texts:
+            raise ValueError("prompt or prompts must provide at least one text prompt")
         self.clip_frames = int(self.get_parameter("clip_frames").value)
         if self.clip_frames <= 0:
             raise ValueError("clip_frames must be positive")
@@ -100,9 +104,10 @@ class Sam3NativeClipNode(Node):
         try:
             response = self.predictor.handle_request({"type": "start_session", "resource_path": str(self.frame_dir)})
             session_id = response["session_id"]
-            self.predictor.handle_request(
-                {"type": "add_prompt", "session_id": session_id, "frame_index": 0, "text": self.prompt}
-            )
+            for prompt in self.prompt_texts:
+                self.predictor.handle_request(
+                    {"type": "add_prompt", "session_id": session_id, "frame_index": 0, "text": prompt}
+                )
             iterator = self.predictor.handle_stream_request(
                 {
                     "type": "propagate_in_video",
@@ -143,7 +148,8 @@ class Sam3NativeClipNode(Node):
             "stream_mode": "native_clip",
             "tracking_state": "tracking",
             "prompt_mode": "native_text",
-            "prompt_text": self.prompt,
+            "prompt_text": ",".join(self.prompt_texts),
+            "prompt_count": len(self.prompt_texts),
             "latency_ms": latency_ms,
             "callback_total_ms": callback_total_ms,
             "end_to_end_ms": end_to_end_ms,

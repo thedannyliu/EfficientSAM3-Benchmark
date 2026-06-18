@@ -71,7 +71,17 @@ SAM3:
   native video tracking uses sam3_native_clip_node, which first captures a fixed
   camera clip, materializes it as a frame folder, then starts the native SAM3
   tracking session
+  use prompt for one noun phrase, or prompts for multiple nouns/phrases
 ```
+
+For SAM3 multi-object text prompts, prefer comma-separated values:
+
+```text
+-p prompts:="cup,notebook,monitor"
+```
+
+Whitespace-separated values such as `cup notebook monitor` are also accepted
+for one-word nouns, but comma separation is safer for multi-word phrases.
 
 If you are already inside `~/EfficientSAM3-Benchmark`, skip repeated
 `cd EfficientSAM3-Benchmark` lines in the command blocks.

@@ -14,6 +14,7 @@ from PIL import Image
 @dataclass(slots=True)
 class Prompt:
     text: str | None = None
+    texts: list[str] = field(default_factory=list)
     points: list[tuple[float, float]] = field(default_factory=list)
     labels: list[int] = field(default_factory=list)
     boxes: list[tuple[float, float, float, float]] = field(default_factory=list)
@@ -129,6 +130,13 @@ class Sam3ImageBackend:
         )
 
     def _run_prompt(self, state: Any, prompt: Prompt) -> dict[str, Any]:
+        if prompt.texts:
+            outputs = [self.processor.set_text_prompt(state=state, prompt=text) for text in prompt.texts]
+            return {
+                "masks": _concat_prediction_values(output.get("masks") for output in outputs),
+                "boxes": _concat_prediction_values(output.get("boxes") for output in outputs),
+                "scores": _concat_prediction_values(output.get("scores") for output in outputs),
+            }
         if prompt.text:
             return self.processor.set_text_prompt(state=state, prompt=prompt.text)
         if prompt.points:
@@ -375,6 +383,29 @@ def _as_pil_image(image: Any) -> Image.Image:
         if image.ndim == 3:
             return Image.fromarray(image[..., :3]).convert("RGB")
     raise TypeError(f"unsupported image type: {type(image)!r}")
+
+
+def _concat_prediction_values(values: Any) -> np.ndarray:
+    arrays = []
+    for value in values:
+        if value is None:
+            continue
+        if hasattr(value, "detach"):
+            value = value.detach()
+        dtype = str(getattr(value, "dtype", ""))
+        if dtype.endswith("bfloat16") and hasattr(value, "float"):
+            value = value.float()
+        if hasattr(value, "cpu"):
+            value = value.cpu()
+        array = np.asarray(value)
+        if array.size == 0:
+            continue
+        if array.ndim == 0:
+            array = array.reshape(1)
+        arrays.append(array)
+    if not arrays:
+        return np.asarray([])
+    return np.concatenate(arrays, axis=0)
 
 
 def _import_required(module_name: str) -> Any:
