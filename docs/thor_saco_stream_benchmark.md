@@ -326,17 +326,54 @@ bash scripts/run_thor_saco_video_and_image_per_frame.sh
 Important outputs:
 
 ```text
-results/thor/saco_stream/<run_id>/saco_stream_suite_summary.csv
-results/thor/saco_stream/<run_id>/<model_id>/frames.csv
-results/thor/saco_stream/<run_id>/<model_id>/frames_summary.csv
-results/thor/saco_stream/<run_id>/<model_id>/saco_veval_preds.json
-results/thor/saco_stream/<run_id>/<model_id>/saco_veval_eval_res.json
-overlays/thor/saco_stream/<run_id>/<model_id>/<source_id>/overlay.mp4
+results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/saco_veval_preds.json
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/saco_veval_eval_res.json
+overlays/thor/saco_video_image_per_frame/<run_id>/<model_id>/<source_id>/overlay.mp4
+
+results/thor/ros_saco_stream/<run_id>/ros_saco_stream_summary.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/results.csv
+results/thor/ros_saco_stream/<run_id>/<model_id>/summary.csv
+overlays/thor/ros_saco_stream/<run_id>/<model_id>/overlay.mp4
 ```
 
 The summary reports stream mode, effective FPS, latency, mIoU, mask F1/AP-style
 threshold summaries, presence accuracy, CUDA memory, and links to overlay and
 prediction artifacts.
+
+Build one model-wise CSV after the offline and ROS runs finish:
+
+```bash
+bash scripts/summarize_thor_saco_model_results.sh
+```
+
+Default output:
+
+```text
+results/thor/saco_model_wise_summary.csv
+```
+
+The wrapper auto-selects the latest directories under
+`results/thor/saco_video_image_per_frame/` and
+`results/thor/ros_saco_stream/`. To summarize a specific run:
+
+```bash
+OFFLINE_RUN_ID=<offline_run_id> \
+ROS_RUN_ID=<ros_run_id> \
+OUTPUT=results/thor/saco_model_wise_summary_<run_id>.csv \
+bash scripts/summarize_thor_saco_model_results.sh
+```
+
+The model-wise CSV contains one row per model/mode, including:
+
+```text
+layer, model_id, backend, mode, status, frames,
+mean_iou, mask_ap_50_95, presence_accuracy,
+mean_model_latency_ms, mean_end_to_end_ms, p95_end_to_end_ms,
+end_to_end_fps, params_total_m, weight_total_mb, summary_csv, source_csv
+```
 
 ## 7. Model Matrix
 
