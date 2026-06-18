@@ -471,3 +471,82 @@ mask-to-bounding-box chaining. SAM3 uses `sam3_native_clip_node`, which captures
 
 Use the offline stream suite for mIoU/AP/accuracy. The ROS path measures
 transport/callback overhead and deployment timing on the ROS video pipeline.
+
+## 10. Multi-Prompt Single-Image Latency
+
+This benchmark is for per-frame multi-object latency on Thor. It uses 10
+diverse SA-Co frames by default, selected from
+`data/manifests/saco_veval_sav_fixed20.jsonl`.
+
+It runs two tests:
+
+```text
+MobileSAM:
+  one image encoder pass, then N independent point-prompt mask decodes
+  N = 1, 2, 3, 5, 10, 15
+
+SAM3 / SAM3.1:
+  one selected frame materialized as a single-frame native video session
+  one text prompt from the SA-Co noun phrase, then one-frame propagation
+  records the returned mask_count for scenes with multiple visible instances
+```
+
+Run the full multi-prompt image benchmark:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+git pull
+unset SAM_BENCH_SCRATCH
+bash scripts/run_thor_multi_prompt_image_benchmark.sh
+```
+
+Outputs:
+
+```text
+results/thor/multi_prompt_image/<run_id>/frames.csv
+results/thor/multi_prompt_image/<run_id>/summary.csv
+overlays/thor/multi_prompt_image/<run_id>/<model_id>/*.jpg
+```
+
+Useful knobs:
+
+```text
+IMAGE_COUNT=10
+POINT_COUNTS=1,2,3,5,10,15
+SUITE=all
+SUITE=mobilesam
+SUITE=sam3_text
+TEXT_PROMPT=cup
+IMAGE_DIR=/path/to/custom/images
+WARMUP=1
+```
+
+Examples:
+
+```bash
+# MobileSAM point-count scaling only.
+SUITE=mobilesam \
+POINT_COUNTS=1,2,3,5,10,15 \
+bash scripts/run_thor_multi_prompt_image_benchmark.sh
+
+# SAM3 vs SAM3.1 on one repeated noun, useful for scenes with several cups.
+SUITE=sam3_text TEXT_PROMPT=cup \
+bash scripts/run_thor_multi_prompt_image_benchmark.sh
+```
+
+Latency columns:
+
+```text
+model_ms               model-only timed section
+image_encoder_ms        MobileSAM image encoder for the frame
+prompt_decode_ms        sum of MobileSAM N independent point decodes
+start_session_ms        SAM3/SAM3.1 native single-frame session setup
+add_prompt_ms           SAM3/SAM3.1 text prompt step
+propagate_ms            SAM3/SAM3.1 one-frame propagation step
+mask_count              masks returned by the model
+```
+
+For MobileSAM, the generated points are deterministic grid points across the
+frame. This measures speed scaling with object count, not mask quality. For
+SAM3/SAM3.1, use `TEXT_PROMPT` and custom `IMAGE_DIR` when you want a controlled
+scene such as several cups in one image.
