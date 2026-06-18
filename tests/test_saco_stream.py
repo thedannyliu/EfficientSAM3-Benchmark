@@ -11,7 +11,13 @@ import cv2
 import numpy as np
 
 from sam_backend.backends import Prompt
-from sam_backend.profile_saco_stream import BBoxChainState, _decode_uncompressed_rle, _initial_prompt_frame_index, profile_saco_stream
+from sam_backend.profile_saco_stream import (
+    BBoxChainState,
+    _decode_uncompressed_rle,
+    _image_per_frame_prompt,
+    _initial_prompt_frame_index,
+    profile_saco_stream,
+)
 from sam_backend.saco_manifest import build_saco_veval_manifest
 from sam_backend.saco_stream_suite import run_suite
 
@@ -269,6 +275,22 @@ class SacoStreamTests(unittest.TestCase):
             self.assertEqual(rows[0]["frame_index"], "1")
             self.assertEqual(rows[0]["prompt_mode"], "point")
 
+    def test_image_per_frame_uses_current_frame_point_prompt(self) -> None:
+        mask = np.zeros((5, 6), dtype=np.uint8)
+        mask[1:4, 2:5] = 1
+        args = argparse.Namespace(prompt="")
+        item = {"source_id": "sample", "text_prompt": "green square"}
+
+        prompt, mode = _image_per_frame_prompt(args, item, mask, "point")
+        self.assertEqual(mode, "point")
+        self.assertIsNotNone(prompt)
+        self.assertAlmostEqual(prompt.points[0][0], 3.0)
+        self.assertAlmostEqual(prompt.points[0][1], 2.0)
+
+        prompt, mode = _image_per_frame_prompt(args, item, np.zeros_like(mask), "point")
+        self.assertIsNone(prompt)
+        self.assertEqual(mode, "no_prompt")
+
     def test_suite_skip_missing_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -302,6 +324,7 @@ class SacoStreamTests(unittest.TestCase):
                 manifest=manifest,
                 gt_annotation_file=None,
                 models=["efficientsam3_ev_m_text_bbox_chain"],
+                mode_set="video",
                 device="cpu",
                 max_frames=1,
                 input_fps=30.0,
@@ -317,6 +340,31 @@ class SacoStreamTests(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "dry-run")
             self.assertIn("--prompt-type text", rows[0]["message"])
             self.assertIn("--text-encoder-type MobileCLIP-S0", rows[0]["message"])
+
+    def test_suite_can_dry_run_image_per_frame_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            manifest = tmp / "manifest.jsonl"
+            manifest.write_text("", encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=manifest,
+                gt_annotation_file=None,
+                models=["sam3_ref_image_per_frame"],
+                mode_set="image_per_frame",
+                device="cpu",
+                max_frames=1,
+                input_fps=30.0,
+                output_dir=tmp / "out",
+                overlay_dir=tmp / "overlay",
+                scratch_root=tmp / "scratch",
+                skip_missing=False,
+                dry_run=True,
+            )
+
+            rows = run_suite(args)
+
+            self.assertEqual(rows[0]["status"], "dry-run")
+            self.assertIn("--stream-mode image_per_frame", rows[0]["message"])
 
 
 if __name__ == "__main__":

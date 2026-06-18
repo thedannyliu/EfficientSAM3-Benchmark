@@ -35,6 +35,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-results/thor/saco_stream/${RUN_ID}}"
 OVERLAY_DIR="${OVERLAY_DIR:-overlays/thor/saco_stream/${RUN_ID}}"
 MAX_FRAMES="${MAX_FRAMES:-120}"
 INPUT_FPS="${INPUT_FPS:-30.0}"
+SACO_MODE_SET="${SACO_MODE_SET:-video}"
 
 mkdir -p "${SAM_BENCH_SCRATCH}/data/annotation" "${SAM_BENCH_SCRATCH}/data/media/saco_sav" \
   data/manifests results/thor/saco_stream overlays/thor/saco_stream
@@ -148,6 +149,7 @@ if [[ "${RUN_SUITE}" == "1" ]]; then
     --scratch-root "${SAM_BENCH_SCRATCH}"
     --max-frames "${MAX_FRAMES}"
     --input-fps "${INPUT_FPS}"
+    --mode-set "${SACO_MODE_SET}"
     --output-dir "${OUTPUT_DIR}"
     --overlay-dir "${OVERLAY_DIR}"
     --skip-missing

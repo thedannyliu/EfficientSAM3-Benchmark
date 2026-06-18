@@ -77,6 +77,8 @@ SUMMARY_FIELDS = [
     "mean_latency_ms",
     "p95_latency_ms",
     "mean_callback_total_ms",
+    "mean_end_to_end_ms",
+    "p95_end_to_end_ms",
     "effective_fps",
     "input_fps",
     "overlay_video_count",
@@ -139,6 +141,8 @@ def profile_saco_stream(args: argparse.Namespace) -> dict[str, Any]:
 
     if args.stream_mode == "native_video":
         frame_rows, pred_entries, overlay_videos, params, memory = _profile_native(args, rows)
+    elif args.stream_mode == "image_per_frame":
+        frame_rows, pred_entries, overlay_videos, params, memory = _profile_image_per_frame(args, rows)
     else:
         frame_rows, pred_entries, overlay_videos, params, memory = _profile_bbox_chain(args, rows)
 
@@ -170,7 +174,7 @@ def profile_saco_stream(args: argparse.Namespace) -> dict[str, Any]:
         "eval_start_frame": _eval_start_frame(frame_rows),
         "frames": len(frame_rows),
         "mean_iou": _mean([row["iou"] for row in frame_rows]),
-        "effective_fps": _fps(_mean([row["callback_total_ms"] for row in frame_rows])),
+        "effective_fps": _fps(_mean([row["end_to_end_ms"] for row in frame_rows])),
         "overlay_videos": len(overlay_videos),
     }
 
@@ -212,6 +216,136 @@ def _profile_bbox_chain(
             overlay_videos.append(overlay_video)
     memory = cuda_memory_mb(torch_module) if torch_module is not None else cuda_memory_mb(None)
     return all_rows, pred_entries, overlay_videos, params, memory
+
+
+def _profile_image_per_frame(
+    args: argparse.Namespace,
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], dict[str, int], dict[str, float]]:
+    backend = create_backend(
+        BackendConfig(
+            backend=args.backend,
+            checkpoint_path=args.checkpoint_path,
+            device=args.device,
+            backbone_type=args.backbone_type,
+            model_name=args.model_name,
+            text_encoder_type=args.text_encoder_type,
+            text_encoder_context_length=args.text_encoder_context_length,
+            text_encoder_pos_embed_table_size=args.text_encoder_pos_embed_table_size,
+            interpolate_pos_embed=args.interpolate_pos_embed,
+            enable_inst_interactivity=True,
+            model_config=args.model_config,
+            external_repo=args.external_repo,
+            mobile_sam_model_type=args.mobile_sam_model_type,
+        )
+    )
+    torch_module = getattr(backend, "torch", None)
+    if torch_module is not None and torch_module.cuda.is_available():
+        torch_module.cuda.reset_peak_memory_stats()
+    params = parameter_counts(getattr(backend, "model", None))
+    all_rows: list[dict[str, Any]] = []
+    pred_entries = []
+    overlay_videos = []
+
+    for item in rows:
+        frame_rows, pred_entry, overlay_video = _profile_image_per_frame_source(args, item, backend, torch_module)
+        all_rows.extend(frame_rows)
+        pred_entries.extend(pred_entry)
+        if overlay_video:
+            overlay_videos.append(overlay_video)
+    memory = cuda_memory_mb(torch_module) if torch_module is not None else cuda_memory_mb(None)
+    return all_rows, pred_entries, overlay_videos, params, memory
+
+
+def _profile_image_per_frame_source(
+    args: argparse.Namespace,
+    item: dict[str, Any],
+    backend: Any,
+    torch_module: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    frame_paths = _frame_paths(item, args.max_frames)
+    gt_masks = _gt_masks_by_frame(item)
+    prompt_type = _resolved_prompt_type(args)
+    start_frame = _initial_prompt_frame_index(prompt_type, gt_masks, len(frame_paths), item)
+
+    writer = None
+    overlay_video = ""
+    rows = []
+    pred_masks: list[np.ndarray | None] = []
+    pred_scores: list[float] = []
+    try:
+        for frame_offset, frame_path in enumerate(frame_paths[start_frame:], start=start_frame):
+            frame_rgb = _read_rgb(frame_path)
+            gt_mask = gt_masks.get(frame_offset)
+            prompt, prompt_mode = _image_per_frame_prompt(args, item, gt_mask, prompt_type)
+            prediction = Prediction(masks=[], boxes=[], scores=[], latency_ms=0.0, metadata={})
+            profile = {}
+            callback_start = perf_counter()
+            if prompt is not None:
+                if torch_module is not None:
+                    with component_timer(getattr(backend, "model", None), torch_module) as profile:
+                        prediction = backend.predict(frame_rgb, prompt)
+                else:
+                    prediction = backend.predict(frame_rgb, prompt)
+            callback_ms = (perf_counter() - callback_start) * 1000.0
+            component_total = sum(profile.values())
+            pred_mask = merge_masks(prediction.masks, frame_rgb.shape[:2])
+            iou = _mask_iou(pred_mask, gt_mask) if gt_mask is not None else ""
+            present_pred = pred_mask is not None and bool(pred_mask.any())
+            present_gt = gt_mask is not None and bool(gt_mask.any())
+            scores = to_numpy(prediction.scores)
+            score_max = float(scores.max()) if scores.size else (1.0 if present_pred else 0.0)
+            pred_scores.append(score_max)
+            pred_masks.append(pred_mask)
+            if args.overlay_root:
+                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                if writer is None:
+                    overlay_video, writer = _open_overlay_writer(args.overlay_root, item, frame_bgr.shape, args.overlay_fps)
+                writer.write(
+                    _overlay_frame(
+                        frame_bgr,
+                        pred_mask,
+                        gt_mask,
+                        args.model_id,
+                        item,
+                        frame_offset,
+                        iou,
+                        callback_ms,
+                        prompt_mode,
+                    )
+                )
+            memory = cuda_memory_mb(torch_module) if torch_module is not None else cuda_memory_mb(None)
+            rows.append(
+                {
+                    "model_id": args.model_id,
+                    "backend": args.backend,
+                    "stream_mode": args.stream_mode,
+                    "source_id": item["source_id"],
+                    "video_id": item["video_id"],
+                    "category_id": item["category_id"],
+                    "frame_index": frame_offset,
+                    "prompt_mode": prompt_mode,
+                    "prompt": _prompt_text(prompt),
+                    "has_gt": gt_mask is not None,
+                    "is_positive": bool(item.get("is_positive", True)),
+                    "iou": iou,
+                    "matched_iou": iou,
+                    "presence_correct": present_pred == present_gt,
+                    "latency_ms": prediction.latency_ms,
+                    "callback_total_ms": callback_ms,
+                    "end_to_end_ms": callback_ms,
+                    "mask_count": _safe_len(prediction.masks),
+                    "box_count": _safe_len(prediction.boxes),
+                    "score_max": score_max,
+                    **{field: profile.get(field, 0.0) for field in COMPONENT_FIELDS},
+                    "other_ms": max(0.0, callback_ms - component_total),
+                    **memory,
+                }
+            )
+    finally:
+        if writer is not None:
+            writer.release()
+    return rows, _pred_entries_for_item(item, pred_masks, pred_scores), overlay_video
 
 
 def _profile_bbox_chain_source(
@@ -506,6 +640,19 @@ def _initial_prompt(args: argparse.Namespace, item: dict[str, Any], gt_mask: np.
     return Prompt(points=[_mask_centroid(gt_mask)], labels=[1])
 
 
+def _image_per_frame_prompt(
+    args: argparse.Namespace,
+    item: dict[str, Any],
+    gt_mask: np.ndarray | None,
+    prompt_type: str,
+) -> tuple[Prompt | None, str]:
+    if prompt_type == "text":
+        return _initial_prompt(args, item, gt_mask, prompt_type), "text"
+    if gt_mask is None or not bool(gt_mask.any()):
+        return None, "no_prompt"
+    return _initial_prompt(args, item, gt_mask, prompt_type), "point"
+
+
 def _native_row(args: argparse.Namespace, item: dict[str, Any], frame_idx: int, pred_mask: np.ndarray | None, gt_mask: np.ndarray | None, iou: float | str, latency_ms: float, mask_count: int, torch_module: Any) -> dict[str, Any]:
     present_pred = pred_mask is not None and bool(pred_mask.any())
     present_gt = gt_mask is not None and bool(gt_mask.any())
@@ -540,6 +687,7 @@ def _native_row(args: argparse.Namespace, item: dict[str, Any], frame_idx: int, 
 def _summary_row(args: argparse.Namespace, rows: list[dict[str, Any]], overlays: list[str], params: dict[str, int], memory: dict[str, float], official_eval_json: str) -> dict[str, Any]:
     ious = [row["iou"] for row in rows if row.get("iou") not in ("", None)]
     callback = [row["callback_total_ms"] for row in rows if row.get("callback_total_ms") not in ("", None)]
+    end_to_end = [row["end_to_end_ms"] for row in rows if row.get("end_to_end_ms") not in ("", None)]
     return {
         "model_id": args.model_id,
         "backend": args.backend,
@@ -556,7 +704,9 @@ def _summary_row(args: argparse.Namespace, rows: list[dict[str, Any]], overlays:
         "mean_latency_ms": _mean([row["latency_ms"] for row in rows]),
         "p95_latency_ms": _percentile([float(row["latency_ms"]) for row in rows if row.get("latency_ms") not in ("", None)], 0.95),
         "mean_callback_total_ms": _mean(callback),
-        "effective_fps": _fps(_mean(callback)),
+        "mean_end_to_end_ms": _mean(end_to_end),
+        "p95_end_to_end_ms": _percentile([float(value) for value in end_to_end], 0.95),
+        "effective_fps": _fps(_mean(end_to_end)),
         "input_fps": args.input_fps,
         "overlay_video_count": len(overlays),
         "pred_json": str(args.pred_json) if args.pred_json else "",
@@ -839,7 +989,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-frames", type=int, default=120)
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--backend", choices=["null", "mobilesam", "sam1", "sam2", "efficient-sam2", "efficienttam", "sam3", "sam3p1", "efficientsam3"], required=True)
-    parser.add_argument("--stream-mode", choices=["bbox_chain", "text_bbox_chain", "native_video"], default="bbox_chain")
+    parser.add_argument("--stream-mode", choices=["bbox_chain", "text_bbox_chain", "native_video", "image_per_frame"], default="bbox_chain")
     parser.add_argument("--prompt-type", choices=["auto", "point", "text"], default="auto")
     parser.add_argument("--prompt", default="")
     parser.add_argument("--checkpoint-path")

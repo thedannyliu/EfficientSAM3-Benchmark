@@ -24,7 +24,7 @@ class SacoStreamRun:
     extra_args: tuple[str, ...] = field(default_factory=tuple)
 
 
-DEFAULT_RUNS = [
+VIDEO_RUNS = [
     SacoStreamRun(
         "mobilesam_vit_t_bbox_chain",
         "mobilesam",
@@ -48,6 +48,14 @@ DEFAULT_RUNS = [
         checkpoint_path="checkpoints/sam1/sam_vit_l_0b3195.pth",
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_l"),
+    ),
+    SacoStreamRun(
+        "sam1_vit_h_bbox_chain",
+        "sam1",
+        "bbox_chain",
+        checkpoint_path="checkpoints/sam1/sam_vit_h_4b8939.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_h"),
     ),
     SacoStreamRun(
         "sam2p1_hiera_tiny_bbox_chain",
@@ -153,6 +161,113 @@ DEFAULT_RUNS = [
 ]
 
 
+IMAGE_PER_FRAME_RUNS = [
+    SacoStreamRun(
+        "mobilesam_vit_t_image_per_frame",
+        "mobilesam",
+        "image_per_frame",
+        checkpoint_path="checkpoints/mobilesam/mobile_sam.pt",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_t"),
+    ),
+    SacoStreamRun(
+        "sam1_vit_b_image_per_frame",
+        "sam1",
+        "image_per_frame",
+        checkpoint_path="checkpoints/sam1/sam_vit_b_01ec64.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_b"),
+    ),
+    SacoStreamRun(
+        "sam1_vit_l_image_per_frame",
+        "sam1",
+        "image_per_frame",
+        checkpoint_path="checkpoints/sam1/sam_vit_l_0b3195.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_l"),
+    ),
+    SacoStreamRun(
+        "sam1_vit_h_image_per_frame",
+        "sam1",
+        "image_per_frame",
+        checkpoint_path="checkpoints/sam1/sam_vit_h_4b8939.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_h"),
+    ),
+    SacoStreamRun(
+        "sam2p1_hiera_tiny_image_per_frame",
+        "sam2",
+        "image_per_frame",
+        checkpoint_path="checkpoints/sam2/sam2.1_hiera_tiny.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_t.yaml",
+        external_repo="external/sam2",
+    ),
+    SacoStreamRun(
+        "sam2p1_hiera_large_image_per_frame",
+        "sam2",
+        "image_per_frame",
+        checkpoint_path="checkpoints/sam2/sam2.1_hiera_large.pt",
+        model_config="configs/sam2.1/sam2.1_hiera_l.yaml",
+        external_repo="external/sam2",
+    ),
+    SacoStreamRun(
+        "sam3_ref_image_per_frame",
+        "sam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path="checkpoints/sam3/sam3.pt",
+        external_repo="external/sam3",
+    ),
+    SacoStreamRun(
+        "efficientsam3_ev_m_image_per_frame",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path="checkpoints/efficientsam3_ft/efficientsam3_efficientvit.pt",
+        external_repo="external/efficientsam3",
+        extra_args=(
+            "--backbone-type", "efficientvit",
+            "--model-name", "b1",
+            "--text-encoder-type", "MobileCLIP-S0",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "16",
+        ),
+    ),
+    SacoStreamRun(
+        "efficientsam3_rv_m_image_per_frame",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path="checkpoints/efficientsam3_ft/efficientsam3_repvit.pt",
+        external_repo="external/efficientsam3",
+        extra_args=(
+            "--backbone-type", "repvit",
+            "--model-name", "m1.1",
+            "--text-encoder-type", "MobileCLIP-S0",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "16",
+        ),
+    ),
+    SacoStreamRun(
+        "efficientsam3_tv_m_image_per_frame",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path="checkpoints/efficientsam3_ft/efficientsam3_tinyvit.pt",
+        external_repo="external/efficientsam3",
+        extra_args=(
+            "--backbone-type", "tinyvit",
+            "--model-name", "11m",
+            "--text-encoder-type", "MobileCLIP-S0",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "16",
+        ),
+    ),
+]
+
+DEFAULT_RUNS = VIDEO_RUNS
+
+
 def main() -> None:
     args = parse_args()
     rows = run_suite(args)
@@ -170,9 +285,10 @@ def main() -> None:
 
 def run_suite(args: argparse.Namespace) -> list[dict[str, str]]:
     selected = {name for name in args.models} if args.models else None
-    runs = [run for run in DEFAULT_RUNS if selected is None or run.model_id in selected]
+    available_runs = _runs_for_mode_set(getattr(args, "mode_set", "video"))
+    runs = [run for run in available_runs if selected is None or run.model_id in selected]
     if selected:
-        missing = selected - {run.model_id for run in DEFAULT_RUNS}
+        missing = selected - {run.model_id for run in available_runs}
         if missing:
             raise ValueError(f"unknown model ids: {', '.join(sorted(missing))}")
     results = []
@@ -201,6 +317,16 @@ def run_suite(args: argparse.Namespace) -> list[dict[str, str]]:
             continue
         results.append(_result(run, "ok", summary_path, csv_path, pred_json, eval_json, overlay_dir, ""))
     return results
+
+
+def _runs_for_mode_set(mode_set: str) -> list[SacoStreamRun]:
+    if mode_set == "video":
+        return VIDEO_RUNS
+    if mode_set == "image_per_frame":
+        return IMAGE_PER_FRAME_RUNS
+    if mode_set == "all":
+        return VIDEO_RUNS + IMAGE_PER_FRAME_RUNS
+    raise ValueError(f"unknown mode set: {mode_set}")
 
 
 def _build_cmd(
@@ -306,6 +432,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--gt-annotation-file", type=Path)
     parser.add_argument("--models", nargs="*", help="Optional subset of model IDs.")
+    parser.add_argument("--mode-set", choices=["video", "image_per_frame", "all"], default="video")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--max-frames", type=int, default=120)
     parser.add_argument("--input-fps", type=float, default=30.0)

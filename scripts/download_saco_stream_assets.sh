@@ -49,6 +49,7 @@ clone_if_missing https://github.com/ChaoningZhang/MobileSAM.git "${EXTERNAL_DIR}
 SAM1_BASE_URL="https://dl.fbaipublicfiles.com/segment_anything"
 download_if_missing "${SAM1_BASE_URL}/sam_vit_b_01ec64.pth" "${CHECKPOINT_DIR}/sam1/sam_vit_b_01ec64.pth"
 download_if_missing "${SAM1_BASE_URL}/sam_vit_l_0b3195.pth" "${CHECKPOINT_DIR}/sam1/sam_vit_l_0b3195.pth"
+download_if_missing "${SAM1_BASE_URL}/sam_vit_h_4b8939.pth" "${CHECKPOINT_DIR}/sam1/sam_vit_h_4b8939.pth"
 download_if_missing "https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt" "${CHECKPOINT_DIR}/mobilesam/mobile_sam.pt"
 
 SAM2_BASE_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824"

@@ -9,6 +9,25 @@ The benchmark writes quantitative CSV/JSON results and one overlay MP4 per
 model/video. Large assets stay under ignored local directories in this repo
 unless you explicitly override the asset root.
 
+Two model families of runs are available:
+
+```text
+video:
+  native video tracking where supported, otherwise bbox-chain stream tracking
+
+image_per_frame:
+  independent image inference on each SA-Co frame, with no previous-frame bbox
+  state carried forward
+```
+
+Latency/FPS columns use these definitions:
+
+```text
+latency_ms       model itself
+end_to_end_ms    full per-frame benchmark step
+effective_fps    1000 / mean_end_to_end_ms
+```
+
 ## 1. Get The Repository
 
 ```bash
@@ -180,6 +199,38 @@ Run all available models and save overlay MP4s:
 RUN_SUITE=1 DRY_RUN=0 bash scripts/setup_thor_saco_stream_benchmark.sh
 ```
 
+The setup script defaults to `SACO_MODE_SET=video`. To run only independent
+image-per-frame models through the same setup script:
+
+```bash
+SACO_MODE_SET=image_per_frame RUN_SUITE=1 DRY_RUN=0 \
+  bash scripts/setup_thor_saco_stream_benchmark.sh
+```
+
+Run both video modes and independent image-per-frame modes for all supported
+models:
+
+```bash
+bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
+Dry-run the one-command video + image-per-frame suite:
+
+```bash
+DRY_RUN=1 bash scripts/run_thor_saco_video_and_image_per_frame.sh
+```
+
+The one-command script accepts the same common knobs:
+
+```text
+SACO_COUNT=20
+MAX_FRAMES=120
+INPUT_FPS=30.0
+SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame"
+OUTPUT_DIR=results/thor/saco_video_image_per_frame/<run_id>
+OVERLAY_DIR=overlays/thor/saco_video_image_per_frame/<run_id>
+```
+
 Or run a smaller first pass:
 
 ```bash
@@ -212,6 +263,7 @@ The default suite includes:
 mobilesam_vit_t_bbox_chain
 sam1_vit_b_bbox_chain
 sam1_vit_l_bbox_chain
+sam1_vit_h_bbox_chain
 sam2p1_hiera_tiny_bbox_chain
 sam2p1_hiera_tiny_native
 sam2p1_hiera_large_bbox_chain
@@ -223,6 +275,25 @@ efficientsam3_ev_m_text_bbox_chain
 efficientsam3_rv_m_text_bbox_chain
 efficientsam3_tv_m_text_bbox_chain
 ```
+
+The image-per-frame suite includes:
+
+```text
+mobilesam_vit_t_image_per_frame
+sam1_vit_b_image_per_frame
+sam1_vit_l_image_per_frame
+sam1_vit_h_image_per_frame
+sam2p1_hiera_tiny_image_per_frame
+sam2p1_hiera_large_image_per_frame
+sam3_ref_image_per_frame
+efficientsam3_ev_m_image_per_frame
+efficientsam3_rv_m_image_per_frame
+efficientsam3_tv_m_image_per_frame
+```
+
+SAM3.1 is currently video-native only in this suite because the available
+`sam3.1_multiplex.pt` checkpoint is used through the native video predictor, not
+the SAM3 image processor.
 
 `sam2p1_hiera_tiny` is the smallest SAM2 replacement for the earlier SAM2-B
 request. `sam3_ref` uses the available `sam3.pt`; `sam3p1_ref` uses
