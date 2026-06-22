@@ -68,6 +68,7 @@ class MobileSamInteractiveNode(Node):
         self.initial_point_y = float(self.get_parameter("initial_point_y").value)
         self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.pending_point: tuple[float, float] | None = None
+        self.prompt_point: tuple[float, float] | None = None
         self.tracking_bbox: tuple[float, float, float, float] | None = None
         self.latest_frame: np.ndarray | None = None
         self.latest_display: np.ndarray | None = None
@@ -126,6 +127,7 @@ class MobileSamInteractiveNode(Node):
         if point is None:
             return
         self.pending_point = point
+        self.prompt_point = point
         self.tracking_bbox = None
         self.latest_result = {"tracking_state": "pending_click", "point_x": point[0], "point_y": point[1]}
         self.get_logger().info(f"received point prompt x={point[0]:.1f} y={point[1]:.1f}")
@@ -168,9 +170,6 @@ class MobileSamInteractiveNode(Node):
                 self.tracking_bbox = next_bbox
                 state = "tracking"
                 overlay = overlay_prediction(frame, prediction.masks, [next_bbox], prediction.scores)
-                if prompt.points:
-                    x, y = [int(round(value)) for value in prompt.points[0]]
-                    cv2.circle(overlay, (x, y), 6, (255, 80, 30), -1, cv2.LINE_AA)
             result = self._result(
                 msg,
                 state,
@@ -182,6 +181,7 @@ class MobileSamInteractiveNode(Node):
                 bbox=next_bbox,
                 prediction=prediction,
             )
+        _draw_prompt_marker(overlay, self.prompt_point)
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         result["tracking_fps"] = self._tracking_fps()
         self.recorder.write(overlay)
@@ -203,6 +203,7 @@ class MobileSamInteractiveNode(Node):
             raise SystemExit
         if key == ord("r"):
             self.pending_point = None
+            self.prompt_point = None
             self.tracking_bbox = None
             self.latest_result = {"tracking_state": "waiting_for_click"}
             self.get_logger().info(f"reset {self.model_label} tracking state")
@@ -221,6 +222,7 @@ class MobileSamInteractiveNode(Node):
                 point = (self.initial_point_x * float(width), self.initial_point_y * float(height))
             else:
                 point = (self.initial_point_x, self.initial_point_y)
+            self.prompt_point = point
             return Prompt(points=[point], labels=[1])
         return None
 
@@ -365,6 +367,22 @@ def _scale_display(image: np.ndarray, display_scale: float, display_max_width: i
 
 def _status_overlay(frame_rgb: np.ndarray, status: str) -> np.ndarray:
     return frame_rgb.copy()
+
+
+def _draw_prompt_marker(image_rgb: np.ndarray, point: tuple[float, float] | None) -> None:
+    if point is None:
+        return
+    height, width = image_rgb.shape[:2]
+    x = int(round(point[0]))
+    y = int(round(point[1]))
+    if x < 0 or y < 0 or x >= width or y >= height:
+        return
+    cv2.circle(image_rgb, (x, y), 9, (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.circle(image_rgb, (x, y), 5, (255, 80, 30), -1, cv2.LINE_AA)
+    cv2.line(image_rgb, (max(0, x - 14), y), (max(0, x - 7), y), (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.line(image_rgb, (min(width - 1, x + 7), y), (min(width - 1, x + 14), y), (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.line(image_rgb, (x, max(0, y - 14)), (x, max(0, y - 7)), (255, 255, 255), 2, cv2.LINE_AA)
+    cv2.line(image_rgb, (x, min(height - 1, y + 7)), (x, min(height - 1, y + 14)), (255, 255, 255), 2, cv2.LINE_AA)
 
 
 def _draw_text(image_bgr: np.ndarray, text: str, origin: tuple[int, int], scale: float = 0.7) -> None:

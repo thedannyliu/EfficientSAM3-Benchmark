@@ -352,6 +352,8 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
 For MobileSAM, click the image to initialize or reset the point prompt; clicks
 on the profiling panel are ignored. Later frames use the previous mask bounding
 box as the next box prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
+The clicked point is shown as a persistent marker on the overlay until reset or
+until another point is clicked.
 The next-frame box prompt defaults to `bbox_scale:=1.2`, which expands the
 mask-derived box by about 20% around its center before passing it to the next
 frame.
