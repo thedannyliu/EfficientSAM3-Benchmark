@@ -11,7 +11,7 @@ camera_stream_node -> /image
                           -> /segmented_image
 result_recorder_node -> CSV + summary CSV
 overlay_video_recorder_node -> overlay MP4
-live_viewer_node -> left: original stream, right: segmentation mask overlay
+live_viewer_node -> image with segmentation overlay, metrics panel on the right
 ```
 
 Use this path after the offline benchmark works. The ROS numbers include model
@@ -225,7 +225,7 @@ yoloe_text_backend_node
 This demo shows one live OpenCV window:
 
 ```text
-left: original video stream     right: segmentation mask overlay
+left: image with segmentation overlay     right: profiling metrics panel
 ```
 
 It also publishes machine-readable and visual segmentation topics:
@@ -251,7 +251,7 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
 
 Use `resize_width` or `resize_height` to shrink large videos before they enter
 the ROS stream. For example, a 1280x720 video with `resize_width:=640` shows as
-about 1280x360 in the side-by-side MobileSAM window.
+about 640x360 plus the metrics panel in the MobileSAM window.
 
 Choose one Terminal B backend option.
 
@@ -341,17 +341,20 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
   -p display_max_width:=1600 \
+  -p record_overlay:=false \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
 
-For MobileSAM, click the left side of the MobileSAM window to initialize the
-point prompt. Later frames use the previous mask bounding box as the next box
-prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
-Use `display_max_width` to cap the full side-by-side window width, or
-`display_scale` to set a fixed display ratio such as `0.5`.
+For MobileSAM, click the image to initialize or reset the point prompt; clicks
+on the profiling panel are ignored. Later frames use the previous mask bounding
+box as the next box prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
+Use `display_max_width` to cap the full window width, or `display_scale` to set
+a fixed display ratio such as `0.5`. Set `record_overlay:=true` and optionally
+`overlay_video_output:=overlays/ros/mobile_sam_demo.mp4` to save the overlay
+video directly from the interactive node.
 
 Terminal B option 4, run SAM1-H bbox-chain tracking with the same interactive
 node:
@@ -404,7 +407,7 @@ YOLOE is the text-prompt YOLO path in this repo. It runs per-frame
 open-vocabulary segmentation, not video tracking.
 
 For SAM3 per-frame, SAM3 native clip tracking, RepViT-S, or YOLOE, Terminal C
-opens the live side-by-side viewer:
+opens the live overlay viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -414,14 +417,18 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
   -p segmented_image_topic:=/segmented_image \
   -p result_topic:=/sam/result_json \
-  -p display_max_width:=1600
+  -p display_max_width:=1600 \
+  -p record_overlay:=false
 ```
 
 Skip Terminal C when using MobileSAM or SAM1-H because
-`mobile_sam_interactive_node` already opens the interactive side-by-side window.
-The viewer overlays FPS, per-frame backend latency, callback/end-to-end latency,
-CUDA memory, and Jetson GPU utilization when `tegrastats` is available. Press
-`q` or `Esc` in the viewer window to close it.
+`mobile_sam_interactive_node` already opens the interactive overlay window.
+The viewer shows FPS, per-frame backend latency, callback/end-to-end latency,
+CUDA memory, and Jetson GPU utilization in the right-side panel when
+`tegrastats` is available. Set `record_overlay:=true` and optionally
+`overlay_video_output:=overlays/ros/live_viewer_demo.mp4` to save the overlay
+video directly from the viewer. Press `q` or `Esc` in the viewer window to
+close it.
 
 Verify the output topics:
 
@@ -565,7 +572,7 @@ ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
 ```
 
 For SAM3 per-frame, SAM3 native clip tracking, EfficientSAM3, or YOLOE,
-Terminal C opens the live side-by-side viewer:
+Terminal C opens the live overlay viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -574,7 +581,9 @@ source scripts/source_thor_ros_env.sh
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
   -p segmented_image_topic:=/segmented_image \
-  -p result_topic:=/sam/result_json
+  -p result_topic:=/sam/result_json \
+  -p display_max_width:=1600 \
+  -p record_overlay:=false
 ```
 
 Terminal B option 4, run interactive MobileSAM bbox-chain tracking:
@@ -591,6 +600,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
   -p display_max_width:=1600 \
+  -p record_overlay:=false \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
@@ -617,17 +627,17 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-The MobileSAM/SAM1-H window shows its own side-by-side view, so do not start
+The MobileSAM/SAM1-H window shows its own interactive overlay view, so do not start
 Terminal C when using these options:
 
 ```text
-left: live RealSense RGB frame     right: MobileSAM or SAM1-H mask overlay
+left: live RGB frame with mask overlay     right: profiling metrics panel
 ```
 
 Controls:
 
 ```text
-left click on the left image: initialize or reset the point prompt
+left click on the image: initialize or reset the point prompt
 r: clear current tracking state
 q or Esc: exit
 ```

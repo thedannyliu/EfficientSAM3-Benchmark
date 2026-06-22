@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -36,6 +37,10 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("display_scale", 1.0)
         self.declare_parameter("display_max_width", 0)
+        self.declare_parameter("record_overlay", False)
+        self.declare_parameter("overlay_video_output", "overlays/ros/mobile_sam_overlay.mp4")
+        self.declare_parameter("overlay_video_fps", 15.0)
+        self.declare_parameter("overlay_video_max_frames", 0)
         self.declare_parameter("bbox_min_area", 25)
         self.declare_parameter("enable_display", True)
         self.declare_parameter("auto_start", False)
@@ -48,6 +53,12 @@ class MobileSamInteractiveNode(Node):
         self.display_scale = float(self.get_parameter("display_scale").value)
         self.display_max_width = int(self.get_parameter("display_max_width").value)
         self.current_display_scale = 1.0
+        self.recorder = OverlayRecorder(
+            enabled=bool(self.get_parameter("record_overlay").value),
+            output_path=Path(str(self.get_parameter("overlay_video_output").value)),
+            fps=float(self.get_parameter("overlay_video_fps").value),
+            max_frames=int(self.get_parameter("overlay_video_max_frames").value),
+        )
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
         self.enable_display = bool(self.get_parameter("enable_display").value)
         self.auto_start = bool(self.get_parameter("auto_start").value)
@@ -96,8 +107,9 @@ class MobileSamInteractiveNode(Node):
             cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
             cv2.setMouseCallback(self.window_name, self.on_mouse)
             self.get_logger().info(
-                f"listening on {image_topic}; click the left image to initialize {self.model_label}; "
-                f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}"
+                f"listening on {image_topic}; click the image to initialize {self.model_label}; "
+                f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}; "
+                f"record_overlay={self.recorder.enabled}"
             )
         elif self.auto_start:
             self.get_logger().info(f"listening on {image_topic}; auto-starting {self.model_label} from initial point")
@@ -165,7 +177,8 @@ class MobileSamInteractiveNode(Node):
             )
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         result["tracking_fps"] = self._tracking_fps()
-        display = _side_by_side(frame, overlay, result, self.model_label)
+        self.recorder.write(overlay)
+        display = _display_with_metrics(overlay, result, self.model_label)
         self.latest_display, self.current_display_scale = _scale_display(
             display,
             self.display_scale,
@@ -269,20 +282,67 @@ class MobileSamInteractiveNode(Node):
     def destroy_node(self) -> bool:
         if self.enable_display:
             cv2.destroyAllWindows()
+        self.recorder.release(self.get_logger())
         return super().destroy_node()
 
 
-def _side_by_side(
-    frame_rgb: np.ndarray, overlay_rgb: np.ndarray, result: dict[str, Any], model_label: str
-) -> np.ndarray:
-    if frame_rgb.shape[:2] != overlay_rgb.shape[:2]:
-        overlay_rgb = cv2.resize(overlay_rgb, (frame_rgb.shape[1], frame_rgb.shape[0]), interpolation=cv2.INTER_LINEAR)
-    combined = np.hstack([frame_rgb, overlay_rgb])
-    combined_bgr = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
-    _draw_text(combined_bgr, "Original - click here", (16, 32))
-    _draw_text(combined_bgr, f"{model_label} mask", (frame_rgb.shape[1] + 16, 32))
-    _draw_metrics(combined_bgr, frame_rgb.shape[1] + 16, 64, result)
-    return combined_bgr
+class OverlayRecorder:
+    def __init__(self, enabled: bool, output_path: Path, fps: float, max_frames: int) -> None:
+        self.enabled = enabled
+        self.output_path = output_path
+        self.fps = fps
+        self.max_frames = max_frames
+        self.writer: cv2.VideoWriter | None = None
+        self.frames = 0
+
+    def write(self, frame_rgb: np.ndarray) -> None:
+        if not self.enabled:
+            return
+        if self.writer is None:
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            height, width = frame_rgb.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(str(self.output_path), fourcc, self.fps, (width, height))
+            if not self.writer.isOpened():
+                raise RuntimeError(f"failed to create overlay video: {self.output_path}")
+        self.writer.write(cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+        self.frames += 1
+        if self.max_frames > 0 and self.frames >= self.max_frames:
+            raise SystemExit
+
+    def release(self, logger: Any) -> None:
+        if self.writer is not None:
+            self.writer.release()
+            logger.info(f"wrote {self.frames} overlay frames to {self.output_path}")
+
+
+def _display_with_metrics(overlay_rgb: np.ndarray, result: dict[str, Any], model_label: str) -> np.ndarray:
+    overlay_bgr = cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR)
+    panel = _metrics_panel(
+        overlay_bgr.shape[0],
+        [
+            model_label,
+            f"State: {result.get('tracking_state', 'n/a')}",
+            f"Prompt: {result.get('prompt_mode') or 'click image'}",
+            f"FPS: {_format_float(result.get('tracking_fps'))}",
+            f"Latency: {_format_float(result.get('latency_ms'))} ms",
+            f"Callback: {_format_float(result.get('callback_total_ms'))} ms",
+            f"End-to-end: {_format_float(result.get('end_to_end_ms'))} ms",
+            f"CUDA: {_format_float(result.get('cuda_allocated_mb'))} MB",
+        ],
+    )
+    return np.hstack([overlay_bgr, panel])
+
+
+def _metrics_panel(height: int, lines: list[str], width: int = 360) -> np.ndarray:
+    panel = np.full((height, width, 3), 24, dtype=np.uint8)
+    cv2.rectangle(panel, (0, 0), (width - 1, height - 1), (55, 55, 55), 1)
+    y = 34
+    for idx, line in enumerate(lines):
+        scale = 0.66 if idx == 0 else 0.56
+        _draw_text(panel, line, (16, y), scale=scale)
+        y += 30 if idx == 0 else 24
+    return panel
 
 
 def _scale_display(image: np.ndarray, display_scale: float, display_max_width: int) -> tuple[np.ndarray, float]:
@@ -297,35 +357,12 @@ def _scale_display(image: np.ndarray, display_scale: float, display_max_width: i
 
 
 def _status_overlay(frame_rgb: np.ndarray, status: str) -> np.ndarray:
-    overlay = frame_rgb.copy()
-    _draw_text_rgb(overlay, status, (16, 32))
-    return overlay
-
-
-def _draw_metrics(image_bgr: np.ndarray, x: int, y: int, result: dict[str, Any]) -> None:
-    lines = [
-        f"State: {result.get('tracking_state', 'n/a')}",
-        f"Prompt: {result.get('prompt_mode') or 'n/a'}",
-        f"FPS: {_format_float(result.get('tracking_fps'))}",
-        f"Latency: {_format_float(result.get('latency_ms'))} ms",
-        f"Callback: {_format_float(result.get('callback_total_ms'))} ms",
-        f"End-to-end: {_format_float(result.get('end_to_end_ms'))} ms",
-        f"CUDA: {_format_float(result.get('cuda_allocated_mb'))} MB",
-    ]
-    cv2.rectangle(image_bgr, (x - 8, y - 22), (x + 360, y + 24 * len(lines)), (0, 0, 0), -1)
-    for idx, line in enumerate(lines):
-        _draw_text(image_bgr, line, (x, y + idx * 24), scale=0.58)
+    return frame_rgb.copy()
 
 
 def _draw_text(image_bgr: np.ndarray, text: str, origin: tuple[int, int], scale: float = 0.7) -> None:
     cv2.putText(image_bgr, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 4, cv2.LINE_AA)
     cv2.putText(image_bgr, text, origin, cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), 1, cv2.LINE_AA)
-
-
-def _draw_text_rgb(image_rgb: np.ndarray, text: str, origin: tuple[int, int]) -> None:
-    image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-    _draw_text(image_bgr, text, origin)
-    image_rgb[:] = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
 
 def _format_float(value: Any) -> str:

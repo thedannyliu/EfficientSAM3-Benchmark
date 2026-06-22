@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import threading
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -28,12 +29,22 @@ class LiveViewerNode(Node):
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("display_scale", 1.0)
         self.declare_parameter("display_max_width", 0)
+        self.declare_parameter("record_overlay", False)
+        self.declare_parameter("overlay_video_output", "overlays/ros/live_viewer_overlay.mp4")
+        self.declare_parameter("overlay_video_fps", 15.0)
+        self.declare_parameter("overlay_video_max_frames", 0)
 
         self.bridge = CvBridge()
         self.window_name = str(self.get_parameter("window_name").value)
         display_fps = float(self.get_parameter("display_fps").value)
         self.display_scale = float(self.get_parameter("display_scale").value)
         self.display_max_width = int(self.get_parameter("display_max_width").value)
+        self.recorder = OverlayRecorder(
+            enabled=bool(self.get_parameter("record_overlay").value),
+            output_path=Path(str(self.get_parameter("overlay_video_output").value)),
+            fps=float(self.get_parameter("overlay_video_fps").value),
+            max_frames=int(self.get_parameter("overlay_video_max_frames").value),
+        )
         self.latest_image: np.ndarray | None = None
         self.latest_segmented: np.ndarray | None = None
         self.latest_metrics: dict[str, Any] = {}
@@ -51,7 +62,8 @@ class LiveViewerNode(Node):
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         self.get_logger().info(
             f"viewing {image_topic} beside {segmented_image_topic}; metrics from {result_topic}; "
-            f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}"
+            f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}; "
+            f"record_overlay={self.recorder.enabled}"
         )
 
     def on_image(self, msg: Image) -> None:
@@ -70,15 +82,16 @@ class LiveViewerNode(Node):
     def display(self) -> None:
         if self.latest_image is None or self.latest_segmented is None:
             return
-        left = self.latest_image
-        right = self.latest_segmented
-        if left.shape[:2] != right.shape[:2]:
-            right = cv2.resize(right, (left.shape[1], left.shape[0]), interpolation=cv2.INTER_LINEAR)
-        combined = np.hstack([left, right])
-        combined = cv2.cvtColor(combined, cv2.COLOR_RGB2BGR)
-        _draw_labels(combined, left_width=left.shape[1])
-        _draw_metrics(
-            combined,
+        overlay = self.latest_segmented
+        if self.latest_image.shape[:2] != overlay.shape[:2]:
+            overlay = cv2.resize(
+                overlay,
+                (self.latest_image.shape[1], self.latest_image.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        self.recorder.write(overlay)
+        combined = _display_with_metrics(
+            overlay,
             viewer_fps=self._viewer_fps(),
             metrics=self.latest_metrics,
             gpu_util=self.gpu_monitor.gpu_util,
@@ -99,6 +112,7 @@ class LiveViewerNode(Node):
 
     def destroy_node(self) -> bool:
         self.gpu_monitor.stop()
+        self.recorder.release(self.get_logger())
         cv2.destroyAllWindows()
         return super().destroy_node()
 
@@ -145,32 +159,67 @@ class TegrastatsMonitor:
                 self.gpu_util = value
 
 
-def _draw_labels(image_bgr: np.ndarray, left_width: int) -> None:
-    _draw_text(image_bgr, "Original", (16, 32))
-    _draw_text(image_bgr, "SAM3 mask overlay", (left_width + 16, 32))
+class OverlayRecorder:
+    def __init__(self, enabled: bool, output_path: Path, fps: float, max_frames: int) -> None:
+        self.enabled = enabled
+        self.output_path = output_path
+        self.fps = fps
+        self.max_frames = max_frames
+        self.writer: cv2.VideoWriter | None = None
+        self.frames = 0
+
+    def write(self, frame_rgb: np.ndarray) -> None:
+        if not self.enabled:
+            return
+        if self.writer is None:
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            height, width = frame_rgb.shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            self.writer = cv2.VideoWriter(str(self.output_path), fourcc, self.fps, (width, height))
+            if not self.writer.isOpened():
+                raise RuntimeError(f"failed to create overlay video: {self.output_path}")
+        self.writer.write(cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+        self.frames += 1
+        if self.max_frames > 0 and self.frames >= self.max_frames:
+            raise SystemExit
+
+    def release(self, logger: Any) -> None:
+        if self.writer is not None:
+            self.writer.release()
+            logger.info(f"wrote {self.frames} overlay frames to {self.output_path}")
 
 
-def _draw_metrics(
-    image_bgr: np.ndarray,
+def _display_with_metrics(
+    overlay_rgb: np.ndarray,
     viewer_fps: float | None,
     metrics: dict[str, Any],
     gpu_util: float | None,
-) -> None:
-    lines = [
-        f"FPS: {_format_float(viewer_fps)}",
-        f"SAM latency: {_format_float(metrics.get('latency_ms'))} ms",
-        f"Callback: {_format_float(metrics.get('callback_total_ms'))} ms",
-        f"End-to-end: {_format_float(metrics.get('end_to_end_ms'))} ms",
-        f"GPU util: {_format_float(gpu_util)}%",
-        f"CUDA alloc: {_format_float(metrics.get('cuda_allocated_mb'))} MB",
-    ]
-    x = image_bgr.shape[1] // 2 + 16
-    y = 64
-    width = 360
-    height = 24 * len(lines) + 16
-    cv2.rectangle(image_bgr, (x - 8, y - 22), (x + width, y + height), (0, 0, 0), -1)
+) -> np.ndarray:
+    overlay_bgr = cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR)
+    panel = _metrics_panel(
+        overlay_bgr.shape[0],
+        [
+            "Overlay",
+            f"FPS: {_format_float(viewer_fps)}",
+            f"SAM latency: {_format_float(metrics.get('latency_ms'))} ms",
+            f"Callback: {_format_float(metrics.get('callback_total_ms'))} ms",
+            f"End-to-end: {_format_float(metrics.get('end_to_end_ms'))} ms",
+            f"GPU util: {_format_float(gpu_util)}%",
+            f"CUDA alloc: {_format_float(metrics.get('cuda_allocated_mb'))} MB",
+        ],
+    )
+    return np.hstack([overlay_bgr, panel])
+
+
+def _metrics_panel(height: int, lines: list[str], width: int = 360) -> np.ndarray:
+    panel = np.full((height, width, 3), 24, dtype=np.uint8)
+    cv2.rectangle(panel, (0, 0), (width - 1, height - 1), (55, 55, 55), 1)
+    y = 34
     for idx, line in enumerate(lines):
-        _draw_text(image_bgr, line, (x, y + idx * 24), scale=0.58)
+        scale = 0.66 if idx == 0 else 0.56
+        _draw_text(panel, line, (16, y), scale=scale)
+        y += 30 if idx == 0 else 24
+    return panel
 
 
 def _scale_display(image: np.ndarray, display_scale: float, display_max_width: int) -> np.ndarray:
