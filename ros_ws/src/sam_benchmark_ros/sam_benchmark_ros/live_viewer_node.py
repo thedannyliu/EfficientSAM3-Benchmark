@@ -26,10 +26,14 @@ class LiveViewerNode(Node):
         self.declare_parameter("result_topic", "/sam/result_json")
         self.declare_parameter("window_name", "SAM3 ROS Streaming")
         self.declare_parameter("display_fps", 30.0)
+        self.declare_parameter("display_scale", 1.0)
+        self.declare_parameter("display_max_width", 0)
 
         self.bridge = CvBridge()
         self.window_name = str(self.get_parameter("window_name").value)
         display_fps = float(self.get_parameter("display_fps").value)
+        self.display_scale = float(self.get_parameter("display_scale").value)
+        self.display_max_width = int(self.get_parameter("display_max_width").value)
         self.latest_image: np.ndarray | None = None
         self.latest_segmented: np.ndarray | None = None
         self.latest_metrics: dict[str, Any] = {}
@@ -44,8 +48,10 @@ class LiveViewerNode(Node):
         self.segmented_subscription = self.create_subscription(Image, segmented_image_topic, self.on_segmented, 10)
         self.result_subscription = self.create_subscription(String, result_topic, self.on_result, 10)
         self.timer = self.create_timer(1.0 / display_fps, self.display)
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         self.get_logger().info(
-            f"viewing {image_topic} beside {segmented_image_topic}; metrics from {result_topic}"
+            f"viewing {image_topic} beside {segmented_image_topic}; metrics from {result_topic}; "
+            f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}"
         )
 
     def on_image(self, msg: Image) -> None:
@@ -77,6 +83,7 @@ class LiveViewerNode(Node):
             metrics=self.latest_metrics,
             gpu_util=self.gpu_monitor.gpu_util,
         )
+        combined = _scale_display(combined, self.display_scale, self.display_max_width)
         cv2.imshow(self.window_name, combined)
         key = cv2.waitKey(1) & 0xFF
         if key in {27, ord("q")}:
@@ -164,6 +171,17 @@ def _draw_metrics(
     cv2.rectangle(image_bgr, (x - 8, y - 22), (x + width, y + height), (0, 0, 0), -1)
     for idx, line in enumerate(lines):
         _draw_text(image_bgr, line, (x, y + idx * 24), scale=0.58)
+
+
+def _scale_display(image: np.ndarray, display_scale: float, display_max_width: int) -> np.ndarray:
+    scale = display_scale if display_scale > 0 else 1.0
+    if display_max_width > 0 and image.shape[1] * scale > display_max_width:
+        scale = display_max_width / float(image.shape[1])
+    if scale == 1.0:
+        return image
+    width = max(1, int(round(image.shape[1] * scale)))
+    height = max(1, int(round(image.shape[0] * scale)))
+    return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA)
 
 
 def _draw_text(image_bgr: np.ndarray, text: str, origin: tuple[int, int], scale: float = 0.7) -> None:

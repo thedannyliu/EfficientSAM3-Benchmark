@@ -34,6 +34,8 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("mobile_sam_model_type", "vit_t")
         self.declare_parameter("window_name", "MobileSAM RealSense")
         self.declare_parameter("display_fps", 30.0)
+        self.declare_parameter("display_scale", 1.0)
+        self.declare_parameter("display_max_width", 0)
         self.declare_parameter("bbox_min_area", 25)
         self.declare_parameter("enable_display", True)
         self.declare_parameter("auto_start", False)
@@ -43,6 +45,9 @@ class MobileSamInteractiveNode(Node):
 
         self.bridge = CvBridge()
         self.window_name = str(self.get_parameter("window_name").value)
+        self.display_scale = float(self.get_parameter("display_scale").value)
+        self.display_max_width = int(self.get_parameter("display_max_width").value)
+        self.current_display_scale = 1.0
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
         self.enable_display = bool(self.get_parameter("enable_display").value)
         self.auto_start = bool(self.get_parameter("auto_start").value)
@@ -90,7 +95,10 @@ class MobileSamInteractiveNode(Node):
         if self.enable_display:
             cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
             cv2.setMouseCallback(self.window_name, self.on_mouse)
-            self.get_logger().info(f"listening on {image_topic}; click the left image to initialize {self.model_label}")
+            self.get_logger().info(
+                f"listening on {image_topic}; click the left image to initialize {self.model_label}; "
+                f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}"
+            )
         elif self.auto_start:
             self.get_logger().info(f"listening on {image_topic}; auto-starting {self.model_label} from initial point")
         else:
@@ -99,7 +107,8 @@ class MobileSamInteractiveNode(Node):
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
         if event != cv2.EVENT_LBUTTONDOWN or self.latest_frame is None:
             return
-        point = left_panel_click_to_image_point(x, y, self.latest_frame.shape[:2])
+        scale = self.current_display_scale if self.current_display_scale > 0 else 1.0
+        point = left_panel_click_to_image_point(x / scale, y / scale, self.latest_frame.shape[:2])
         if point is None:
             return
         self.pending_point = point
@@ -156,7 +165,12 @@ class MobileSamInteractiveNode(Node):
             )
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         result["tracking_fps"] = self._tracking_fps()
-        self.latest_display = _side_by_side(frame, overlay, result, self.model_label)
+        display = _side_by_side(frame, overlay, result, self.model_label)
+        self.latest_display, self.current_display_scale = _scale_display(
+            display,
+            self.display_scale,
+            self.display_max_width,
+        )
         self._publish(msg, mask, overlay, result)
         self.frame_index += 1
 
@@ -269,6 +283,17 @@ def _side_by_side(
     _draw_text(combined_bgr, f"{model_label} mask", (frame_rgb.shape[1] + 16, 32))
     _draw_metrics(combined_bgr, frame_rgb.shape[1] + 16, 64, result)
     return combined_bgr
+
+
+def _scale_display(image: np.ndarray, display_scale: float, display_max_width: int) -> tuple[np.ndarray, float]:
+    scale = display_scale if display_scale > 0 else 1.0
+    if display_max_width > 0 and image.shape[1] * scale > display_max_width:
+        scale = display_max_width / float(image.shape[1])
+    if scale == 1.0:
+        return image, 1.0
+    width = max(1, int(round(image.shape[1] * scale)))
+    height = max(1, int(round(image.shape[0] * scale)))
+    return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA), scale
 
 
 def _status_overlay(frame_rgb: np.ndarray, status: str) -> np.ndarray:

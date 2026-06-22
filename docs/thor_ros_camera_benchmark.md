@@ -245,8 +245,13 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p video_path:=videos/test1.mov \
   -p image_topic:=/image \
   -p fps:=15.0 \
-  -p frame_id:=video
+  -p frame_id:=video \
+  -p resize_width:=640
 ```
+
+Use `resize_width` or `resize_height` to shrink large videos before they enter
+the ROS stream. For example, a 1280x720 video with `resize_width:=640` shows as
+about 1280x360 in the side-by-side MobileSAM window.
 
 Choose one Terminal B backend option.
 
@@ -335,6 +340,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p external_repo:=external/MobileSAM \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
+  -p display_max_width:=1600 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
@@ -344,6 +350,8 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
 For MobileSAM, click the left side of the MobileSAM window to initialize the
 point prompt. Later frames use the previous mask bounding box as the next box
 prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
+Use `display_max_width` to cap the full side-by-side window width, or
+`display_scale` to set a fixed display ratio such as `0.5`.
 
 Terminal B option 4, run SAM1-H bbox-chain tracking with the same interactive
 node:
@@ -405,7 +413,8 @@ source scripts/source_thor_ros_env.sh
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
   -p segmented_image_topic:=/segmented_image \
-  -p result_topic:=/sam/result_json
+  -p result_topic:=/sam/result_json \
+  -p display_max_width:=1600
 ```
 
 Skip Terminal C when using MobileSAM or SAM1-H because
@@ -581,6 +590,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p external_repo:=external/MobileSAM \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
+  -p display_max_width:=1600 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
