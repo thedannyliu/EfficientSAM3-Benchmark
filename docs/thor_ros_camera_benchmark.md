@@ -86,6 +86,243 @@ for one-word nouns, but comma separation is safer for multi-word phrases.
 If you are already inside `~/EfficientSAM3-Benchmark`, skip repeated
 `cd EfficientSAM3-Benchmark` lines in the command blocks.
 
+## 0. Quick Demo Usage
+
+Use this section when you want to run a live demo rather than the full benchmark
+recording workflow. The flow is always:
+
+```text
+Terminal A: choose one image source
+Terminal B: choose one model/backend
+Terminal C: open viewer only for non-interactive models
+```
+
+All terminals should start from the same environment:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+```
+
+### Terminal A: Choose The Stream Source
+
+Use a recorded video as a ROS image stream:
+
+```bash
+ros2 run sam_benchmark_ros video_stream_node --ros-args \
+  -p video_path:=videos/test1.mov \
+  -p image_topic:=/image \
+  -p fps:=15.0 \
+  -p frame_id:=video \
+  -p resize_width:=640
+```
+
+Useful video stream controls:
+
+```text
+video_path       local video file to publish
+fps              publish rate; use half the original rate for 0.5x playback
+resize_width     shrink or enlarge the frames before publishing
+resize_height    alternative to resize_width
+```
+
+Use the RealSense RGB camera as the ROS image stream:
+
+```bash
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=false \
+  rgb_camera.color_profile:=1280x720x30
+```
+
+Then use this image topic for the camera commands:
+
+```text
+/camera/camera/color/image_raw
+```
+
+If your wrapper uses a different namespace, find it with:
+
+```bash
+ros2 topic list | grep color
+```
+
+### Terminal B: Choose The Demo Model
+
+The commands below use `image_topic:=/image` for recorded video. For the
+RealSense camera source, replace it with
+`image_topic:=/camera/camera/color/image_raw`.
+
+For **MobileSAM interactive point prompt tracking**, use the source topic from
+Terminal A. Use `/image` for video stream or
+`/camera/camera/color/image_raw` for RealSense:
+
+```bash
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
+  -p backend:=mobilesam \
+  -p checkpoint_path:=checkpoints/mobilesam/mobile_sam.pt \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_t \
+  -p display_max_width:=1600 \
+  -p bbox_scale:=1.2 \
+  -p record_overlay:=false \
+  -p overlay_video_output:=overlays/ros/mobile_sam_demo.mp4 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For **SAM1-H interactive point prompt tracking**, use the same node with SAM1-H
+weights:
+
+```bash
+ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
+  -p image_topic:=/image \
+  -p backend:=sam1 \
+  -p checkpoint_path:=checkpoints/mobilesam/sam_vit_h_4b8939.pth \
+  -p external_repo:=external/MobileSAM \
+  -p device:=cuda \
+  -p mobile_sam_model_type:=vit_h \
+  -p window_name:="SAM1-H ROS Demo" \
+  -p display_max_width:=1600 \
+  -p bbox_scale:=1.2 \
+  -p record_overlay:=false \
+  -p overlay_video_output:=overlays/ros/sam1_h_demo.mp4 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+MobileSAM and SAM1-H controls:
+
+```text
+left click on the image    initialize or reset the point prompt
+r                          clear tracking state
+q or Esc                   exit
+```
+
+The clicked point is shown on the overlay. After the first point prompt, the
+node uses the previous mask's bounding box as the next frame's box prompt.
+`bbox_scale:=1.2` expands that next-frame box by about 20% around its center.
+Set `record_overlay:=true` to save the overlay MP4 at `overlay_video_output`.
+
+For **SAM3 text prompt per-frame segmentation**:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p external_repo:=external/sam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+For **SAM3 native clip tracking**, the node first captures a fixed clip from
+the ROS image topic, writes frames to `frame_dir`, then runs SAM3's native video
+tracking path:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For **EfficientSAM3 text prompt per-frame segmentation**:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/efficient_sam3_repvit_s.pt \
+  -p device:=cuda \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+For **YOLOE open-vocabulary segmentation**:
+
+```bash
+ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
+  -p image_topic:=/image \
+  -p weights:=checkpoints/yoloe/yoloe-26m-seg.pt \
+  -p device:=cuda \
+  -p prompt:=monitor \
+  -p imgsz:=640 \
+  -p conf:=0.25 \
+  -p iou:=0.7 \
+  -p max_det:=20 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+### Terminal C: Viewer For Non-Interactive Models
+
+Skip Terminal C for MobileSAM and SAM1-H because their node already opens the
+interactive overlay window. For SAM3, EfficientSAM3, SAM3 native clip tracking,
+and YOLOE, open the viewer:
+
+```bash
+ros2 run sam_benchmark_ros live_viewer_node --ros-args \
+  -p image_topic:=/image \
+  -p segmented_image_topic:=/segmented_image \
+  -p result_topic:=/sam/result_json \
+  -p display_max_width:=1600 \
+  -p record_overlay:=false \
+  -p overlay_video_output:=overlays/ros/live_viewer_demo.mp4
+```
+
+The viewer shows the image with mask overlay on the left and profiling metrics
+on the right, so metrics do not cover the object. Set `record_overlay:=true` to
+save the overlay MP4.
+
+### Common Topic And Display Checks
+
+```bash
+ros2 topic hz /image
+ros2 topic hz /segmentation_mask
+ros2 topic hz /segmented_image
+ros2 topic echo /sam/result_json --once
+```
+
+If a new video path, FPS, display width, or recording setting does not appear to
+take effect, stop old nodes and restart from the rebuilt workspace:
+
+```bash
+pkill -f video_stream_node || true
+pkill -f mobile_sam_interactive_node || true
+pkill -f live_viewer_node || true
+
+cd ros_ws
+colcon build --symlink-install --packages-select sam_benchmark_ros
+cd ..
+source scripts/source_thor_ros_env.sh
+```
+
 ## 1. Prepare The Same Environment As Offline
 
 Start from `main`:
