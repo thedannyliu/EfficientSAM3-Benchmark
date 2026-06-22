@@ -42,6 +42,7 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("overlay_video_fps", 15.0)
         self.declare_parameter("overlay_video_max_frames", 0)
         self.declare_parameter("bbox_min_area", 25)
+        self.declare_parameter("bbox_scale", 1.2)
         self.declare_parameter("enable_display", True)
         self.declare_parameter("auto_start", False)
         self.declare_parameter("initial_point_x", 0.5)
@@ -60,6 +61,7 @@ class MobileSamInteractiveNode(Node):
             max_frames=int(self.get_parameter("overlay_video_max_frames").value),
         )
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
+        self.bbox_scale = float(self.get_parameter("bbox_scale").value)
         self.enable_display = bool(self.get_parameter("enable_display").value)
         self.auto_start = bool(self.get_parameter("auto_start").value)
         self.initial_point_x = float(self.get_parameter("initial_point_x").value)
@@ -151,7 +153,12 @@ class MobileSamInteractiveNode(Node):
             prediction = self.backend.predict(frame, prompt)
             latency_ms = (perf_counter() - prediction_start) * 1000.0
             mask = masks_to_mono8(prediction.masks, frame.shape[:2])
-            next_bbox = masks_to_bbox_xyxy(prediction.masks, frame.shape[:2], min_area=self.bbox_min_area)
+            next_bbox = masks_to_bbox_xyxy(
+                prediction.masks,
+                frame.shape[:2],
+                min_area=self.bbox_min_area,
+                scale=self.bbox_scale,
+            )
             prompt_mode = "point" if prompt.points else "box"
             if next_bbox is None:
                 self.tracking_bbox = None

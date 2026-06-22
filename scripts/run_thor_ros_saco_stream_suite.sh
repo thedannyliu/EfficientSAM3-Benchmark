@@ -35,6 +35,7 @@ ROS_STARTUP_SEC="${ROS_STARTUP_SEC:-5}"
 ROS_INITIAL_POINT_X="${ROS_INITIAL_POINT_X:-0.5}"
 ROS_INITIAL_POINT_Y="${ROS_INITIAL_POINT_Y:-0.5}"
 ROS_INITIAL_POINT_NORMALIZED="${ROS_INITIAL_POINT_NORMALIZED:-true}"
+ROS_BBOX_SCALE="${ROS_BBOX_SCALE:-1.2}"
 ROS_DEVICE="${ROS_DEVICE:-cuda}"
 ROS_SUPPORTED_MODELS=(
   mobilesam_vit_t_bbox_chain
@@ -218,6 +219,7 @@ backend_cmd_for_model() {
         -p "initial_point_x:=${ROS_INITIAL_POINT_X}"
         -p "initial_point_y:=${ROS_INITIAL_POINT_Y}"
         -p "initial_point_normalized:=${ROS_INITIAL_POINT_NORMALIZED}"
+        -p "bbox_scale:=${ROS_BBOX_SCALE}"
         -p "image_topic:=${ROS_IMAGE_TOPIC}"
         -p "result_topic:=${result_topic}"
         -p "overlay_topic:=${overlay_topic}"
@@ -242,6 +244,7 @@ backend_cmd_for_model() {
         -p "initial_point_x:=${ROS_INITIAL_POINT_X}"
         -p "initial_point_y:=${ROS_INITIAL_POINT_Y}"
         -p "initial_point_normalized:=${ROS_INITIAL_POINT_NORMALIZED}"
+        -p "bbox_scale:=${ROS_BBOX_SCALE}"
         -p "image_topic:=${ROS_IMAGE_TOPIC}"
         -p "result_topic:=${result_topic}"
         -p "overlay_topic:=${overlay_topic}"

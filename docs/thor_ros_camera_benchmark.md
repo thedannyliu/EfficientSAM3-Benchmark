@@ -341,6 +341,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
   -p display_max_width:=1600 \
+  -p bbox_scale:=1.2 \
   -p record_overlay:=false \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
@@ -351,6 +352,9 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
 For MobileSAM, click the image to initialize or reset the point prompt; clicks
 on the profiling panel are ignored. Later frames use the previous mask bounding
 box as the next box prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
+The next-frame box prompt defaults to `bbox_scale:=1.2`, which expands the
+mask-derived box by about 20% around its center before passing it to the next
+frame.
 Use `display_max_width` to cap the full window width, or `display_scale` to set
 a fixed display ratio such as `0.5`. Set `record_overlay:=true` and optionally
 `overlay_video_output:=overlays/ros/mobile_sam_demo.mp4` to save the overlay
@@ -371,14 +375,15 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_h \
   -p window_name:="SAM1-H ROS Video" \
+  -p bbox_scale:=1.2 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
 
-For SAM1-H, click the left side of the SAM1-H window to initialize the point
-prompt. Later frames use the previous mask bounding box as the next box prompt.
+For SAM1-H, click the image to initialize the point prompt. Later frames use the
+previous mask bounding box expanded by `bbox_scale:=1.2` as the next box prompt.
 Press `r` to reset tracking, or `q`/`Esc` to exit.
 
 Terminal B option 5, run YOLOE open-vocabulary segmentation with a text prompt
@@ -600,6 +605,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_t \
   -p display_max_width:=1600 \
+  -p bbox_scale:=1.2 \
   -p record_overlay:=false \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
@@ -621,6 +627,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p device:=cuda \
   -p mobile_sam_model_type:=vit_h \
   -p window_name:="SAM1-H RealSense" \
+  -p bbox_scale:=1.2 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
@@ -1018,6 +1025,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p mobile_sam_model_type:=vit_t \
   -p device:=cuda \
   -p window_name:="MobileSAM Camera" \
+  -p bbox_scale:=1.2 \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
@@ -1058,6 +1066,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p mobile_sam_model_type:=vit_h \
   -p device:=cuda \
   -p window_name:="SAM1-H Camera" \
+  -p bbox_scale:=1.2 \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \

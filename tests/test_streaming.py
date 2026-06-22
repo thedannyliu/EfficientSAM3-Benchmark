@@ -36,6 +36,15 @@ class StreamingHelpersTest(unittest.TestCase):
         self.assertIsNone(masks_to_bbox_xyxy(mask, (5, 6), min_area=100))
         self.assertIsNone(masks_to_bbox_xyxy([], (5, 6)))
 
+    def test_masks_to_bbox_xyxy_scales_box_about_center(self) -> None:
+        mask = np.zeros((10, 20), dtype=np.uint8)
+        mask[2:8, 5:15] = 1
+
+        self.assertSequenceEqual(
+            tuple(round(value, 6) for value in masks_to_bbox_xyxy(mask, (10, 20), scale=1.2)),
+            (4.0, 1.4, 15.0, 7.6),
+        )
+
     def test_left_panel_click_to_image_point(self) -> None:
         self.assertEqual(left_panel_click_to_image_point(10, 5, (20, 30)), (10.0, 5.0))
         self.assertIsNone(left_panel_click_to_image_point(30, 5, (20, 30)))

@@ -15,14 +15,38 @@ def masks_to_mono8(masks: Any, frame_hw: tuple[int, int]) -> np.ndarray:
     return (merged.astype(np.uint8) * 255).astype(np.uint8)
 
 
-def masks_to_bbox_xyxy(masks: Any, frame_hw: tuple[int, int], min_area: int = 1) -> tuple[float, float, float, float] | None:
+def masks_to_bbox_xyxy(
+    masks: Any,
+    frame_hw: tuple[int, int],
+    min_area: int = 1,
+    scale: float = 1.0,
+) -> tuple[float, float, float, float] | None:
     merged = merge_masks(masks, frame_hw)
     if merged is None or int(merged.sum()) < min_area:
         return None
     ys, xs = np.nonzero(merged)
     if xs.size == 0 or ys.size == 0:
         return None
-    return (float(xs.min()), float(ys.min()), float(xs.max()), float(ys.max()))
+    height, width = frame_hw
+    x1 = float(xs.min())
+    y1 = float(ys.min())
+    x2 = float(xs.max())
+    y2 = float(ys.max())
+    bbox_scale = max(1.0, float(scale))
+    if bbox_scale > 1.0:
+        box_width = x2 - x1 + 1.0
+        box_height = y2 - y1 + 1.0
+        x_pad = (bbox_scale - 1.0) * box_width / 2.0
+        y_pad = (bbox_scale - 1.0) * box_height / 2.0
+        x1 -= x_pad
+        y1 -= y_pad
+        x2 += x_pad
+        y2 += y_pad
+    x1 = max(0.0, x1)
+    y1 = max(0.0, y1)
+    x2 = min(float(width - 1), x2)
+    y2 = min(float(height - 1), y2)
+    return (x1, y1, x2, y2)
 
 
 def left_panel_click_to_image_point(

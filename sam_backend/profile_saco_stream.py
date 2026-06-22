@@ -96,6 +96,7 @@ SUMMARY_FIELDS = [
 class BBoxChainState:
     initial_prompt: Prompt
     bbox_min_area: int = 25
+    bbox_scale: float = 1.0
     initial_prompt_frame_index: int = 0
     tracking_bbox: tuple[float, float, float, float] | None = None
     used_initial_prompt: bool = False
@@ -113,7 +114,12 @@ class BBoxChainState:
         return Prompt(boxes=[self.tracking_bbox]), "box"
 
     def update(self, masks: Any, frame_hw: tuple[int, int]) -> tuple[float, float, float, float] | None:
-        self.tracking_bbox = masks_to_bbox_xyxy(masks, frame_hw, min_area=self.bbox_min_area)
+        self.tracking_bbox = masks_to_bbox_xyxy(
+            masks,
+            frame_hw,
+            min_area=self.bbox_min_area,
+            scale=self.bbox_scale,
+        )
         return self.tracking_bbox
 
 
@@ -363,6 +369,7 @@ def _profile_bbox_chain_source(
     state = BBoxChainState(
         initial_prompt=initial_prompt,
         bbox_min_area=args.bbox_min_area,
+        bbox_scale=args.bbox_scale,
     )
 
     writer = None
@@ -1004,6 +1011,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interpolate-pos-embed", action="store_true")
     parser.add_argument("--mobile-sam-model-type", default="vit_t")
     parser.add_argument("--bbox-min-area", type=int, default=25)
+    parser.add_argument("--bbox-scale", type=float, default=1.0)
     parser.add_argument("--input-fps", type=float, default=30.0)
     parser.add_argument("--csv-output", type=Path, required=True)
     parser.add_argument("--summary-output", type=Path)
