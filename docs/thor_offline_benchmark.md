@@ -695,7 +695,7 @@ sam-run-saco-stream-suite \
     efficientsam3_tinyvit21_image_per_frame_text \
     efficientsam3_tv_m_image_per_frame_point \
   --device cuda \
-  --max-frames 30 \
+  --max-frames 120 \
   --output-dir "${OUTPUT_DIR}" \
   --overlay-dir "${OVERLAY_DIR}" \
   --skip-missing
@@ -709,6 +709,12 @@ python -m sam_backend.saco_model_summary \
     efficientsam3_tv_m_image_per_frame_point \
   --output "${THREE_MODEL_SUMMARY}"
 ```
+
+The fixed manifest is `data/manifests/saco_veval_sav_fixed20.jsonl`. With
+`--max-frames 120`, this evaluates up to 2400 frame rows across 20 videos, with
+the final count lower when selected videos have fewer valid frames. Use
+`--max-frames 30` only for a quick first pass; fixed20 then produces at most
+600 frame rows.
 
 Command-only check without loading models:
 

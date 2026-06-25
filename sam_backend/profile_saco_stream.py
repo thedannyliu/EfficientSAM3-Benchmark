@@ -272,7 +272,11 @@ def _profile_image_per_frame_source(
     frame_paths = _frame_paths(item, args.max_frames)
     gt_masks = _gt_masks_by_frame(item)
     prompt_type = _resolved_prompt_type(args)
-    start_frame = _initial_prompt_frame_index(prompt_type, gt_masks, len(frame_paths), item)
+    try:
+        start_frame = _initial_prompt_frame_index(prompt_type, gt_masks, len(frame_paths), item)
+    except ValueError as exc:
+        print(f"skipping {item['source_id']}: {exc}", file=sys.stderr)
+        return [], [], ""
 
     writer = None
     overlay_video = ""
@@ -737,9 +741,12 @@ def _run_official_eval(args: argparse.Namespace, rows: list[dict[str, Any]]) -> 
     if eval_start not in ("", 0):
         return f"skipped: eval starts at frame {eval_start}"
     args.official_eval_json.parent.mkdir(parents=True, exist_ok=True)
+    eval_script = _official_eval_script(args.external_repo)
+    if eval_script is None:
+        return "skipped: official SA-Co eval script not found"
     cmd = [
         sys.executable,
-        str(Path(args.external_repo or "external/sam3") / "sam3" / "eval" / "saco_veval_eval.py"),
+        str(eval_script),
         "one",
         "--gt_annot_file",
         str(args.gt_annotation_file),
@@ -753,6 +760,16 @@ def _run_official_eval(args: argparse.Namespace, rows: list[dict[str, Any]]) -> 
     except (subprocess.CalledProcessError, FileNotFoundError) as exc:
         return f"failed: {exc}"
     return str(args.official_eval_json)
+
+
+def _official_eval_script(external_repo: str | None) -> Path | None:
+    root = Path(external_repo or "external/sam3")
+    candidates = [
+        root / "sam3" / "eval" / "saco_veval_eval.py",
+        root / "sam3" / "sam3" / "eval" / "saco_veval_eval.py",
+        root / "eval" / "saco_veval_eval.py",
+    ]
+    return next((path for path in candidates if path.exists()), None)
 
 
 def _read_manifest(path: Path) -> list[dict[str, Any]]:

@@ -140,10 +140,12 @@ class Sam3ImageBackend:
         if prompt.text:
             return self.processor.set_text_prompt(state=state, prompt=prompt.text)
         if prompt.points:
+            point_coords = np.asarray(prompt.points, dtype=np.float32)
+            point_labels = np.asarray(prompt.labels or [1] * len(prompt.points), dtype=np.int32)
             masks, scores, logits = self.model.predict_inst(
                 state,
-                point_coords=prompt.points,
-                point_labels=prompt.labels or [1] * len(prompt.points),
+                point_coords=point_coords,
+                point_labels=point_labels,
             )
             return {"masks": masks, "scores": scores, "logits": logits}
         if prompt.boxes:

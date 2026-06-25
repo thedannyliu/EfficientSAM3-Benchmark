@@ -16,6 +16,7 @@ from sam_backend.profile_saco_stream import (
     _decode_uncompressed_rle,
     _image_per_frame_prompt,
     _initial_prompt_frame_index,
+    _official_eval_script,
     profile_saco_stream,
 )
 from sam_backend.saco_manifest import build_saco_veval_manifest
@@ -277,6 +278,77 @@ class SacoStreamTests(unittest.TestCase):
             self.assertEqual(rows[0]["frame_index"], "1")
             self.assertEqual(rows[0]["prompt_mode"], "point")
 
+    def test_image_per_frame_point_skips_source_without_gt_in_profiled_frames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            media = tmp / "media" / "sav_a"
+            media.mkdir(parents=True)
+            frame = np.zeros((16, 20, 3), dtype=np.uint8)
+            self.assertTrue(cv2.imwrite(str(media / "00000.jpg"), frame))
+
+            manifest = tmp / "manifest.jsonl"
+            row = {
+                "dataset": "saco-veval-sav",
+                "source_id": "sav_a_7",
+                "video_id": 1,
+                "video_name": "sav_a",
+                "category_id": 7,
+                "noun_phrase": "green square",
+                "text_prompt": "green square",
+                "is_positive": True,
+                "media_root": str(tmp / "media"),
+                "file_names": ["sav_a/00000.jpg"],
+                "height": 16,
+                "width": 20,
+                "length": 1,
+                "annotations": [
+                    {
+                        "id": 10,
+                        "video_id": 1,
+                        "category_id": 7,
+                        "segmentations": [{"size": [16, 20], "counts": [320]}],
+                    }
+                ],
+            }
+            manifest.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+            args = argparse.Namespace(
+                manifest=manifest,
+                limit=0,
+                max_frames=1,
+                model_id="null_point",
+                backend="null",
+                stream_mode="image_per_frame",
+                prompt_type="point",
+                prompt="",
+                checkpoint_path=None,
+                device="cpu",
+                model_config=None,
+                external_repo=None,
+                backbone_type="efficientvit",
+                model_name="b0",
+                text_encoder_type=None,
+                text_encoder_context_length=77,
+                text_encoder_pos_embed_table_size=None,
+                interpolate_pos_embed=False,
+                mobile_sam_model_type="vit_t",
+                bbox_min_area=1,
+                bbox_scale=1.0,
+                input_fps=30.0,
+                csv_output=tmp / "frames.csv",
+                summary_output=tmp / "summary.json",
+                pred_json=tmp / "pred.json",
+                gt_annotation_file=None,
+                official_eval_json=None,
+                overlay_root=None,
+                overlay_fps=30.0,
+            )
+
+            summary = profile_saco_stream(args)
+
+            self.assertEqual(summary["frames"], 0)
+            self.assertEqual(summary["sources"], 0)
+
     def test_image_per_frame_uses_current_frame_point_prompt(self) -> None:
         mask = np.zeros((5, 6), dtype=np.uint8)
         mask[1:4, 2:5] = 1
@@ -405,6 +477,15 @@ class SacoStreamTests(unittest.TestCase):
             self.assertIn("external/efficientsam3", messages["efficientsam3_tinyvit21_image_per_frame_point"])
             self.assertNotIn("EfficientSam3-Distillation", messages["efficientsam3_tinyvit21_image_per_frame_point"])
             self.assertIn("efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt", messages["efficientsam3_tinyvit21_image_per_frame_text"])
+
+    def test_official_eval_script_handles_nested_sam3_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            script = root / "sam3" / "sam3" / "eval" / "saco_veval_eval.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("", encoding="utf-8")
+
+            self.assertEqual(_official_eval_script(str(root)), script)
 
 
 if __name__ == "__main__":
