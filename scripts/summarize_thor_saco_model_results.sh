@@ -20,6 +20,16 @@ if [[ -n "${ROS_RUN_ID:-}" ]]; then
   args+=(--ros-root "${ros_base}/${ROS_RUN_ID}")
 fi
 
+if [[ "${OFFLINE_ONLY:-0}" == "1" ]]; then
+  args+=(--offline-only)
+fi
+
+if [[ -n "${MODELS:-}" ]]; then
+  # shellcheck disable=SC2206
+  model_args=(${MODELS})
+  args+=(--models "${model_args[@]}")
+fi
+
 python -m sam_backend.saco_model_summary "${args[@]}"
 
 cat <<EOF

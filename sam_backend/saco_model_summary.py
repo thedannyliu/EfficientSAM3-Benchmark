@@ -60,8 +60,11 @@ def collect_model_summary(args: argparse.Namespace) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     if offline_root and offline_root.exists():
         rows.extend(collect_offline_rows(offline_root))
-    if ros_root and ros_root.exists():
+    if not getattr(args, "offline_only", False) and ros_root and ros_root.exists():
         rows.extend(collect_ros_rows(ros_root))
+    if args.models:
+        selected = set(args.models)
+        rows = [row for row in rows if row.get("model_id") in selected]
     return rows
 
 
@@ -237,6 +240,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ros-root", type=Path, help="Specific results/thor/ros_saco_stream/<run_id> directory.")
     parser.add_argument("--offline-base", type=Path, default=Path("results/thor/saco_video_image_per_frame"))
     parser.add_argument("--ros-base", type=Path, default=Path("results/thor/ros_saco_stream"))
+    parser.add_argument("--offline-only", action="store_true", help="Only collect offline SA-Co summaries.")
+    parser.add_argument("--models", nargs="*", help="Optional model IDs to keep in the summary.")
     parser.add_argument("--output", type=Path, default=Path("results/thor/saco_model_wise_summary.csv"))
     return parser.parse_args()
 

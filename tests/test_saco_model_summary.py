@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import tempfile
 import unittest
 from pathlib import Path
 
-from sam_backend.saco_model_summary import collect_offline_rows, collect_ros_rows
+from sam_backend.saco_model_summary import collect_model_summary, collect_offline_rows, collect_ros_rows
 
 
 class SacoModelSummaryTest(unittest.TestCase):
@@ -76,6 +77,32 @@ class SacoModelSummaryTest(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "ok")
             self.assertEqual(rows[0]["end_to_end_fps"], "45.45")
             self.assertEqual(rows[0]["overlay_count"], 1)
+
+    def test_collect_model_summary_filters_models(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            for model_id in ("keep_model", "drop_model"):
+                _write_csv(
+                    root / model_id / "frames_summary.csv",
+                    [
+                        {
+                            "model_id": model_id,
+                            "backend": "efficientsam3",
+                            "stream_mode": "image_per_frame",
+                        }
+                    ],
+                )
+            args = argparse.Namespace(
+                offline_root=root,
+                ros_root=Path(tmpdir) / "missing_ros",
+                offline_base=Path(tmpdir) / "missing_offline_base",
+                ros_base=Path(tmpdir) / "missing_ros_base",
+                models=["keep_model"],
+            )
+
+            rows = collect_model_summary(args)
+
+            self.assertEqual([row["model_id"] for row in rows], ["keep_model"])
 
 
 def _write_csv(path: Path, rows: list[dict[str, str]]) -> None:

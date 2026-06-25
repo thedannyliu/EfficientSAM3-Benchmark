@@ -402,7 +402,8 @@ class SacoStreamTests(unittest.TestCase):
             self.assertIn("--prompt-type text", messages["efficientsam3_tinyvit21_image_per_frame_text"])
             self.assertIn("--backbone-type tinyvit", messages["efficientsam3_tinyvit21_image_per_frame_point"])
             self.assertIn("--model-name 21m", messages["efficientsam3_tinyvit21_image_per_frame_point"])
-            self.assertIn("EfficientSam3-Distillation", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertIn("external/efficientsam3", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertNotIn("EfficientSam3-Distillation", messages["efficientsam3_tinyvit21_image_per_frame_point"])
             self.assertIn("efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt", messages["efficientsam3_tinyvit21_image_per_frame_text"])
 
 

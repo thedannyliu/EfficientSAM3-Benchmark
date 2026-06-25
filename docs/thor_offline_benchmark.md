@@ -132,6 +132,7 @@ checkpoints/efficienttam/efficienttam_s.pt
 checkpoints/yoloe/yoloe-26m-seg.pt
 checkpoints/edgetam/edgetam.pt
 checkpoints/mobilesam/mobile_sam.pt
+checkpoints/efficientsam3_ft/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt
 ```
 
 ## 5. Prepare Fixed Datasets
@@ -678,10 +679,13 @@ Run the distilled EfficientSAM3 TinyViT-21M checkpoint in both point and text
 prompt modes, plus the existing EffiSAM-TV point prompt baseline:
 
 ```bash
-export EFFICIENTSAM3_TINYVIT21_REPO=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/EfficientSam3-Distillation
-export EFFICIENTSAM3_TINYVIT21_CHECKPOINT="${EFFICIENTSAM3_TINYVIT21_REPO}/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt"
-
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
+OUTPUT_DIR="results/thor/saco_video_image_per_frame/${RUN_ID}"
+OVERLAY_DIR="overlays/thor/saco_video_image_per_frame/${RUN_ID}"
+THREE_MODEL_SUMMARY="${OUTPUT_DIR}/tinyvit21_three_model_summary.csv"
+
+test -f checkpoints/efficientsam3_ft/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt
+
 sam-run-saco-stream-suite \
   --manifest data/manifests/saco_veval_sav_fixed20.jsonl \
   --gt-annotation-file "${SAM_BENCH_SCRATCH:-/storage/scratch1/9/eliu354/efficientsam3-benchmark}/data/annotation/saco_veval_sav_val.json" \
@@ -692,9 +696,18 @@ sam-run-saco-stream-suite \
     efficientsam3_tv_m_image_per_frame_point \
   --device cuda \
   --max-frames 30 \
-  --output-dir "results/thor/saco_video_image_per_frame/${RUN_ID}" \
-  --overlay-dir "overlays/thor/saco_video_image_per_frame/${RUN_ID}" \
+  --output-dir "${OUTPUT_DIR}" \
+  --overlay-dir "${OVERLAY_DIR}" \
   --skip-missing
+
+python -m sam_backend.saco_model_summary \
+  --offline-root "${OUTPUT_DIR}" \
+  --offline-only \
+  --models \
+    efficientsam3_tinyvit21_image_per_frame_point \
+    efficientsam3_tinyvit21_image_per_frame_text \
+    efficientsam3_tv_m_image_per_frame_point \
+  --output "${THREE_MODEL_SUMMARY}"
 ```
 
 Command-only check without loading models:
@@ -729,10 +742,15 @@ model_name="21m", load_from_HF=False)`. Its point prompt result is the main
 quality signal right now. Text prompt runs are included for completeness, but
 text IoU can be 0 until text/prompt KD is trained.
 
+If the distilled source checkout differs from `external/efficientsam3` on Thor,
+put or symlink that Thor-local checkout at `external/efficientsam3` before
+running the suite. Do not use the PACE `/storage/home/...` project path on Thor.
+
 Outputs:
 
 ```text
 results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/tinyvit21_three_model_summary.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/summary.json
