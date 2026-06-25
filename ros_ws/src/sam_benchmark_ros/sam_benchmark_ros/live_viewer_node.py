@@ -18,6 +18,8 @@ from std_msgs.msg import String
 
 from sam_backend.streaming import parse_tegrastats_gr3d
 
+from .video_recording import TimedVideoRecorder, stamp_to_seconds
+
 
 class LiveViewerNode(Node):
     def __init__(self) -> None:
@@ -33,20 +35,23 @@ class LiveViewerNode(Node):
         self.declare_parameter("overlay_video_output", "overlays/ros/live_viewer_overlay.mp4")
         self.declare_parameter("overlay_video_fps", 15.0)
         self.declare_parameter("overlay_video_max_frames", 0)
+        self.declare_parameter("overlay_video_preserve_timing", True)
 
         self.bridge = CvBridge()
         self.window_name = str(self.get_parameter("window_name").value)
         display_fps = float(self.get_parameter("display_fps").value)
         self.display_scale = float(self.get_parameter("display_scale").value)
         self.display_max_width = int(self.get_parameter("display_max_width").value)
-        self.recorder = OverlayRecorder(
+        self.recorder = TimedVideoRecorder(
             enabled=bool(self.get_parameter("record_overlay").value),
             output_path=Path(str(self.get_parameter("overlay_video_output").value)),
             fps=float(self.get_parameter("overlay_video_fps").value),
             max_frames=int(self.get_parameter("overlay_video_max_frames").value),
+            preserve_timing=bool(self.get_parameter("overlay_video_preserve_timing").value),
         )
         self.latest_image: np.ndarray | None = None
         self.latest_segmented: np.ndarray | None = None
+        self.latest_segmented_stamp: float | None = None
         self.latest_metrics: dict[str, Any] = {}
         self.segmented_times: deque[float] = deque(maxlen=60)
         self.gpu_monitor = TegrastatsMonitor()
@@ -71,6 +76,7 @@ class LiveViewerNode(Node):
 
     def on_segmented(self, msg: Image) -> None:
         self.latest_segmented = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        self.latest_segmented_stamp = stamp_to_seconds(msg.header.stamp)
         self.segmented_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
 
     def on_result(self, msg: String) -> None:
@@ -89,7 +95,7 @@ class LiveViewerNode(Node):
                 (self.latest_image.shape[1], self.latest_image.shape[0]),
                 interpolation=cv2.INTER_LINEAR,
             )
-        self.recorder.write(overlay)
+        self.recorder.write(overlay, self.latest_segmented_stamp)
         combined = _display_with_metrics(
             overlay,
             viewer_fps=self._viewer_fps(),
@@ -157,36 +163,6 @@ class TegrastatsMonitor:
             value = parse_tegrastats_gr3d(line)
             if value is not None:
                 self.gpu_util = value
-
-
-class OverlayRecorder:
-    def __init__(self, enabled: bool, output_path: Path, fps: float, max_frames: int) -> None:
-        self.enabled = enabled
-        self.output_path = output_path
-        self.fps = fps
-        self.max_frames = max_frames
-        self.writer: cv2.VideoWriter | None = None
-        self.frames = 0
-
-    def write(self, frame_rgb: np.ndarray) -> None:
-        if not self.enabled:
-            return
-        if self.writer is None:
-            self.output_path.parent.mkdir(parents=True, exist_ok=True)
-            height, width = frame_rgb.shape[:2]
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            self.writer = cv2.VideoWriter(str(self.output_path), fourcc, self.fps, (width, height))
-            if not self.writer.isOpened():
-                raise RuntimeError(f"failed to create overlay video: {self.output_path}")
-        self.writer.write(cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
-        self.frames += 1
-        if self.max_frames > 0 and self.frames >= self.max_frames:
-            raise SystemExit
-
-    def release(self, logger: Any) -> None:
-        if self.writer is not None:
-            self.writer.release()
-            logger.info(f"wrote {self.frames} overlay frames to {self.output_path}")
 
 
 def _display_with_metrics(

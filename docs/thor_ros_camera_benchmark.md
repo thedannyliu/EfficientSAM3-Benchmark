@@ -112,7 +112,8 @@ Use a recorded video as a ROS image stream:
 ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p video_path:=videos/test1.mov \
   -p image_topic:=/image \
-  -p fps:=15.0 \
+  -p fps:=0.0 \
+  -p playback_rate:=1.0 \
   -p frame_id:=video \
   -p resize_width:=640
 ```
@@ -121,7 +122,8 @@ Useful video stream controls:
 
 ```text
 video_path       local video file to publish
-fps              publish rate; use half the original rate for 0.5x playback
+fps              publish rate; use 0.0 to auto-use the video's source FPS
+playback_rate    speed multiplier; use 0.5 for half-speed playback
 resize_width     shrink or enlarge the frames before publishing
 resize_height    alternative to resize_width
 ```
@@ -169,6 +171,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p bbox_scale:=1.2 \
   -p record_overlay:=false \
   -p overlay_video_output:=overlays/ros/mobile_sam_demo.mp4 \
+  -p overlay_video_preserve_timing:=true \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
@@ -191,6 +194,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p bbox_scale:=1.2 \
   -p record_overlay:=false \
   -p overlay_video_output:=overlays/ros/sam1_h_demo.mp4 \
+  -p overlay_video_preserve_timing:=true \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
@@ -209,6 +213,8 @@ The clicked point is shown on the overlay. After the first point prompt, the
 node uses the previous mask's bounding box as the next frame's box prompt.
 `bbox_scale:=1.2` expands that next-frame box by about 20% around its center.
 Set `record_overlay:=true` to save the overlay MP4 at `overlay_video_output`.
+The recorder preserves ROS timestamp timing by default, so a slow backend will
+not make the saved MP4 play 4x faster.
 
 For **SAM3 text prompt per-frame segmentation**:
 
@@ -293,12 +299,15 @@ ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p result_topic:=/sam/result_json \
   -p display_max_width:=1600 \
   -p record_overlay:=false \
-  -p overlay_video_output:=overlays/ros/live_viewer_demo.mp4
+  -p overlay_video_output:=overlays/ros/live_viewer_demo.mp4 \
+  -p overlay_video_preserve_timing:=true
 ```
 
 The viewer shows the image with mask overlay on the left and profiling metrics
 on the right, so metrics do not cover the object. Set `record_overlay:=true` to
-save the overlay MP4.
+save the overlay MP4. The viewer preserves ROS timestamp timing by default, so
+if the model only produces 7.5 FPS of overlays from a 30 FPS stream, the saved
+MP4 keeps the original duration by repeating frames as needed.
 
 ### Common Topic And Display Checks
 
@@ -481,7 +490,8 @@ source scripts/source_thor_ros_env.sh
 ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p video_path:=videos/test1.mov \
   -p image_topic:=/image \
-  -p fps:=15.0 \
+  -p fps:=0.0 \
+  -p playback_rate:=1.0 \
   -p frame_id:=video \
   -p resize_width:=640
 ```
@@ -489,6 +499,9 @@ ros2 run sam_benchmark_ros video_stream_node --ros-args \
 Use `resize_width` or `resize_height` to shrink large videos before they enter
 the ROS stream. For example, a 1280x720 video with `resize_width:=640` shows as
 about 640x360 plus the metrics panel in the MobileSAM window.
+Use `fps:=0.0` for original video speed. Use `playback_rate:=0.5` for half
+speed, or set an explicit `fps` only when you intentionally want to override the
+source video's FPS.
 
 Choose one Terminal B backend option.
 
@@ -980,6 +993,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
   -p video_output:=overlays/thor/ros_camera/null/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=100
 ```
 
@@ -1022,6 +1036,7 @@ ros2 run sam_benchmark_ros result_recorder_node --ros-args \
 ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p video_output:=overlays/thor/ros_camera/sam3/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=300
 ```
 
@@ -1049,6 +1064,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
   -p video_output:=overlays/thor/ros_camera/sam3_native_clip/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=120
 ```
 
@@ -1131,6 +1147,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
   -p video_output:=overlays/thor/ros_camera/repvit_s/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=300
 ```
 
@@ -1250,6 +1267,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
   -p video_output:=overlays/thor/ros_camera/mobilesam_bbox_chain/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=300
 ```
 
@@ -1291,6 +1309,7 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
   -p video_output:=overlays/thor/ros_camera/sam1_h_bbox_chain/overlay.mp4 \
   -p fps:=30.0 \
+  -p preserve_timing:=true \
   -p max_frames:=300
 ```
 

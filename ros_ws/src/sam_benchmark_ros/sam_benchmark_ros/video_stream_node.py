@@ -12,14 +12,16 @@ class VideoStreamNode(Node):
         super().__init__("video_stream_node")
         self.declare_parameter("video_path", "")
         self.declare_parameter("image_topic", "/image")
-        self.declare_parameter("fps", 15.0)
+        self.declare_parameter("fps", 0.0)
+        self.declare_parameter("playback_rate", 1.0)
         self.declare_parameter("frame_id", "camera")
         self.declare_parameter("resize_width", 0)
         self.declare_parameter("resize_height", 0)
 
         video_path = self.get_parameter("video_path").value
         topic = self.get_parameter("image_topic").value
-        fps = float(self.get_parameter("fps").value)
+        requested_fps = float(self.get_parameter("fps").value)
+        playback_rate = float(self.get_parameter("playback_rate").value)
         self.frame_id = self.get_parameter("frame_id").value
         self.resize_width = int(self.get_parameter("resize_width").value)
         self.resize_height = int(self.get_parameter("resize_height").value)
@@ -28,13 +30,23 @@ class VideoStreamNode(Node):
         self.capture = cv2.VideoCapture(video_path if video_path else 0)
         if not self.capture.isOpened():
             raise RuntimeError(f"failed to open video source: {video_path or 0}")
-        self.timer = self.create_timer(1.0 / fps, self.publish_frame)
+        source_fps = float(self.capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        base_fps = requested_fps if requested_fps > 0.0 else source_fps
+        if base_fps <= 0.0:
+            base_fps = 30.0
+        effective_fps = base_fps * max(playback_rate, 0.001)
+        self.timer = self.create_timer(1.0 / effective_fps, self.publish_frame)
         if self.resize_width > 0 or self.resize_height > 0:
             self.get_logger().info(
-                f"publishing {topic} at {fps:g} FPS; resizing frames to {self.resize_width}x{self.resize_height}"
+                f"publishing {topic} at {effective_fps:g} FPS; source_fps={source_fps:g} "
+                f"requested_fps={requested_fps:g} playback_rate={playback_rate:g}; "
+                f"resizing frames to {self.resize_width}x{self.resize_height}"
             )
         else:
-            self.get_logger().info(f"publishing {topic} at {fps:g} FPS")
+            self.get_logger().info(
+                f"publishing {topic} at {effective_fps:g} FPS; source_fps={source_fps:g} "
+                f"requested_fps={requested_fps:g} playback_rate={playback_rate:g}"
+            )
 
     def publish_frame(self) -> None:
         ok, frame = self.capture.read()
