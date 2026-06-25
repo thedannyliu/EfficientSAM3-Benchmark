@@ -661,6 +661,86 @@ python -m sam_backend.profile_sav_frames \
 IoU, latency, FPS, CUDA memory, and component timing. SAM2-family and MobileSAM
 image backends are point-only in this frame benchmark.
 
+## 10c. Run SA-Co/VEval-SAV Per-Image Segmentation
+
+This runs the SA-Co/VEval-SAV stream manifest as independent image
+segmentation samples with `--stream-mode image_per_frame`. Point prompt mode
+derives a fresh positive point from the current frame GT mask. Text prompt mode
+uses the SA-Co noun phrase in the manifest.
+
+Prepare or refresh the fixed SA-Co/VEval-SAV assets first:
+
+```bash
+RUN_SUITE=0 RUN_NULL_SMOKE=1 bash scripts/setup_thor_saco_stream_benchmark.sh
+```
+
+Run the distilled EfficientSAM3 TinyViT-21M checkpoint in both point and text
+prompt modes, plus the existing EffiSAM-TV point prompt baseline:
+
+```bash
+export EFFICIENTSAM3_TINYVIT21_REPO=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/EfficientSam3-Distillation
+export EFFICIENTSAM3_TINYVIT21_CHECKPOINT="${EFFICIENTSAM3_TINYVIT21_REPO}/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt"
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+sam-run-saco-stream-suite \
+  --manifest data/manifests/saco_veval_sav_fixed20.jsonl \
+  --gt-annotation-file "${SAM_BENCH_SCRATCH:-/storage/scratch1/9/eliu354/efficientsam3-benchmark}/data/annotation/saco_veval_sav_val.json" \
+  --mode-set image_per_frame \
+  --models \
+    efficientsam3_tinyvit21_image_per_frame_point \
+    efficientsam3_tinyvit21_image_per_frame_text \
+    efficientsam3_tv_m_image_per_frame_point \
+  --device cuda \
+  --max-frames 30 \
+  --output-dir "results/thor/saco_video_image_per_frame/${RUN_ID}" \
+  --overlay-dir "overlays/thor/saco_video_image_per_frame/${RUN_ID}" \
+  --skip-missing
+```
+
+Command-only check without loading models:
+
+```bash
+DRY_RUN_ID="$(date +%Y%m%d-%H%M%S)-dryrun"
+sam-run-saco-stream-suite \
+  --manifest data/manifests/saco_veval_sav_fixed20.jsonl \
+  --mode-set image_per_frame \
+  --models \
+    efficientsam3_tinyvit21_image_per_frame_point \
+    efficientsam3_tinyvit21_image_per_frame_text \
+    efficientsam3_tv_m_image_per_frame_point \
+  --device cuda \
+  --max-frames 1 \
+  --output-dir "results/thor/saco_video_image_per_frame/${DRY_RUN_ID}" \
+  --overlay-dir "overlays/thor/saco_video_image_per_frame/${DRY_RUN_ID}" \
+  --dry-run
+```
+
+Model IDs:
+
+```text
+efficientsam3_tinyvit21_image_per_frame_point  distilled TinyViT-21M image encoder, point prompt
+efficientsam3_tinyvit21_image_per_frame_text   distilled TinyViT-21M image encoder, text prompt
+efficientsam3_tv_m_image_per_frame_point       existing EffiSAM-TV 11M, point prompt
+```
+
+The TinyViT-21M checkpoint is loaded through
+`build_efficientsam3_image_model(..., backbone_type="tinyvit",
+model_name="21m", load_from_HF=False)`. Its point prompt result is the main
+quality signal right now. Text prompt runs are included for completeness, but
+text IoU can be 0 until text/prompt KD is trained.
+
+Outputs:
+
+```text
+results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/summary.json
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/saco_veval_preds.json
+results/thor/saco_video_image_per_frame/<run_id>/<model_id>/saco_veval_eval_res.json
+overlays/thor/saco_video_image_per_frame/<run_id>/<model_id>/<source_id>/overlay.mp4
+```
+
 ## 11. Run YOLOE-26M-seg + EdgeTAM Text-Prompt Tracking
 
 Recorded video POC:

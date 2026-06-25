@@ -35,6 +35,17 @@ class BackendConfigTest(unittest.TestCase):
         self.assertEqual(config.text_encoder_context_length, 16)
         self.assertEqual(config.text_encoder_pos_embed_table_size, 16)
 
+    def test_resolves_distilled_tinyvit21_checkpoint_filename(self) -> None:
+        config = resolve_backend_config(
+            BackendConfig(
+                backend="efficientsam3",
+                checkpoint_path="/tmp/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt",
+            )
+        )
+
+        self.assertEqual(config.backbone_type, "tinyvit")
+        self.assertEqual(config.model_name, "21m")
+
     def test_leaves_unknown_checkpoint_filename_unchanged(self) -> None:
         config = resolve_backend_config(
             BackendConfig(

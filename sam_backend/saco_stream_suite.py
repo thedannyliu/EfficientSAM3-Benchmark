@@ -10,6 +10,15 @@ from pathlib import Path
 
 
 DEFAULT_SCRATCH_ROOT = Path("/storage/scratch1/9/eliu354/efficientsam3-benchmark")
+DEFAULT_TINYVIT21_REPO = "/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/EfficientSam3-Distillation"
+DEFAULT_TINYVIT21_CHECKPOINT = str(
+    Path(DEFAULT_TINYVIT21_REPO) / "efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt"
+)
+EFFICIENTSAM3_TINYVIT21_REPO = os.environ.get("EFFICIENTSAM3_TINYVIT21_REPO", DEFAULT_TINYVIT21_REPO)
+EFFICIENTSAM3_TINYVIT21_CHECKPOINT = os.environ.get(
+    "EFFICIENTSAM3_TINYVIT21_CHECKPOINT",
+    DEFAULT_TINYVIT21_CHECKPOINT,
+)
 
 
 @dataclass(frozen=True)
@@ -261,6 +270,45 @@ IMAGE_PER_FRAME_RUNS = [
             "--text-encoder-type", "MobileCLIP-S0",
             "--text-encoder-context-length", "16",
             "--text-encoder-pos-embed-table-size", "16",
+        ),
+    ),
+    SacoStreamRun(
+        "efficientsam3_tv_m_image_per_frame_point",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="point",
+        checkpoint_path="checkpoints/efficientsam3_ft/efficientsam3_tinyvit.pt",
+        external_repo="external/efficientsam3",
+        extra_args=(
+            "--backbone-type", "tinyvit",
+            "--model-name", "11m",
+            "--text-encoder-type", "MobileCLIP-S0",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "16",
+        ),
+    ),
+    SacoStreamRun(
+        "efficientsam3_tinyvit21_image_per_frame_point",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="point",
+        checkpoint_path=EFFICIENTSAM3_TINYVIT21_CHECKPOINT,
+        external_repo=EFFICIENTSAM3_TINYVIT21_REPO,
+        extra_args=(
+            "--backbone-type", "tinyvit",
+            "--model-name", "21m",
+        ),
+    ),
+    SacoStreamRun(
+        "efficientsam3_tinyvit21_image_per_frame_text",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path=EFFICIENTSAM3_TINYVIT21_CHECKPOINT,
+        external_repo=EFFICIENTSAM3_TINYVIT21_REPO,
+        extra_args=(
+            "--backbone-type", "tinyvit",
+            "--model-name", "21m",
         ),
     ),
 ]

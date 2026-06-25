@@ -339,6 +339,7 @@ def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str, s
         "efficient_sam3_tinyvit_s": ("tinyvit", "5m", None, None, None),
         "efficient_sam3_tinyvit_m": ("tinyvit", "11m", None, None, None),
         "efficient_sam3_tinyvit_l": ("tinyvit", "21m", None, None, None),
+        "efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3": ("tinyvit", "21m", None, None, None),
         "efficient_sam3_efficientvit_s": ("efficientvit", "b0", None, None, None),
         "efficient_sam3_efficientvit_m": ("efficientvit", "b1", None, None, None),
         "efficient_sam3_efficientvit_l": ("efficientvit", "b2", None, None, None),

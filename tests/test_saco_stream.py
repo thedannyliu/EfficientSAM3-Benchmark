@@ -368,6 +368,43 @@ class SacoStreamTests(unittest.TestCase):
             self.assertEqual(rows[0]["status"], "dry-run")
             self.assertIn("--stream-mode image_per_frame", rows[0]["message"])
 
+    def test_suite_can_dry_run_efficientsam3_image_per_frame_point_and_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            manifest = tmp / "manifest.jsonl"
+            manifest.write_text("", encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=manifest,
+                gt_annotation_file=None,
+                models=[
+                    "efficientsam3_tv_m_image_per_frame_point",
+                    "efficientsam3_tinyvit21_image_per_frame_point",
+                    "efficientsam3_tinyvit21_image_per_frame_text",
+                ],
+                mode_set="image_per_frame",
+                device="cpu",
+                max_frames=1,
+                input_fps=30.0,
+                output_dir=tmp / "out",
+                overlay_dir=tmp / "overlay",
+                scratch_root=tmp / "scratch",
+                skip_missing=False,
+                dry_run=True,
+            )
+
+            rows = run_suite(args)
+            messages = {row["model_id"]: row["message"] for row in rows}
+
+            self.assertEqual(len(rows), 3)
+            self.assertIn("--prompt-type point", messages["efficientsam3_tv_m_image_per_frame_point"])
+            self.assertIn("--model-name 11m", messages["efficientsam3_tv_m_image_per_frame_point"])
+            self.assertIn("--prompt-type point", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertIn("--prompt-type text", messages["efficientsam3_tinyvit21_image_per_frame_text"])
+            self.assertIn("--backbone-type tinyvit", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertIn("--model-name 21m", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertIn("EfficientSam3-Distillation", messages["efficientsam3_tinyvit21_image_per_frame_point"])
+            self.assertIn("efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt", messages["efficientsam3_tinyvit21_image_per_frame_text"])
+
 
 if __name__ == "__main__":
     unittest.main()
