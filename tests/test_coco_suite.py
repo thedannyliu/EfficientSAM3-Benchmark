@@ -37,6 +37,28 @@ class CocoSuiteTest(unittest.TestCase):
             self.assertIn("--external-repo external/sam3", rows[0]["message"])
             self.assertIn("--limit 1", rows[0]["message"])
 
+    def test_dry_run_builds_instinctsam_command(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            args = argparse.Namespace(
+                manifest=tmp / "manifest.jsonl",
+                limit=1,
+                device="cpu",
+                models=["instinctsam_vitb"],
+                output_dir=tmp / "results",
+                overlay_dir=None,
+                skip_missing=False,
+                dry_run=True,
+            )
+
+            rows = run_suite(args)
+
+            self.assertEqual(rows[0]["model_id"], "instinctsam_vitb")
+            self.assertEqual(rows[0]["status"], "dry-run")
+            self.assertIn("--checkpoint-path checkpoints/instinctsam/instinctsam_vitb_concept.pt", rows[0]["message"])
+            self.assertIn("--backbone-type vit_base", rows[0]["message"])
+            self.assertIn("--text-encoder-type MobileCLIP-S1", rows[0]["message"])
+
     def test_unknown_model_id_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

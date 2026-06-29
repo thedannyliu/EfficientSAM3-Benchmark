@@ -31,6 +31,7 @@ fi
 if [[ "${DOWNLOAD_SAM}" == "1" ]]; then
   bash scripts/download_sam3_checkpoint.sh
   bash scripts/download_efficientsam3_checkpoints.sh
+  bash scripts/download_instinctsam_vitb_checkpoint.sh
   bash scripts/download_sam2_family_checkpoints.sh
   bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
 fi

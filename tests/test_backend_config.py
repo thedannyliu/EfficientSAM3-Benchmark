@@ -46,6 +46,20 @@ class BackendConfigTest(unittest.TestCase):
         self.assertEqual(config.backbone_type, "tinyvit")
         self.assertEqual(config.model_name, "21m")
 
+    def test_resolves_instinctsam_vitb_checkpoint_filename(self) -> None:
+        config = resolve_backend_config(
+            BackendConfig(
+                backend="efficientsam3",
+                checkpoint_path="checkpoints/instinctsam/instinctsam_vitb_concept.pt",
+            )
+        )
+
+        self.assertEqual(config.backbone_type, "vit_base")
+        self.assertEqual(config.model_name, "base")
+        self.assertEqual(config.text_encoder_type, "MobileCLIP-S1")
+        self.assertEqual(config.text_encoder_context_length, 16)
+        self.assertEqual(config.text_encoder_pos_embed_table_size, 77)
+
     def test_leaves_unknown_checkpoint_filename_unchanged(self) -> None:
         config = resolve_backend_config(
             BackendConfig(

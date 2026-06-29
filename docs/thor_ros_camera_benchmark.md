@@ -49,6 +49,13 @@ Distilled RepViT-S EfficientSAM3:
   inferred backbone_type=repvit
   inferred model_name=m0.9
 
+InstinctSAM ViT-B text segmentation:
+  backend=efficientsam3
+  checkpoint_path=checkpoints/instinctsam/instinctsam_vitb_concept.pt
+  backbone_type=vit_base
+  model_name=base
+  text_encoder_type=MobileCLIP-S1
+
 YOLOE open-vocabulary segmentation:
   node=yoloe_text_backend_node
   weights=checkpoints/yoloe/yoloe-26m-seg.pt
@@ -268,6 +275,28 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
+For **InstinctSAM ViT-B text prompt per-frame segmentation**:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/instinctsam/instinctsam_vitb_concept.pt \
+  -p device:=cuda \
+  -p backbone_type:=vit_base \
+  -p model_name:=base \
+  -p text_encoder_type:=MobileCLIP-S1 \
+  -p text_encoder_context_length:=16 \
+  -p text_encoder_pos_embed_table_size:=77 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
 For **YOLOE open-vocabulary segmentation**:
 
 ```bash
@@ -390,6 +419,7 @@ source scripts/source_thor_ros_env.sh
 bash scripts/setup_model_repos.sh
 bash scripts/download_sam3_checkpoint.sh
 bash scripts/download_efficientsam3_checkpoints.sh
+bash scripts/download_instinctsam_vitb_checkpoint.sh
 bash scripts/download_sam2_family_checkpoints.sh
 bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
 ```
@@ -576,7 +606,38 @@ The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. Use either the SAM3 command or this
 RepViT-S command for Terminal B, not both at the same time.
 
-Terminal B option 3, run interactive MobileSAM bbox-chain tracking on the same
+Terminal B option 3, run InstinctSAM ViT-B text-prompt segmentation on the same
+incoming ROS frames. The checkpoint is assembled from
+`GM717/InstinctSAM-ViT-B` trunk weights plus local SAM3 heads by
+`scripts/download_instinctsam_vitb_checkpoint.sh`:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/instinctsam/instinctsam_vitb_concept.pt \
+  -p device:=cuda \
+  -p backbone_type:=vit_base \
+  -p model_name:=base \
+  -p text_encoder_type:=MobileCLIP-S1 \
+  -p text_encoder_context_length:=16 \
+  -p text_encoder_pos_embed_table_size:=77 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Use either the SAM3, RepViT-S, or InstinctSAM command for Terminal B, not more
+than one at the same time.
+
+Terminal B option 4, run interactive MobileSAM bbox-chain tracking on the same
 incoming ROS video frames:
 
 ```bash
@@ -612,7 +673,7 @@ a fixed display ratio such as `0.5`. Set `record_overlay:=true` and optionally
 `overlay_video_output:=overlays/ros/mobile_sam_demo.mp4` to save the overlay
 video directly from the interactive node.
 
-Terminal B option 4, run SAM1-H bbox-chain tracking with the same interactive
+Terminal B option 5, run SAM1-H bbox-chain tracking with the same interactive
 node:
 
 ```bash
@@ -638,7 +699,7 @@ For SAM1-H, click the image to initialize the point prompt. Later frames use the
 previous mask bounding box expanded by `bbox_scale:=1.2` as the next box prompt.
 Press `r` to reset tracking, or `q`/`Esc` to exit.
 
-Terminal B option 5, run YOLOE open-vocabulary segmentation with a text prompt
+Terminal B option 6, run YOLOE open-vocabulary segmentation with a text prompt
 on the same incoming ROS frames:
 
 ```bash
@@ -1132,6 +1193,39 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
 The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. You can still pass those parameters
 explicitly if you want the run command to show the architecture.
+
+InstinctSAM ViT-B:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=efficientsam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/instinctsam/instinctsam_vitb_concept.pt \
+  -p device:=cuda \
+  -p backbone_type:=vit_base \
+  -p model_name:=base \
+  -p text_encoder_type:=MobileCLIP-S1 \
+  -p text_encoder_context_length:=16 \
+  -p text_encoder_pos_embed_table_size:=77 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/image \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+For InstinctSAM camera benchmark recording, use separate output folders:
+
+```bash
+mkdir -p results/thor/ros_camera/instinctsam_vitb overlays/thor/ros_camera/instinctsam_vitb
+
+ros2 run sam_benchmark_ros result_recorder_node --ros-args \
+  -p csv_output:=results/thor/ros_camera/instinctsam_vitb/results.csv \
+  -p summary_output:=results/thor/ros_camera/instinctsam_vitb/summary.csv \
+  -p max_messages:=300
+```
 
 For RepViT-S camera benchmark recording, use separate output folders:
 

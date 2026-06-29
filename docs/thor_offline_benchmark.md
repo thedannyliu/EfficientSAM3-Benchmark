@@ -112,6 +112,7 @@ source scripts/source_thor_ros_env.sh
 
 bash scripts/download_sam3_checkpoint.sh
 bash scripts/download_efficientsam3_checkpoints.sh
+bash scripts/download_instinctsam_vitb_checkpoint.sh
 bash scripts/download_sam2_family_checkpoints.sh
 bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
 bash scripts/check_storage_budget.sh 300 data checkpoints external
@@ -125,6 +126,8 @@ checkpoints/stage1_sam3p1/efficient_sam3p1_efficientvit_s_mobileclip_s0_ctx16.pt
 checkpoints/stage1_sam3p1/efficient_sam3p1_efficientvit_l_mobileclip_s0_ctx16.pt
 checkpoints/stage1_all_converted/efficient_sam3_efficientvit-b0_mobileclip_s1.pth
 checkpoints/stage1_all_converted/efficient_sam3_efficientvit-b2_mobileclip_s1.pth
+checkpoints/instinctsam/concept_vitb_trunk_step6000.pt
+checkpoints/instinctsam/instinctsam_vitb_concept.pt
 checkpoints/sam2/sam2.1_hiera_tiny.pt
 checkpoints/efficient-sam2/sam2.1_hiera_tiny.pt
 checkpoints/efficienttam/efficienttam_ti.pt
@@ -193,7 +196,7 @@ Ultralytics weights are resolved by model name and cached by Ultralytics.
 ## 6. Run The COCO Fixed10 Image Suite
 
 This is the main SAM-family single-image benchmark. It runs SAM3,
-EfficientSAM3 variants, SAM2.1 tiny/small/base-plus/large,
+EfficientSAM3 variants, InstinctSAM ViT-B, SAM2.1 tiny/small/base-plus/large,
 Efficient-SAM2.1 tiny/small/base-plus/large, EfficientTAM-Ti/S, and
 MobileSAM registry variants `vit_t/vit_b/vit_l/vit_h` where their
 checkpoints/repos exist. Official SAM3 currently has one image checkpoint in
@@ -251,6 +254,35 @@ ground-truth mask decoding, and overlay writing. For each COCO row, `total_ms`
 starts immediately before `backend.predict(frame_rgb, prompt)` and includes the
 single-image model path, such as SAM3 `set_image` plus the selected text, point,
 or box prompt.
+
+InstinctSAM ViT-B is published as ViT-B vision-encoder weights at
+`https://huggingface.co/GM717/InstinctSAM-ViT-B`, not as a standalone full SAM3
+checkpoint. `scripts/download_instinctsam_vitb_checkpoint.sh` downloads the
+released trunk to `checkpoints/instinctsam/`, then builds
+`checkpoints/instinctsam/instinctsam_vitb_concept.pt` from the local SAM3
+teacher heads and the downloaded MobileCLIP-S1 EfficientSAM3 checkpoint. Run it
+after `download_sam3_checkpoint.sh` and `download_efficientsam3_checkpoints.sh`.
+
+Run only InstinctSAM ViT-B for a first smoke benchmark:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.coco_suite \
+  --manifest data/manifests/coco_val2017_fixed10.jsonl \
+  --models instinctsam_vitb \
+  --device cuda \
+  --limit 1 \
+  --eval-mode both \
+  --output-dir "results/thor/offline/coco/${RUN_ID}" \
+  --overlay-dir "overlays/thor/offline/coco/${RUN_ID}" \
+  --skip-missing
+```
+
+The InstinctSAM model id in `coco_suite_model_summary.csv` is
+`instinctsam_vitb`. Its backend is still `efficientsam3`, with
+`backbone_type=vit_base`, `model_name=base`, `text_encoder_type=MobileCLIP-S1`,
+`text_encoder_context_length=16`, and
+`text_encoder_pos_embed_table_size=77`.
 
 EfficientSAM3's upstream `external/efficientsam3/eval/eval_coco.py` evaluates
 COCO with each annotation's ground-truth bounding box:
@@ -453,8 +485,8 @@ PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
 
 After the smoke run, run the full matrix. This includes all YOLOE-seg sizes,
 YOLO11 segmentation sizes, SAM2.1 sizes, Efficient-SAM2.1 sizes,
-EfficientSAM3 variants, EfficientTAM-Ti/S, and MobileSAM `vit_t/vit_b/vit_l/vit_h`
-when the checkpoints are available:
+EfficientSAM3 variants, InstinctSAM ViT-B, EfficientTAM-Ti/S, and MobileSAM
+`vit_t/vit_b/vit_l/vit_h` when the checkpoints are available:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"

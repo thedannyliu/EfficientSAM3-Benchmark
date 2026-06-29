@@ -76,6 +76,9 @@ class Sam3ImageBackend:
         self.torch = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         processor_mod = _import_required("sam3.model.sam3_image_processor")
+        from .instinctsam import patch_efficientsam3_vit_base
+
+        patch_efficientsam3_vit_base(builder)
 
         if self.config.backend == "sam3":
             self.model = builder.build_sam3_image_model(
@@ -348,6 +351,8 @@ def _infer_efficientsam3_image_config(checkpoint_path: str) -> tuple[str, str, s
         "efficientsam3_efficientvit": ("efficientvit", "b1", "MobileCLIP-S0", 16, 16),
         "efficientsam3_repvit": ("repvit", "m1.1", "MobileCLIP-S0", 16, 16),
         "efficientsam3_tinyvit": ("tinyvit", "11m", "MobileCLIP-S0", 16, 16),
+        "instinctsam_vitb_concept": ("vit_base", "base", "MobileCLIP-S1", 16, 77),
+        "instinctsam_vitb_stagea": ("vit_base", "base", "MobileCLIP-S1", 16, 77),
     }
     return mapping.get(stem)
 
