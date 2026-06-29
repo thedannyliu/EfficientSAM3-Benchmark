@@ -1194,7 +1194,7 @@ The backend infers `backbone_type:=repvit` and `model_name:=m0.9` from the
 `efficient_sam3_repvit_s.pt` filename. You can still pass those parameters
 explicitly if you want the run command to show the architecture.
 
-InstinctSAM ViT-B:
+InstinctSAM3 ViT-B:
 
 ```bash
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
@@ -1216,7 +1216,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-For InstinctSAM camera benchmark recording, use separate output folders:
+For InstinctSAM3 camera benchmark recording, use separate output folders:
 
 ```bash
 mkdir -p results/thor/ros_camera/instinctsam_vitb overlays/thor/ros_camera/instinctsam_vitb
@@ -1225,7 +1225,19 @@ ros2 run sam_benchmark_ros result_recorder_node --ros-args \
   -p csv_output:=results/thor/ros_camera/instinctsam_vitb/results.csv \
   -p summary_output:=results/thor/ros_camera/instinctsam_vitb/summary.csv \
   -p max_messages:=300
+
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/instinctsam_vitb/overlay.mp4 \
+  -p fps:=30.0 \
+  -p preserve_timing:=true \
+  -p max_frames:=300
 ```
+
+Use the same command with `image_topic:=/camera/camera/color/image_raw` for the
+RealSense RGB stream. The output folder stays
+`results/thor/ros_camera/instinctsam_vitb/` unless you intentionally want a
+separate recorded-video versus camera split.
 
 For RepViT-S camera benchmark recording, use separate output folders:
 

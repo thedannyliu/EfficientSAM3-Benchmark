@@ -478,6 +478,41 @@ class SacoStreamTests(unittest.TestCase):
             self.assertNotIn("EfficientSam3-Distillation", messages["efficientsam3_tinyvit21_image_per_frame_point"])
             self.assertIn("efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt", messages["efficientsam3_tinyvit21_image_per_frame_text"])
 
+    def test_suite_can_dry_run_instinctsam_image_per_frame_point_and_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            manifest = tmp / "manifest.jsonl"
+            manifest.write_text("", encoding="utf-8")
+            args = argparse.Namespace(
+                manifest=manifest,
+                gt_annotation_file=None,
+                models=[
+                    "instinctsam_vitb_image_per_frame_point",
+                    "instinctsam_vitb_image_per_frame_text",
+                ],
+                mode_set="image_per_frame",
+                device="cpu",
+                max_frames=1,
+                input_fps=30.0,
+                output_dir=tmp / "out",
+                overlay_dir=tmp / "overlay",
+                scratch_root=tmp / "scratch",
+                skip_missing=False,
+                dry_run=True,
+            )
+
+            rows = run_suite(args)
+            messages = {row["model_id"]: row["message"] for row in rows}
+
+            self.assertEqual(len(rows), 2)
+            self.assertIn("--prompt-type point", messages["instinctsam_vitb_image_per_frame_point"])
+            self.assertIn("--prompt-type text", messages["instinctsam_vitb_image_per_frame_text"])
+            self.assertIn("checkpoints/instinctsam/instinctsam_vitb_concept.pt", messages["instinctsam_vitb_image_per_frame_point"])
+            self.assertIn("--backbone-type vit_base", messages["instinctsam_vitb_image_per_frame_point"])
+            self.assertIn("--model-name base", messages["instinctsam_vitb_image_per_frame_point"])
+            self.assertIn("--text-encoder-type MobileCLIP-S1", messages["instinctsam_vitb_image_per_frame_text"])
+            self.assertIn("--text-encoder-pos-embed-table-size 77", messages["instinctsam_vitb_image_per_frame_text"])
+
     def test_official_eval_script_handles_nested_sam3_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

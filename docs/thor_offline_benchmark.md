@@ -705,24 +705,29 @@ Prepare or refresh the fixed SA-Co/VEval-SAV assets first:
 
 ```bash
 RUN_SUITE=0 RUN_NULL_SMOKE=1 bash scripts/setup_thor_saco_stream_benchmark.sh
+bash scripts/download_instinctsam_vitb_checkpoint.sh
 ```
 
-Run the distilled EfficientSAM3 TinyViT-21M checkpoint in both point and text
-prompt modes, plus the existing EffiSAM-TV point prompt baseline:
+Run InstinctSAM3 ViT-B and the distilled EfficientSAM3 TinyViT-21M checkpoint
+in both point and text prompt modes, plus the existing EffiSAM-TV point prompt
+baseline:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 OUTPUT_DIR="results/thor/saco_video_image_per_frame/${RUN_ID}"
 OVERLAY_DIR="overlays/thor/saco_video_image_per_frame/${RUN_ID}"
-THREE_MODEL_SUMMARY="${OUTPUT_DIR}/tinyvit21_three_model_summary.csv"
+FIVE_MODEL_SUMMARY="${OUTPUT_DIR}/instinctsam_tinyvit21_five_model_summary.csv"
 
 test -f checkpoints/efficientsam3_ft/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt
+test -f checkpoints/instinctsam/instinctsam_vitb_concept.pt
 
 sam-run-saco-stream-suite \
   --manifest data/manifests/saco_veval_sav_fixed20.jsonl \
   --gt-annotation-file "${SAM_BENCH_SCRATCH:-/storage/scratch1/9/eliu354/efficientsam3-benchmark}/data/annotation/saco_veval_sav_val.json" \
   --mode-set image_per_frame \
   --models \
+    instinctsam_vitb_image_per_frame_point \
+    instinctsam_vitb_image_per_frame_text \
     efficientsam3_tinyvit21_image_per_frame_point \
     efficientsam3_tinyvit21_image_per_frame_text \
     efficientsam3_tv_m_image_per_frame_point \
@@ -736,10 +741,12 @@ python -m sam_backend.saco_model_summary \
   --offline-root "${OUTPUT_DIR}" \
   --offline-only \
   --models \
+    instinctsam_vitb_image_per_frame_point \
+    instinctsam_vitb_image_per_frame_text \
     efficientsam3_tinyvit21_image_per_frame_point \
     efficientsam3_tinyvit21_image_per_frame_text \
     efficientsam3_tv_m_image_per_frame_point \
-  --output "${THREE_MODEL_SUMMARY}"
+  --output "${FIVE_MODEL_SUMMARY}"
 ```
 
 The fixed manifest is `data/manifests/saco_veval_sav_fixed20.jsonl`. With
@@ -756,6 +763,8 @@ sam-run-saco-stream-suite \
   --manifest data/manifests/saco_veval_sav_fixed20.jsonl \
   --mode-set image_per_frame \
   --models \
+    instinctsam_vitb_image_per_frame_point \
+    instinctsam_vitb_image_per_frame_text \
     efficientsam3_tinyvit21_image_per_frame_point \
     efficientsam3_tinyvit21_image_per_frame_text \
     efficientsam3_tv_m_image_per_frame_point \
@@ -769,10 +778,20 @@ sam-run-saco-stream-suite \
 Model IDs:
 
 ```text
+instinctsam_vitb_image_per_frame_point         InstinctSAM3 ViT-B image encoder, point prompt
+instinctsam_vitb_image_per_frame_text          InstinctSAM3 ViT-B image encoder, text prompt
 efficientsam3_tinyvit21_image_per_frame_point  distilled TinyViT-21M image encoder, point prompt
 efficientsam3_tinyvit21_image_per_frame_text   distilled TinyViT-21M image encoder, text prompt
 efficientsam3_tv_m_image_per_frame_point       existing EffiSAM-TV 11M, point prompt
 ```
+
+The InstinctSAM3 checkpoint is loaded through
+`build_efficientsam3_image_model(..., backbone_type="vit_base",
+model_name="base", text_encoder_type="MobileCLIP-S1",
+text_encoder_context_length=16, text_encoder_pos_embed_table_size=77,
+load_from_HF=False)`. `scripts/download_instinctsam_vitb_checkpoint.sh`
+downloads the `GM717/InstinctSAM-ViT-B` trunk and merges it with the local SAM3
+heads into `checkpoints/instinctsam/instinctsam_vitb_concept.pt`.
 
 The TinyViT-21M checkpoint is loaded through
 `build_efficientsam3_image_model(..., backbone_type="tinyvit",
@@ -788,7 +807,7 @@ Outputs:
 
 ```text
 results/thor/saco_video_image_per_frame/<run_id>/saco_stream_suite_summary.csv
-results/thor/saco_video_image_per_frame/<run_id>/tinyvit21_three_model_summary.csv
+results/thor/saco_video_image_per_frame/<run_id>/instinctsam_tinyvit21_five_model_summary.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/frames_summary.csv
 results/thor/saco_video_image_per_frame/<run_id>/<model_id>/summary.json

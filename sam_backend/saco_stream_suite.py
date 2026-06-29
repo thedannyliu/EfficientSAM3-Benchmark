@@ -12,11 +12,15 @@ from pathlib import Path
 DEFAULT_SCRATCH_ROOT = Path("/storage/scratch1/9/eliu354/efficientsam3-benchmark")
 DEFAULT_TINYVIT21_REPO = "external/efficientsam3"
 DEFAULT_TINYVIT21_CHECKPOINT = "checkpoints/efficientsam3_ft/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.pt"
+DEFAULT_INSTINCTSAM_REPO = "external/efficientsam3"
+DEFAULT_INSTINCTSAM_CHECKPOINT = "checkpoints/instinctsam/instinctsam_vitb_concept.pt"
 EFFICIENTSAM3_TINYVIT21_REPO = os.environ.get("EFFICIENTSAM3_TINYVIT21_REPO", DEFAULT_TINYVIT21_REPO)
 EFFICIENTSAM3_TINYVIT21_CHECKPOINT = os.environ.get(
     "EFFICIENTSAM3_TINYVIT21_CHECKPOINT",
     DEFAULT_TINYVIT21_CHECKPOINT,
 )
+INSTINCTSAM_REPO = os.environ.get("INSTINCTSAM_REPO", DEFAULT_INSTINCTSAM_REPO)
+INSTINCTSAM_CHECKPOINT = os.environ.get("INSTINCTSAM_CHECKPOINT", DEFAULT_INSTINCTSAM_CHECKPOINT)
 
 
 @dataclass(frozen=True)
@@ -307,6 +311,36 @@ IMAGE_PER_FRAME_RUNS = [
         extra_args=(
             "--backbone-type", "tinyvit",
             "--model-name", "21m",
+        ),
+    ),
+    SacoStreamRun(
+        "instinctsam_vitb_image_per_frame_point",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="point",
+        checkpoint_path=INSTINCTSAM_CHECKPOINT,
+        external_repo=INSTINCTSAM_REPO,
+        extra_args=(
+            "--backbone-type", "vit_base",
+            "--model-name", "base",
+            "--text-encoder-type", "MobileCLIP-S1",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "77",
+        ),
+    ),
+    SacoStreamRun(
+        "instinctsam_vitb_image_per_frame_text",
+        "efficientsam3",
+        "image_per_frame",
+        prompt_type="text",
+        checkpoint_path=INSTINCTSAM_CHECKPOINT,
+        external_repo=INSTINCTSAM_REPO,
+        extra_args=(
+            "--backbone-type", "vit_base",
+            "--model-name", "base",
+            "--text-encoder-type", "MobileCLIP-S1",
+            "--text-encoder-context-length", "16",
+            "--text-encoder-pos-embed-table-size", "77",
         ),
     ),
 ]
