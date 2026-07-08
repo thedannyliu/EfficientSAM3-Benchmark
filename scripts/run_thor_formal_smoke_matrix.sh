@@ -4,7 +4,7 @@ set -euo pipefail
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-results/thor/formal_smoke/${RUN_ID}}"
 OVERLAY_ROOT="${OVERLAY_ROOT:-overlays/thor/formal_smoke/${RUN_ID}}"
-SAM2D_PIPELINE="${SAM2D_PIPELINE:-/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline}"
+SAM2D_PIPELINE="${SAM2D_PIPELINE:-external/SAM2-Distillation-Pipeline}"
 SAV_ROOT="${SAV_ROOT:-data/sa-v/sav_test}"
 SA1B_ROOT="${SA1B_ROOT:-data/sa1b/extracted_two_tar}"
 SA1B_IMAGE_ROOT="${SA1B_IMAGE_ROOT:-${SA1B_ROOT}}"

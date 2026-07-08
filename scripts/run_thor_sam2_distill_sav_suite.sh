@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SAM2D_PIPELINE="${SAM2D_PIPELINE:-/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline}"
+SAM2D_PIPELINE="${SAM2D_PIPELINE:-external/SAM2-Distillation-Pipeline}"
 SAV_ROOT="${SAV_ROOT:-data/sa-v/sav_test}"
 SAV_SPLIT_FILE="${SAV_SPLIT_FILE:-}"
 RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"

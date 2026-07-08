@@ -634,6 +634,7 @@ Recommended Thor file layout before the smoke run:
         tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors
         tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors
   external/
+    SAM2-Distillation-Pipeline/
     sam2/
     EdgeTAM/
     EfficientTAM/
@@ -652,6 +653,20 @@ The smoke manifest builder recursively scans JSON files under
 `data/sa1b/extracted_two_tar` and resolves images by `image.file_name`,
 same-stem image name, or the matching relative directory under
 `SA1B_IMAGE_ROOT`.
+
+The SAM2 distillation benchmark code should be a Thor-local clone, not the PACE
+`/storage/home/...` path. Recommended location:
+
+```bash
+mkdir -p external
+git clone git@github.com:thedannyliu/SAM2-Distillation-Pipeline.git external/SAM2-Distillation-Pipeline
+```
+
+If that repo already exists somewhere else on Thor, pass it explicitly:
+
+```bash
+SAM2D_PIPELINE=/home/ril-thor/SAM2-Distillation-Pipeline bash scripts/run_thor_formal_smoke_matrix.sh
+```
 
 The Stage1 TinyViT checkpoints are resolved by the SAM2-Distillation-Pipeline
 defaults unless overridden:
@@ -731,7 +746,6 @@ cd ~/EfficientSAM3-Benchmark
 source scripts/source_thor_ros_env.sh
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
-SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
 SAV_ROOT=data/sa-v/sav_test \
 SA1B_ROOT=data/sa1b/extracted_two_tar \
 SA1B_IMAGE_ROOT=data/sa1b/extracted_two_tar \
@@ -786,7 +800,6 @@ Run the SAM2.1-L/B+ and Stage1 TinyViT rows:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
-SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
 SAV_ROOT=/path/to/SA-V/sav_test \
 OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
 MAX_VIDEOS=0 \
@@ -798,7 +811,6 @@ bash scripts/run_thor_sam2_distill_sav_suite.sh sam2
 Run official EdgeTAM and `tv21m_mse_cos_edgetam`:
 
 ```bash
-SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
 SAV_ROOT=/path/to/SA-V/sav_test \
 OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
 MAX_VIDEOS=0 \
