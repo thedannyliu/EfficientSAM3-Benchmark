@@ -17,6 +17,10 @@ FIELDS = [
     "callback_total_ms",
     "end_to_end_ms",
     "tracking_fps",
+    "backend",
+    "stream_mode",
+    "tracking_state",
+    "model_kind",
     "image_encoder_ms",
     "text_encoder_ms",
     "prompt_encoder_ms",
@@ -34,8 +38,14 @@ FIELDS = [
     "prompt_count",
     "point_x",
     "point_y",
+    "box_x1",
+    "box_y1",
+    "box_x2",
+    "box_y2",
     "mask_count",
     "box_count",
+    "init_state_ms",
+    "add_prompt_ms",
     "score_max",
     "cuda_allocated_mb",
     "cuda_reserved_mb",
@@ -84,6 +94,8 @@ SUMMARY_FIELDS = [
     "mean_end_to_end_fps",
     "p95_end_to_end_ms",
     "mean_tracking_fps",
+    "mean_init_state_ms",
+    "mean_add_prompt_ms",
     "mean_image_encoder_ms",
     "mean_text_encoder_ms",
     "mean_prompt_encoder_ms",
@@ -134,6 +146,10 @@ class ResultRecorderNode(Node):
             "callback_total_ms": data.get("callback_total_ms"),
             "end_to_end_ms": data.get("end_to_end_ms"),
             "tracking_fps": data.get("tracking_fps"),
+            "backend": data.get("backend"),
+            "stream_mode": data.get("stream_mode"),
+            "tracking_state": data.get("tracking_state"),
+            "model_kind": data.get("model_kind"),
             "image_encoder_ms": data.get("image_encoder_ms"),
             "text_encoder_ms": data.get("text_encoder_ms"),
             "prompt_encoder_ms": data.get("prompt_encoder_ms"),
@@ -151,8 +167,14 @@ class ResultRecorderNode(Node):
             "prompt_count": data.get("prompt_count"),
             "point_x": data.get("point_x"),
             "point_y": data.get("point_y"),
+            "box_x1": data.get("box_x1"),
+            "box_y1": data.get("box_y1"),
+            "box_x2": data.get("box_x2"),
+            "box_y2": data.get("box_y2"),
             "mask_count": data.get("mask_count"),
             "box_count": data.get("box_count"),
+            "init_state_ms": data.get("init_state_ms"),
+            "add_prompt_ms": data.get("add_prompt_ms"),
             "score_max": data.get("score_max"),
             "cuda_allocated_mb": data.get("cuda_allocated_mb"),
             "cuda_reserved_mb": data.get("cuda_reserved_mb"),
@@ -226,6 +248,8 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     detector = _values(rows, "detector_ms")
     memory_attention = _values(rows, "memory_attention_ms")
     memory_encoder = _values(rows, "memory_encoder_ms")
+    init_state = _values(rows, "init_state_ms")
+    add_prompt = _values(rows, "add_prompt_ms")
     masks = _values(rows, "mask_count")
     scores = _values(rows, "score_max")
     mean_latency = mean(latency) if latency else None
@@ -244,6 +268,8 @@ def summarize_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_end_to_end_fps": 1000.0 / mean_end_to_end if mean_end_to_end and mean_end_to_end > 0 else "",
         "p95_end_to_end_ms": _percentile(end_to_end, 0.95),
         "mean_tracking_fps": mean(tracking_fps) if tracking_fps else "",
+        "mean_init_state_ms": mean(init_state) if init_state else "",
+        "mean_add_prompt_ms": mean(add_prompt) if add_prompt else "",
         "mean_image_encoder_ms": mean(image) if image else "",
         "mean_text_encoder_ms": mean(text) if text else "",
         "mean_prompt_encoder_ms": mean(prompt) if prompt else "",

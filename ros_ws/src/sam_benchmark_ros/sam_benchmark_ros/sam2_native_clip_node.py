@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from collections import deque
 from pathlib import Path
 from time import perf_counter
@@ -21,27 +23,29 @@ from sam_backend.streaming import (
     left_panel_click_to_image_point,
     left_panel_drag_to_image_box,
     masks_to_mono8,
-    parse_text_prompts,
 )
 
 
-class Sam3NativeClipNode(Node):
+class Sam2NativeClipNode(Node):
     def __init__(self) -> None:
-        super().__init__("sam3_native_clip_node")
+        super().__init__("sam2_native_clip_node")
         self.declare_parameter("image_topic", "/camera/camera/color/image_raw")
         self.declare_parameter("result_topic", "/sam/result_json")
         self.declare_parameter("mask_topic", "/segmentation_mask")
         self.declare_parameter("segmented_image_topic", "/segmented_image")
         self.declare_parameter("overlay_topic", "/sam/overlay")
-        self.declare_parameter("checkpoint_path", "checkpoints/sam3/sam3.pt")
-        self.declare_parameter("external_repo", "external/sam3")
-        self.declare_parameter("prompt", "monitor")
-        self.declare_parameter("prompts", "")
+        self.declare_parameter("checkpoint_path", "checkpoints/sam2/sam2.1_hiera_large.pt")
+        self.declare_parameter("sam2_checkpoint_path", "")
+        self.declare_parameter("model_config", "configs/sam2.1/sam2.1_hiera_l.yaml")
+        self.declare_parameter("external_repo", "external/sam2")
+        self.declare_parameter("sam2_distill_root", "external/SAM2-Distillation-Pipeline")
+        self.declare_parameter("model_kind", "sam2")
+        self.declare_parameter("tinyvit_checkpoint", "")
+        self.declare_parameter("tinyvit_model_name", "tiny_vit_21m_512.dist_in22k_ft_in1k")
+        self.declare_parameter("device", "cuda")
         self.declare_parameter("clip_frames", 120)
-        self.declare_parameter("frame_dir", "results/thor/ros_camera/sam3_native_clip/frames")
-        self.declare_parameter("version", "sam3")
-        self.declare_parameter("prompt_mode", "text")
-        self.declare_parameter("window_name", "SAM3 Native Memory")
+        self.declare_parameter("frame_dir", "results/thor/ros_camera/sam2_native_clip/frames")
+        self.declare_parameter("window_name", "SAM2 Native Memory")
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("display_scale", 1.0)
         self.declare_parameter("display_max_width", 0)
@@ -53,13 +57,6 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("box_drag_min_pixels", 5.0)
 
         self.bridge = CvBridge()
-        self.prompt_mode = str(self.get_parameter("prompt_mode").value)
-        if self.prompt_mode not in {"text", "point", "box", "interactive"}:
-            raise ValueError("prompt_mode must be one of: text, point, box, interactive")
-        self.prompt = str(self.get_parameter("prompt").value)
-        self.prompt_texts = parse_text_prompts(self.prompt, str(self.get_parameter("prompts").value))
-        if self.prompt_mode == "text" and not self.prompt_texts:
-            raise ValueError("prompt or prompts must provide at least one text prompt")
         self.clip_frames = int(self.get_parameter("clip_frames").value)
         if self.clip_frames <= 0:
             raise ValueError("clip_frames must be positive")
@@ -80,57 +77,44 @@ class Sam3NativeClipNode(Node):
         self.latest_display: np.ndarray | None = None
         self.frames: list[np.ndarray] = []
         self.headers: list[Any] = []
-        self.geometry_prompt: dict[str, Any] | None = None
+        self.prompt: dict[str, Any] | None = None
         self.drag_start: tuple[float, float] | None = None
+        self.state = "waiting_for_prompt"
+        self.frame_index = 0
         self.result_times: deque[float] = deque(maxlen=60)
-        self.state = "waiting_for_prompt" if self.prompt_mode != "text" else "capturing"
-        self.processing_started = False
 
-        external_repo = str(self.get_parameter("external_repo").value)
-        checkpoint_path = str(self.get_parameter("checkpoint_path").value)
-        _prepend_repo_path(external_repo)
-        torch_module = _import_required("torch")
-        builder = _import_required("sam3.model_builder")
-        self.torch_module = torch_module
-        self.predictor = builder.build_sam3_predictor(
-            checkpoint_path=checkpoint_path,
-            version=str(self.get_parameter("version").value),
-        )
-        self.params = parameter_counts(getattr(self.predictor, "model", self.predictor))
-        if torch_module.cuda.is_available():
-            torch_module.cuda.reset_peak_memory_stats()
+        self.predictor, self.torch_module, self.load_summary = _build_predictor_from_params(self)
+        self.params = parameter_counts(self.predictor)
+        if self.torch_module.cuda.is_available():
+            self.torch_module.cuda.reset_peak_memory_stats()
 
         image_topic = str(self.get_parameter("image_topic").value)
         result_topic = str(self.get_parameter("result_topic").value)
         mask_topic = str(self.get_parameter("mask_topic").value)
         segmented_image_topic = str(self.get_parameter("segmented_image_topic").value)
         overlay_topic = str(self.get_parameter("overlay_topic").value)
+        display_fps = float(self.get_parameter("display_fps").value)
+
         self.result_publisher = self.create_publisher(String, result_topic, 10)
         self.mask_publisher = self.create_publisher(Image, mask_topic, 10)
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
         self.subscription = self.create_subscription(Image, image_topic, self.on_image, 1)
-        display_fps = float(self.get_parameter("display_fps").value)
         self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
 
         if self.enable_display:
             cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
             cv2.setMouseCallback(self.window_name, self.on_mouse)
-
-        if self.prompt_mode == "text":
-            self.get_logger().info(
-                f"capturing {self.clip_frames} frames from {image_topic}; "
-                f"SAM3 text native tracking will run after the clip is materialized"
-            )
-        elif self.auto_start:
-            self.get_logger().info(f"listening on {image_topic}; auto-starting native SAM3 point tracking")
-        else:
             self.get_logger().info(
                 f"listening on {image_topic}; click for point or drag for box; clip_frames={self.clip_frames}"
             )
+        elif self.auto_start:
+            self.get_logger().info(f"listening on {image_topic}; auto-starting native SAM2 clip tracking")
+        else:
+            self.get_logger().info(f"listening on {image_topic}; display disabled and waiting for a prompt")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
-        if self.prompt_mode == "text" or self.latest_frame is None or self.state == "processing":
+        if self.latest_frame is None or self.state == "processing":
             return
         scale = self.current_display_scale if self.current_display_scale > 0 else 1.0
         point = left_panel_click_to_image_point(x / scale, y / scale, self.latest_frame.shape[:2])
@@ -149,28 +133,22 @@ class Sam3NativeClipNode(Node):
         start = self.drag_start
         self.drag_start = None
         box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
-        if self.prompt_mode == "box" and box is None:
-            self.get_logger().info("drag a larger box to start SAM3 box tracking")
-            return
-        if self.prompt_mode == "point" or box is None:
+        if box is None:
             self._start_capture({"prompt_mode": "point", "point": point, "label": 1})
-            self.get_logger().info(f"received native SAM3 point prompt x={point[0]:.1f} y={point[1]:.1f}")
+            self.get_logger().info(f"received native SAM2 point prompt x={point[0]:.1f} y={point[1]:.1f}")
         else:
             self._start_capture({"prompt_mode": "box", "box": box})
             self.get_logger().info(
-                f"received native SAM3 box prompt x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
+                f"received native SAM2 box prompt x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
             )
 
     def on_image(self, msg: Image) -> None:
-        if self.state == "processing":
-            return
-        frame_rgb = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
-        self.latest_frame = frame_rgb
+        frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+        self.latest_frame = frame
         self.latest_header = msg.header
-
-        if self.prompt_mode != "text" and self.auto_start and self.state == "waiting_for_prompt":
+        if self.auto_start and self.state == "waiting_for_prompt":
             self.auto_start = False
-            height, width = frame_rgb.shape[:2]
+            height, width = frame.shape[:2]
             if self.initial_point_normalized:
                 point = (self.initial_point_x * float(width), self.initial_point_y * float(height))
             else:
@@ -178,144 +156,109 @@ class Sam3NativeClipNode(Node):
             self._start_capture({"prompt_mode": "point", "point": point, "label": 1})
             return
 
-        if self.state == "waiting_for_prompt":
-            self.latest_display = _scale_display(
-                _status_overlay(frame_rgb, "Click point or drag box"),
-                self.display_scale,
-                self.display_max_width,
-            )[0]
-            return
-
         if self.state == "capturing":
-            self.frames.append(frame_rgb.copy())
+            self.frames.append(frame.copy())
             self.headers.append(msg.header)
             if len(self.frames) % 30 == 0 or len(self.frames) == self.clip_frames:
-                self.get_logger().info(f"captured {len(self.frames)}/{self.clip_frames} frames")
-        if self.state == "capturing" and len(self.frames) >= self.clip_frames:
-            self.processing_started = True
-            self.state = "processing"
-            self._process_clip()
+                self.get_logger().info(f"captured {len(self.frames)}/{self.clip_frames} frames for native SAM2")
+            if len(self.frames) >= self.clip_frames:
+                self.state = "processing"
+                self._process_clip()
+        elif self.state == "waiting_for_prompt":
+            self.latest_display = _scale_display(_status_overlay(frame, "Click point or drag box"), self.display_scale, self.display_max_width)[0]
 
     def _start_capture(self, prompt: dict[str, Any]) -> None:
         if self.latest_frame is None or self.latest_header is None:
             return
-        self.geometry_prompt = prompt
+        self.prompt = prompt
         self.frames = [self.latest_frame.copy()]
         self.headers = [self.latest_header]
         self.state = "capturing"
 
     def _process_clip(self) -> None:
+        if self.prompt is None:
+            self.state = "waiting_for_prompt"
+            return
+        prompt = self.prompt
         self.frame_dir.mkdir(parents=True, exist_ok=True)
-        for old_frame in self.frame_dir.iterdir():
-            if old_frame.is_file() and old_frame.suffix.lower() in {".jpg", ".jpeg", ".png"}:
-                old_frame.unlink()
+        for old_frame in self.frame_dir.glob("*.jpg"):
+            old_frame.unlink()
         for idx, frame_rgb in enumerate(self.frames):
-            path = self.frame_dir / f"{idx:06d}.jpg"
-            cv2.imwrite(str(path), cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(str(self.frame_dir / f"{idx:06d}.jpg"), cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
 
-        session_id = None
         try:
             self._sync()
             start_init = perf_counter()
-            response = self.predictor.handle_request({"type": "start_session", "resource_path": str(self.frame_dir)})
+            inference_state = self.predictor.init_state(video_path=str(self.frame_dir))
             self._sync()
             init_ms = (perf_counter() - start_init) * 1000.0
-            session_id = response["session_id"]
+
             start_prompt = perf_counter()
-            prompt_record = self._add_prompt(session_id)
+            if prompt["prompt_mode"] == "box":
+                self.predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=0,
+                    obj_id=1,
+                    box=np.asarray(prompt["box"], dtype=np.float32),
+                )
+            else:
+                self.predictor.add_new_points_or_box(
+                    inference_state=inference_state,
+                    frame_idx=0,
+                    obj_id=1,
+                    points=np.asarray([prompt["point"]], dtype=np.float32),
+                    labels=np.asarray([prompt.get("label", 1)], dtype=np.int32),
+                )
             self._sync()
             add_prompt_ms = (perf_counter() - start_prompt) * 1000.0
-            iterator = self.predictor.handle_stream_request(
-                {
-                    "type": "propagate_in_video",
-                    "session_id": session_id,
-                    "start_frame_index": 0,
-                    "max_frame_num_to_track": self.clip_frames,
-                }
+
+            iterator = self.predictor.propagate_in_video(
+                inference_state,
+                start_frame_idx=0,
+                max_frame_num_to_track=len(self.frames),
             )
             while True:
                 start = perf_counter()
                 try:
-                    response = next(iterator)
+                    frame_idx, obj_ids, video_res_masks = next(iterator)
                     self._sync()
                 except StopIteration:
                     break
                 latency_ms = (perf_counter() - start) * 1000.0
-                frame_index = int(response.get("frame_index", response.get("frame_idx", 0)))
-                if frame_index >= len(self.frames):
-                    continue
-                masks = _sam3_output_masks(response.get("outputs", {}), self.frames[frame_index].shape[:2])
-                self._publish_frame(frame_index, masks, latency_ms, init_ms, add_prompt_ms, prompt_record)
+                frame_idx = int(frame_idx)
+                masks = _binary_masks(video_res_masks)
+                self._publish_frame(frame_idx, masks, obj_ids, latency_ms, init_ms, add_prompt_ms, prompt)
         finally:
-            if session_id is not None:
-                self.predictor.handle_request({"type": "close_session", "session_id": session_id})
             self.state = "done"
-            self.get_logger().info("native SAM3 clip tracking complete; click or drag again to reset and run another clip")
-
-    def _add_prompt(self, session_id: str) -> dict[str, Any]:
-        if self.prompt_mode == "text":
-            for prompt in self.prompt_texts:
-                self.predictor.handle_request(
-                    {"type": "add_prompt", "session_id": session_id, "frame_index": 0, "text": prompt}
-                )
-            return {"prompt_mode": "native_text", "prompt_text": ",".join(self.prompt_texts)}
-        if self.geometry_prompt is None:
-            raise RuntimeError("geometry prompt is missing")
-        prompt = self.geometry_prompt
-        if prompt["prompt_mode"] == "box":
-            box_xywh = _normalized_xywh(prompt["box"], self.frames[0].shape[:2])
-            self.predictor.handle_request(
-                {
-                    "type": "add_prompt",
-                    "session_id": session_id,
-                    "frame_index": 0,
-                    "bounding_boxes": [box_xywh],
-                    "bounding_box_labels": [1],
-                }
-            )
-        else:
-            self.predictor.handle_request(
-                {
-                    "type": "add_prompt",
-                    "session_id": session_id,
-                    "frame_index": 0,
-                    "points": [prompt["point"]],
-                    "point_labels": [prompt.get("label", 1)],
-                    "obj_id": 1,
-                    "rel_coordinates": False,
-                }
-            )
-        return prompt
+            self.get_logger().info("native SAM2 clip tracking complete; click or drag again to reset and run another clip")
 
     def _publish_frame(
         self,
         frame_index: int,
         masks: Any,
+        obj_ids: Any,
         latency_ms: float,
         init_ms: float,
         add_prompt_ms: float,
         prompt: dict[str, Any],
     ) -> None:
+        if frame_index >= len(self.frames):
+            return
         frame = self.frames[frame_index]
         header = self.headers[frame_index]
-        mask = masks_to_mono8(masks, frame.shape[:2])
         overlay = overlay_prediction(frame, masks)
         _draw_prompt(overlay, prompt)
-        callback_total_ms = latency_ms
-        end_to_end_ms = self._end_to_end_ms(header)
+        mask = masks_to_mono8(masks, frame.shape[:2])
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
-        tracking_fps = self._tracking_fps()
         memory = cuda_memory_mb(self.torch_module)
         result = {
             "frame_index": frame_index,
             "stamp": {"sec": header.stamp.sec, "nanosec": header.stamp.nanosec},
             "frame_id": header.frame_id,
-            "backend": "sam3",
-            "stream_mode": "native_clip",
+            "backend": _backend_label(str(self.get_parameter("external_repo").value)),
+            "stream_mode": "native_video_clip",
             "tracking_state": "tracking",
             "prompt_mode": prompt["prompt_mode"],
-            "prompt_text": prompt.get("prompt_text", ""),
-            "prompt_count": len(self.prompt_texts) if prompt["prompt_mode"] == "native_text" else 1,
             "point_x": prompt.get("point", ("", ""))[0] if prompt["prompt_mode"] == "point" else "",
             "point_y": prompt.get("point", ("", ""))[1] if prompt["prompt_mode"] == "point" else "",
             "box_x1": prompt.get("box", ("", "", "", ""))[0] if prompt["prompt_mode"] == "box" else "",
@@ -325,10 +268,13 @@ class Sam3NativeClipNode(Node):
             "latency_ms": latency_ms,
             "init_state_ms": init_ms if frame_index == 0 else "",
             "add_prompt_ms": add_prompt_ms if frame_index == 0 else "",
-            "callback_total_ms": callback_total_ms,
-            "end_to_end_ms": end_to_end_ms,
-            "tracking_fps": tracking_fps,
+            "callback_total_ms": latency_ms,
+            "end_to_end_ms": self._end_to_end_ms(header),
+            "tracking_fps": self._tracking_fps(),
             "mask_count": _safe_len(masks),
+            "object_ids": ",".join(str(obj_id) for obj_id in obj_ids),
+            "model_kind": str(self.get_parameter("model_kind").value),
+            **self.load_summary,
             **memory,
             **self.params,
         }
@@ -355,14 +301,13 @@ class Sam3NativeClipNode(Node):
         if key in {27, ord("q")}:
             raise SystemExit
         if key == ord("r"):
-            self.state = "waiting_for_prompt" if self.prompt_mode != "text" else "capturing"
-            self.processing_started = False
-            self.geometry_prompt = None
+            self.state = "waiting_for_prompt"
+            self.prompt = None
             self.frames = []
             self.headers = []
             self.drag_start = None
             self.latest_display = None
-            self.get_logger().info("reset native SAM3 tracking state")
+            self.get_logger().info("reset native SAM2 tracking state")
 
     def _sync(self) -> None:
         cuda = getattr(self.torch_module, "cuda", None)
@@ -384,27 +329,142 @@ class Sam3NativeClipNode(Node):
     def destroy_node(self) -> bool:
         if self.enable_display:
             cv2.destroyAllWindows()
-        if hasattr(self, "predictor") and hasattr(self.predictor, "shutdown"):
-            self.predictor.shutdown()
         return super().destroy_node()
 
 
-def _sam3_output_masks(outputs: dict[str, Any], frame_hw: tuple[int, int]) -> Any:
-    for key in ("out_binary_masks", "pred_masks", "masks"):
-        if key in outputs:
-            return outputs[key]
-    return np.zeros((0, frame_hw[0], frame_hw[1]), dtype=np.uint8)
+def _build_predictor_from_params(node: Sam2NativeClipNode) -> tuple[Any, Any, dict[str, Any]]:
+    external_repo = str(node.get_parameter("external_repo").value)
+    _prepend_repo_path(external_repo)
+    torch_module = _import_required("torch")
+    builder = _import_required("sam2.build_sam")
+    _try_patch_edgetam_compat(node)
+
+    model_kind = str(node.get_parameter("model_kind").value)
+    checkpoint_path = str(node.get_parameter("checkpoint_path").value)
+    sam2_checkpoint_path = str(node.get_parameter("sam2_checkpoint_path").value)
+    full_checkpoint = sam2_checkpoint_path if model_kind == "stage1-student" and sam2_checkpoint_path else checkpoint_path
+    predictor = builder.build_sam2_video_predictor(
+        config_file=str(node.get_parameter("model_config").value),
+        ckpt_path=full_checkpoint,
+        device=str(node.get_parameter("device").value),
+        apply_postprocessing=False,
+        hydra_overrides_extra=["++model.non_overlap_masks=false"],
+    )
+    predictor.eval()
+    for param in predictor.parameters():
+        param.requires_grad_(False)
+
+    load_summary: dict[str, Any] = {
+        "checkpoint_path": checkpoint_path,
+        "sam2_checkpoint_path": full_checkpoint,
+        "model_config": str(node.get_parameter("model_config").value),
+    }
+    if model_kind == "stage1-student":
+        load_summary.update(_patch_stage1_forward_image(node, predictor, torch_module, checkpoint_path, full_checkpoint))
+    return predictor, torch_module, load_summary
 
 
-def _normalized_xywh(box_xyxy: tuple[float, float, float, float], frame_hw: tuple[int, int]) -> list[float]:
-    height, width = frame_hw
-    x1, y1, x2, y2 = [float(value) for value in box_xyxy]
-    return [
-        max(0.0, min(1.0, x1 / float(width))),
-        max(0.0, min(1.0, y1 / float(height))),
-        max(0.0, min(1.0, (x2 - x1 + 1.0) / float(width))),
-        max(0.0, min(1.0, (y2 - y1 + 1.0) / float(height))),
-    ]
+def _try_patch_edgetam_compat(node: Sam2NativeClipNode) -> None:
+    sam2_distill_root = Path(str(node.get_parameter("sam2_distill_root").value))
+    if sam2_distill_root.exists():
+        sys.path.insert(0, str(sam2_distill_root))
+    try:
+        from sam2_distill.edgetam.compat import patch_edgetam_perceiver_view
+    except ImportError:
+        return
+    patch_edgetam_perceiver_view()
+
+
+def _patch_stage1_forward_image(
+    node: Sam2NativeClipNode,
+    predictor: Any,
+    torch_module: Any,
+    student_checkpoint_path: str,
+    sam2_checkpoint_path: str,
+) -> dict[str, Any]:
+    sam2_distill_root = Path(str(node.get_parameter("sam2_distill_root").value))
+    if sam2_distill_root.exists():
+        sys.path.insert(0, str(sam2_distill_root))
+    try:
+        from sam2_distill.edgetam.compat import patch_edgetam_perceiver_view
+        from sam2_distill.models.stage1_checkpoint import infer_tinyvit_model_name, resolve_tinyvit_checkpoint
+        from sam2_distill.models.tinyvit_adapter import TinyViTSAM2Adapter
+    except ImportError as exc:
+        raise RuntimeError(
+            "model_kind=stage1-student requires SAM2-Distillation-Pipeline on sam2_distill_root/PYTHONPATH"
+        ) from exc
+
+    patch_edgetam_perceiver_view()
+    checkpoint = torch_module.load(student_checkpoint_path, map_location="cpu", weights_only=False)
+    state_dict = _extract_state_dict(checkpoint)
+    requested_tinyvit = str(node.get_parameter("tinyvit_model_name").value)
+    tinyvit_model_name = infer_tinyvit_model_name(state_dict, requested_tinyvit)
+    requested_tinyvit_checkpoint = str(node.get_parameter("tinyvit_checkpoint").value)
+    tinyvit_checkpoint = (
+        resolve_tinyvit_checkpoint(tinyvit_model_name, Path(requested_tinyvit_checkpoint))
+        if requested_tinyvit_checkpoint
+        else None
+    )
+    student = TinyViTSAM2Adapter(
+        model_name=tinyvit_model_name,
+        checkpoint_path=str(tinyvit_checkpoint) if tinyvit_checkpoint is not None else None,
+    ).to(str(node.get_parameter("device").value))
+    incompatible = student.load_state_dict(state_dict, strict=False)
+    student.eval()
+    for param in student.parameters():
+        param.requires_grad_(False)
+
+    position_encoding = predictor.image_encoder.neck.position_encoding
+
+    @torch_module.inference_mode()
+    def forward_image(self: Any, img_batch: Any) -> dict[str, Any]:
+        features = student(img_batch)
+        backbone_fpn = [
+            features["high_res_s0"].float(),
+            features["high_res_s1"].float(),
+            features["image_embed"].float(),
+        ]
+        vision_pos_enc = [position_encoding(feat).float() for feat in backbone_fpn]
+        return {
+            "vision_features": backbone_fpn[-1],
+            "vision_pos_enc": vision_pos_enc,
+            "backbone_fpn": backbone_fpn,
+        }
+
+    predictor.forward_image = types.MethodType(forward_image, predictor)
+    predictor._stage1_student = student
+    return {
+        "student_checkpoint_path": student_checkpoint_path,
+        "tinyvit_checkpoint_path": str(tinyvit_checkpoint) if tinyvit_checkpoint is not None else "",
+        "tinyvit_model_name": tinyvit_model_name,
+        "stage1_checkpoint_step": checkpoint.get("step", ""),
+        "stage1_checkpoint_epoch": checkpoint.get("epoch", ""),
+        "stage1_missing_keys": len(incompatible.missing_keys),
+        "stage1_unexpected_keys": len(incompatible.unexpected_keys),
+        "sam2_checkpoint_path": sam2_checkpoint_path,
+    }
+
+
+def _extract_state_dict(checkpoint: dict[str, Any]) -> dict[str, Any]:
+    for key in ("model", "model_state", "state_dict"):
+        value = checkpoint.get(key)
+        if isinstance(value, dict):
+            if any(state_key.startswith("module.") for state_key in value):
+                return {state_key.removeprefix("module."): tensor for state_key, tensor in value.items()}
+            return value
+    raise KeyError("checkpoint must contain one of: model, model_state, state_dict")
+
+
+def _binary_masks(masks: Any) -> np.ndarray:
+    values = masks
+    if hasattr(values, "detach"):
+        values = values.detach()
+    if hasattr(values, "float"):
+        values = values.float()
+    if hasattr(values, "cpu"):
+        values = values.cpu()
+    array = np.asarray(values)
+    return (array > 0).astype(np.uint8)
 
 
 def _draw_prompt(image_rgb: np.ndarray, prompt: dict[str, Any]) -> None:
@@ -413,7 +473,7 @@ def _draw_prompt(image_rgb: np.ndarray, prompt: dict[str, Any]) -> None:
         x1, y1, x2, y2 = [int(round(value)) for value in box]
         cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (255, 255, 255), 3, cv2.LINE_AA)
         cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (30, 220, 255), 1, cv2.LINE_AA)
-    elif prompt["prompt_mode"] == "point":
+    else:
         point = prompt["point"]
         x = int(round(point[0]))
         y = int(round(point[1]))
@@ -432,7 +492,7 @@ def _display_with_metrics(overlay_rgb: np.ndarray, result: dict[str, Any]) -> np
     overlay_bgr = cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR)
     panel = np.full((overlay_bgr.shape[0], 360, 3), 24, dtype=np.uint8)
     lines = [
-        "SAM3 native memory",
+        "SAM2 native memory",
         f"Prompt: {result.get('prompt_mode', '')}",
         f"Frame: {result.get('frame_index', '')}",
         f"State: {result.get('tracking_state', '')}",
@@ -460,6 +520,10 @@ def _scale_display(image: np.ndarray, display_scale: float, display_max_width: i
     return cv2.resize(image, (width, height), interpolation=cv2.INTER_AREA), scale
 
 
+def _backend_label(external_repo: str) -> str:
+    return "edgetam" if "edgetam" in external_repo.lower() else "sam2"
+
+
 def _format_float(value: Any) -> str:
     if value in ("", None):
         return "n/a"
@@ -484,7 +548,7 @@ def _stamp_delta_ms(start_sec: int, start_nanosec: int, end_sec: int, end_nanose
 
 def main() -> None:
     rclpy.init()
-    node = Sam3NativeClipNode()
+    node = Sam2NativeClipNode()
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, SystemExit):

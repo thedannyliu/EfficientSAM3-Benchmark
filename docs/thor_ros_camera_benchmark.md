@@ -30,17 +30,22 @@ As of 2026-07-08, the checked-in ROS camera code has these behaviors:
 | MobileSAM | `mobile_sam_interactive_node` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
 | SAM1 ViT-B/L/H | `mobile_sam_interactive_node` with `backend:=sam1` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
 | SAM2.1 / Efficient-SAM2.1 image backends | `sam_backend_node` | fixed parameter point only | independent per-frame image segmentation | implemented, not memory tracking |
-| SAM2.1 native video memory tracking | none in ROS camera yet | target: click point or drag box | target: `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | not implemented in ROS camera |
-| SAM2.1 + distilled TinyViT encoders | none in ROS camera yet | target: click point or drag box | target: SAM2 memory with distilled image encoder swapped in | not implemented in ROS camera |
+| SAM2.1 native video memory tracking | `sam2_native_clip_node` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | implemented for bounded clips |
+| EdgeTAM native video memory tracking | `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs EdgeTAM's SAM2-compatible memory predictor | implemented for bounded clips |
+| SAM2.1 + distilled TinyViT encoders | `sam2_native_clip_node` with `model_kind:=stage1-student` | click point or left-button drag box in the OpenCV window | same SAM2/EdgeTAM memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for bounded clips |
 | SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
-| SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt only, after a fixed clip is captured | native `start_session` + `add_prompt` + `propagate_in_video` over the captured clip | implemented for text clip tracking only |
-| SAM3 geometry prompt tracking | none in ROS camera yet | target: click point or drag box | target: native SAM3 video session with geometry prompt | not implemented in ROS camera |
+| SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt, click point, or left-button drag box in the OpenCV window | captures a bounded clip, then runs native `start_session` + `add_prompt` + `propagate_in_video` | implemented for bounded text/geometry clips |
+| SAM3 geometry prompt tracking | `sam3_native_clip_node` with `prompt_mode:=interactive`, `point`, or `box` | click point or left-button drag box in the OpenCV window | same SAM3 native video session, with geometry prompt data passed to `add_prompt` | implemented for bounded clips |
 
 Do not use `sam_backend_node` runs as evidence of SAM2/SAM3 memory tracking.
 Those rows are useful for per-frame image latency, but they do not carry SAM2 or
-SAM3 video memory across frames. For SAM1-family models, the intended camera
-tracking baseline is different: the first point or box prompt creates a mask,
-then the previous mask bounding box is passed as the next frame prompt.
+SAM3 video memory across frames. Use `sam2_native_clip_node` for SAM2/EdgeTAM
+memory tracking and `sam3_native_clip_node` for SAM3 memory tracking on ROS
+camera clips. These native paths are bounded clip tracking rather than
+unbounded online trackers because the official predictors initialize from a
+JPEG frame folder. For SAM1-family models, the intended camera tracking
+baseline is different: the first point or box prompt creates a mask, then the
+previous mask bounding box is passed as the next frame prompt.
 
 ### Thor File Layout For Camera Runs
 
@@ -91,9 +96,10 @@ Keep the camera files aligned with the offline benchmark layout:
   overlays/thor/ros_camera/
 ```
 
-The `sam2_distill/` weights are recorded here because they are required for the
-planned SAM2 native-memory camera path. The current ROS camera code does not yet
-load those Stage1 TinyViT encoder replacements.
+The `sam2_distill/` weights are required when `sam2_native_clip_node` runs with
+`model_kind:=stage1-student`; in that mode the node loads a full SAM2/EdgeTAM
+checkpoint for the prompt, mask, and memory modules, then patches only the
+image encoder with the selected Stage1 TinyViT checkpoint.
 
 ### Acceptance Criteria For Native Camera Memory Tracking
 
@@ -105,10 +111,11 @@ initial prompt:
   OpenCV left click produces prompt_mode=point, or left-button drag/release produces prompt_mode=box
 
 SAM2 native:
-  node initializes one video state after the first prompt
+  node captures a bounded clip after the first prompt
+  node initializes one video state from the captured JPEG frame folder
   first prompt calls add_new_points_or_box with either points/labels or box
   later frames come from propagate_in_video, not repeated sam_backend_node image calls
-  result rows include stream_mode=native_video or equivalent
+  result rows include stream_mode=native_video_clip
 
 SAM2 distilled TinyViT:
   same SAM2 native path, but image encoder is replaced by the selected Stage1 TinyViT variant
@@ -118,7 +125,7 @@ SAM3 native geometry:
   node starts a SAM3 video session after the first point or box prompt
   add_prompt receives geometry prompt data, not only text
   later frames come from propagate_in_video
-  result rows include stream_mode=native_geometry or equivalent
+  result rows include stream_mode=native_clip and prompt_mode=point or box
 
 SAM1/MobileSAM:
   first prompt may be point or box
@@ -135,8 +142,8 @@ SAM3 reference per-frame text segmentation:
 SAM3 native clip tracking:
   node=sam3_native_clip_node
   checkpoint_path=checkpoints/sam3/sam3.pt
-  prompt=monitor
-  note=text prompt only; captures a fixed clip before native propagation
+  prompt_mode=text, interactive, point, or box
+  note=captures a bounded clip before native propagation
 
 MobileSAM live point/box bbox-chain tracking:
   node=mobile_sam_interactive_node
@@ -180,14 +187,16 @@ SAM1-H:
 
 SAM2.1 / Efficient-SAM2.1:
   current ROS camera path is per-frame point-prompt image segmentation through sam_backend_node
-  native memory tracking is available in offline stream profilers, not in a live ROS camera node yet
+  native memory tracking uses sam2_native_clip_node:
+    click point or drag box -> capture a bounded clip -> init_state/add_new_points_or_box/propagate_in_video
+  stage1-student mode patches forward_image to the selected TinyViT encoder before propagation
 
 SAM3:
   live ROS camera path uses per-frame text/point image segmentation through sam_backend_node
   current native video tracking uses sam3_native_clip_node, which first captures a fixed
   camera clip, materializes it as a frame folder, then starts the native SAM3
-  tracking session with text prompts
-  live geometry prompt native tracking from click point or drag box is not implemented yet
+  tracking session with text, point, or box prompts
+  prompt_mode=interactive enables click point or left-button drag box geometry prompts
 ```
 
 For SAM3 multi-object text prompts, prefer comma-separated values:
@@ -336,6 +345,71 @@ Set `record_overlay:=true` to save the overlay MP4 at `overlay_video_output`.
 The recorder preserves ROS timestamp timing by default, so a slow backend will
 not make the saved MP4 play 4x faster.
 
+For **SAM2.1 native point/box memory tracking**, use the source topic from
+Terminal A. Click the OpenCV window for a point prompt, or left-button drag and
+release for a box prompt. The node captures `clip_frames` frames after the
+prompt and then runs the official SAM2 memory path:
+
+```bash
+ros2 run sam_benchmark_ros sam2_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p external_repo:=external/sam2 \
+  -p checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
+  -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
+  -p device:=cuda \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam2p1_l_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For **EdgeTAM native point/box memory tracking**, use the same node with the
+EdgeTAM repo and config:
+
+```bash
+ros2 run sam_benchmark_ros sam2_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p external_repo:=external/EdgeTAM \
+  -p checkpoint_path:=checkpoints/edgetam/edgetam.pt \
+  -p model_config:=configs/edgetam.yaml \
+  -p device:=cuda \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/edgetam_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+For **Stage1 TinyViT encoder + SAM2 memory tracking**, load a full SAM2
+checkpoint for the prompt/mask/memory modules and patch only the image encoder:
+
+```bash
+ros2 run sam_benchmark_ros sam2_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p external_repo:=external/sam2 \
+  -p sam2_distill_root:=external/SAM2-Distillation-Pipeline \
+  -p model_kind:=stage1-student \
+  -p checkpoint_path:=checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt \
+  -p sam2_checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
+  -p tinyvit_checkpoint:=checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
+  -p tinyvit_model_name:=tiny_vit_21m_512.dist_in22k_ft_in1k \
+  -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
+  -p device:=cuda \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/tv21m_mse_cos_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+Use `auto_start:=true` when you want a non-interactive smoke run from the first
+incoming frame. With `auto_start`, `initial_point_x/y` can be normalized
+coordinates such as `0.5,0.5`.
+
 For **SAM3 text prompt per-frame segmentation**:
 
 ```bash
@@ -353,15 +427,16 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-For **SAM3 native clip tracking**, the node first captures a fixed clip from
-the ROS image topic, writes frames to `frame_dir`, then runs SAM3's native video
-tracking path:
+For **SAM3 native text clip tracking**, the node first captures a fixed clip
+from the ROS image topic, writes frames to `frame_dir`, then runs SAM3's native
+video tracking path:
 
 ```bash
 ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p image_topic:=/image \
   -p checkpoint_path:=checkpoints/sam3/sam3.pt \
   -p external_repo:=external/sam3 \
+  -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
   -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
@@ -370,6 +445,30 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
+
+For **SAM3 native point/box clip tracking**, use the same node with
+`prompt_mode:=interactive`. Click the OpenCV window for a point prompt, or
+left-button drag and release for a box prompt. After the prompt, the node
+captures `clip_frames` frames and sends the geometry prompt through SAM3
+`add_prompt` before `propagate_in_video`:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt_mode:=interactive \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_geometry_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+Use `prompt_mode:=point` to force clicks only, or `prompt_mode:=box` to require
+a drag box. Use `auto_start:=true` for a non-interactive point-prompt smoke run
+from the first incoming frame.
 
 For **EfficientSAM3 text prompt per-frame segmentation**:
 
@@ -1245,13 +1344,14 @@ ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p max_frames:=120
 ```
 
-Terminal B, capture a 120-frame camera clip and run SAM3 native tracking:
+Terminal B, capture a 120-frame camera clip and run SAM3 native text tracking:
 
 ```bash
 ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p image_topic:=/image \
   -p checkpoint_path:=checkpoints/sam3/sam3.pt \
   -p external_repo:=external/sam3 \
+  -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
   -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
@@ -1261,8 +1361,26 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-This is the SAM3 native tracking path. Do not compare its end-to-end latency
-directly against per-frame live backends unless you explicitly want the
+For SAM3 native point/box tracking in the same recorder setup, replace Terminal
+B with:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p image_topic:=/image \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p external_repo:=external/sam3 \
+  -p prompt_mode:=interactive \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
+
+This is the SAM3 native tracking path. Click once for a point prompt, or
+left-button drag/release for a box prompt. Do not compare its end-to-end
+latency directly against per-frame live backends unless you explicitly want the
 capture-then-track delay included.
 
 ## 10. Run EfficientSAM3 Text-Prompt Camera Benchmark
