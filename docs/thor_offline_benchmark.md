@@ -115,6 +115,7 @@ bash scripts/download_efficientsam3_checkpoints.sh
 bash scripts/download_instinctsam_vitb_checkpoint.sh
 bash scripts/download_sam2_family_checkpoints.sh
 bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
+bash scripts/download_sam2_distill_tinyvit_init_weights.sh
 bash scripts/check_storage_budget.sh 300 data checkpoints external
 ```
 
@@ -711,6 +712,12 @@ The Stage1 loader also needs the original TinyViT initialization weights:
 | 21M | `checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors` |
 | 11M | `checkpoints/sam2_distill/tinyvit/tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors` |
 | 5M | `checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors` |
+
+These are public timm TinyViT initialization weights. Download them on Thor:
+
+```bash
+bash scripts/download_sam2_distill_tinyvit_init_weights.sh
+```
 
 If you want to keep the checkpoints in the original
 SAM2-Distillation-Pipeline run folders instead, pass explicit env vars:
