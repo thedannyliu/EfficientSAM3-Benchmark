@@ -76,9 +76,6 @@ class Sam3ImageBackend:
         self.torch = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         processor_mod = _import_required("sam3.model.sam3_image_processor")
-        from .instinctsam import patch_efficientsam3_vit_base
-
-        patch_efficientsam3_vit_base(builder)
 
         if self.config.backend == "sam3":
             self.model = builder.build_sam3_image_model(
@@ -89,6 +86,10 @@ class Sam3ImageBackend:
         elif self.config.backend == "efficientsam3":
             if not self.config.checkpoint_path:
                 raise ValueError("--checkpoint-path is required for EfficientSAM3")
+            if self.config.backbone_type == "vit_base":
+                from .instinctsam import patch_efficientsam3_vit_base
+
+                patch_efficientsam3_vit_base(builder)
             self.model = builder.build_efficientsam3_image_model(
                 checkpoint_path=self.config.checkpoint_path,
                 load_from_HF=False,

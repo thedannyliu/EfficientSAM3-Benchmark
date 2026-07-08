@@ -9,6 +9,11 @@ def patch_efficientsam3_vit_base(builder: Any) -> None:
     """Add InstinctSAM's ViT-B/16 student trunk to an EfficientSAM3 builder."""
     if getattr(builder, "_sam_bench_instinctsam_vit_base", False):
         return
+    if not hasattr(builder, "_create_student_vision_backbone"):
+        raise RuntimeError(
+            "InstinctSAM ViT-B patch requires an EfficientSAM3 model_builder with "
+            "_create_student_vision_backbone; use external/efficientsam3 for instinctsam_vitb"
+        )
 
     original_create_student_vision_backbone = builder._create_student_vision_backbone
 
