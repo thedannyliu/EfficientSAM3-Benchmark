@@ -14,6 +14,12 @@ SKIP_DONE="${SKIP_DONE:-1}"
 NUM_EVAL_PROCESSES="${NUM_EVAL_PROCESSES:-4}"
 SAV_MAX_FRAMES="${SAV_MAX_FRAMES:-120}"
 MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS:-20}"
+SAV_VIDEO_COUNT="${SAV_VIDEO_COUNT:-1}"
+SAV_MANIFEST_COUNT="${SAV_MANIFEST_COUNT:-${SAV_VIDEO_COUNT}}"
+SA1B_COUNT="${SA1B_COUNT:-1}"
+SA1B_LIMIT="${SA1B_LIMIT:-${SA1B_COUNT}}"
+SA1B_MAX_IMAGE_OBJECTS="${SA1B_MAX_IMAGE_OBJECTS:-1}"
+SA1B_IMAGE_ARTIFACT_VIDEOS="${SA1B_IMAGE_ARTIFACT_VIDEOS:-1}"
 SA1B_MODELS="${SA1B_MODELS:-sam3 es3p1_weak_image_weak_text es3p1_strong_image_weak_text es3_weak_image_strong_available_text es3_strong_image_strong_available_text instinctsam_vitb sam2p1_hiera_tiny sam2p1_hiera_small sam2p1_hiera_base_plus sam2p1_hiera_large efficient_sam2p1_hiera_tiny efficient_sam2p1_hiera_small efficient_sam2p1_hiera_base_plus efficient_sam2p1_hiera_large official_edgetam efficienttam_ti efficienttam_s mobilesam_vit_t mobilesam_vit_b mobilesam_vit_l mobilesam_vit_h sam1_vit_h}"
 
 PROJECT_ROOT="$(pwd)"
@@ -93,6 +99,8 @@ echo "SA1B_IMAGE_ROOT=${SA1B_IMAGE_ROOT}"
 echo "SAM2D_PIPELINE=${SAM2D_PIPELINE}"
 echo "SAM2_STAGE1_ROOT=${SAM2_STAGE1_ROOT}"
 echo "SAM2_TINYVIT_ROOT=${SAM2_TINYVIT_ROOT}"
+echo "SAV_VIDEO_COUNT=${SAV_VIDEO_COUNT}"
+echo "SA1B_COUNT=${SA1B_COUNT}"
 
 require_path() {
   local label="$1"
@@ -140,10 +148,10 @@ run_sav_smoke() {
   require_path "SA-V root" "${SAV_ROOT}"
   require_path "SAM2-Distillation-Pipeline" "${SAM2D_PIPELINE}"
 
-  MAX_VIDEOS=1 \
+  MAX_VIDEOS="${SAV_VIDEO_COUNT}" \
   MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS}" \
   OUT_ROOT="${OUTPUT_ROOT}/sav_sam2d" \
-  PREP_ROOT="${OUTPUT_ROOT}/prepared/sav_one_video" \
+  PREP_ROOT="${OUTPUT_ROOT}/prepared/sav_videos" \
   SAM2D_PIPELINE="${SAM2D_PIPELINE}" \
   SAM2_DISTILL_CHECKPOINT_ROOT="${SAM2_DISTILL_CHECKPOINT_ROOT}" \
   SAM2_STAGE1_ROOT="${SAM2_STAGE1_ROOT}" \
@@ -170,10 +178,10 @@ run_sav_smoke() {
   NUM_EVAL_PROCESSES="${NUM_EVAL_PROCESSES}" \
   bash scripts/run_thor_sam2_distill_sav_suite.sh all
 
-  local sav_manifest="${OUTPUT_ROOT}/manifests/sav_one_video.jsonl"
+  local sav_manifest="${OUTPUT_ROOT}/manifests/sav_videos.jsonl"
   python -m sam_backend.sav_manifest \
     --sav-root "${SAV_ROOT}" \
-    --count 1 \
+    --count "${SAV_MANIFEST_COUNT}" \
     --output "${sav_manifest}"
 
   maybe_run_efficienttam_sav efficienttam_ti checkpoints/efficienttam/efficienttam_ti.pt configs/efficienttam/efficienttam_ti.yaml "${sav_manifest}"
@@ -190,22 +198,22 @@ run_sa1b_smoke() {
   require_path "SA1B annotation root" "${SA1B_ROOT}"
   require_path "SAM2-Distillation-Pipeline" "${SAM2D_PIPELINE}"
 
-  local sa1b_manifest="${OUTPUT_ROOT}/manifests/sa1b_one_image.jsonl"
+  local sa1b_manifest="${OUTPUT_ROOT}/manifests/sa1b_images.jsonl"
   SA1B_ROOT="${SA1B_ROOT}" \
   SA1B_IMAGE_ROOT="${SA1B_IMAGE_ROOT}" \
-  SA1B_COUNT=1 \
+  SA1B_COUNT="${SA1B_COUNT}" \
   MANIFEST="${sa1b_manifest}" \
   bash scripts/prepare_sa1b_fixed_subset.sh
 
   python -m sam_backend.manifest_mask_layout \
     --manifest "${sa1b_manifest}" \
-    --output-root "${OUTPUT_ROOT}/prepared/sa1b_one_image_mask_layout"
+    --output-root "${OUTPUT_ROOT}/prepared/sa1b_mask_layout"
 
   MODELS="${SA1B_MODELS}" \
   MANIFEST="${sa1b_manifest}" \
   RUN_ID="${RUN_ID}" \
   DEVICE="${DEVICE}" \
-  LIMIT=1 \
+  LIMIT="${SA1B_LIMIT}" \
   EVAL_MODE=both \
   SKIP_MISSING="${SKIP_MISSING}" \
   OUTPUT_DIR="${OUTPUT_ROOT}/sa1b_sam_family" \
@@ -214,7 +222,7 @@ run_sa1b_smoke() {
 
   (
     cd "${SAM2D_PIPELINE}"
-    PREP_ROOT="${OUTPUT_ROOT}/prepared/sa1b_one_image_mask_layout" \
+    PREP_ROOT="${OUTPUT_ROOT}/prepared/sa1b_mask_layout" \
     OUT_ROOT="${OUTPUT_ROOT}/sa1b_sam2d/sam2_stage1" \
     SAM2_ROOT="${SAM2_ROOT}" \
     SAM2L_CKPT="${SAM2L_CKPT}" \
@@ -229,8 +237,8 @@ run_sa1b_smoke() {
     TV11_MSE_COS="${TV11_MSE_COS}" \
     TV5_MSE="${TV5_MSE}" \
     TV5_MSE_COS="${TV5_MSE_COS}" \
-    MAX_IMAGE_OBJECTS=1 \
-    IMAGE_ARTIFACT_VIDEOS=1 \
+    MAX_IMAGE_OBJECTS="${SA1B_MAX_IMAGE_OBJECTS}" \
+    IMAGE_ARTIFACT_VIDEOS="${SA1B_IMAGE_ARTIFACT_VIDEOS}" \
     DEVICE="${DEVICE}" \
     SKIP_MISSING="${SKIP_MISSING}" \
     SKIP_DONE="${SKIP_DONE}" \
@@ -241,14 +249,14 @@ run_sa1b_smoke() {
 
   (
     cd "${SAM2D_PIPELINE}"
-    PREP_ROOT="${OUTPUT_ROOT}/prepared/sa1b_one_image_mask_layout" \
+    PREP_ROOT="${OUTPUT_ROOT}/prepared/sa1b_mask_layout" \
     OUT_ROOT="${OUTPUT_ROOT}/sa1b_sam2d/edgetam" \
     SAM2_ROOT="${SAM2_ROOT}" \
     EDGETAM_ROOT="${EDGETAM_ROOT}" \
     EDGETAM_CHECKPOINT="${EDGETAM_CHECKPOINT}" \
     TV21_MSE_COS="${TV21_MSE_COS}" \
-    MAX_IMAGE_OBJECTS=1 \
-    IMAGE_ARTIFACT_VIDEOS=1 \
+    MAX_IMAGE_OBJECTS="${SA1B_MAX_IMAGE_OBJECTS}" \
+    IMAGE_ARTIFACT_VIDEOS="${SA1B_IMAGE_ARTIFACT_VIDEOS}" \
     DEVICE="${DEVICE}" \
     SKIP_DONE="${SKIP_DONE}" \
     scripts/company/16_benchmark_edgetam_bridge_raw_sav.sh image

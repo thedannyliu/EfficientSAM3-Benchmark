@@ -56,9 +56,9 @@ def build_sav_manifest(
         )
         if row is not None:
             rows.append(row)
-        if len(rows) == count:
+        if count > 0 and len(rows) == count:
             break
-    if len(rows) < count:
+    if count > 0 and len(rows) < count:
         raise RuntimeError(f"only found {len(rows)} eligible SA-V videos, requested {count}")
     return rows
 
@@ -170,7 +170,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a fixed SA-V val/test manifest for video profiling.")
     parser.add_argument("--sav-root", type=Path, required=True, help="SA-V val/test root with JPEGImages_24fps and Annotations_6fps.")
     parser.add_argument("--output", type=Path, default=Path("data/manifests/sav_fixed3.jsonl"))
-    parser.add_argument("--count", type=int, default=3)
+    parser.add_argument("--count", type=int, default=3, help="Number of videos to sample; use 0 for all eligible videos.")
     parser.add_argument("--seed", type=int, default=20260527)
     parser.add_argument(
         "--selection-policy",

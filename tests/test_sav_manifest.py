@@ -37,6 +37,24 @@ class SavManifestTest(unittest.TestCase):
             self.assertTrue(all(row["initial_mask_area"] == 100 for row in rows))
             self.assertTrue(all(row["selection"] == "random_video_seeded_largest_first_mask" for row in rows))
 
+    def test_zero_count_uses_all_eligible_videos(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            frames_root = root / "JPEGImages_24fps"
+            ann_root = root / "Annotations_6fps"
+            for video_id in ["video_a", "video_b"]:
+                (frames_root / video_id).mkdir(parents=True)
+                (ann_root / video_id / "000").mkdir(parents=True)
+                frame = np.zeros((12, 12, 3), dtype=np.uint8)
+                mask = np.zeros((12, 12), dtype=np.uint8)
+                mask[2:8, 2:8] = 255
+                self.assertTrue(cv2.imwrite(str(frames_root / video_id / "00000.jpg"), frame))
+                self.assertTrue(cv2.imwrite(str(ann_root / video_id / "000" / "00000.png"), mask))
+
+            rows = build_sav_manifest(root, count=0, seed=1)
+
+            self.assertEqual([row["video_id"] for row in rows], ["video_b", "video_a"])
+
     def test_salient_policy_filters_tiny_and_thin_masks(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

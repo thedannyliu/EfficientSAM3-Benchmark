@@ -764,10 +764,10 @@ Smoke outputs:
 
 ```text
 results/thor/formal_smoke/<run_id>/thor_formal_smoke_summary.csv
-results/thor/formal_smoke/<run_id>/manifests/sav_one_video.jsonl
-results/thor/formal_smoke/<run_id>/manifests/sa1b_one_image.jsonl
-results/thor/formal_smoke/<run_id>/prepared/sav_one_video/
-results/thor/formal_smoke/<run_id>/prepared/sa1b_one_image_mask_layout/
+results/thor/formal_smoke/<run_id>/manifests/sav_videos.jsonl
+results/thor/formal_smoke/<run_id>/manifests/sa1b_images.jsonl
+results/thor/formal_smoke/<run_id>/prepared/sav_videos/
+results/thor/formal_smoke/<run_id>/prepared/sa1b_mask_layout/
 results/thor/formal_smoke/<run_id>/sav_sam2d/
 results/thor/formal_smoke/<run_id>/sav_efficienttam/
 results/thor/formal_smoke/<run_id>/sa1b_sam_family/
@@ -790,9 +790,40 @@ mIoU,AP,AP50,AP75,J&F,J,F,mean_total_ms,effective_fps,mean_iou,
 mean_effective_fps,elapsed_sec,sec_per_video,source_csv
 ```
 
-After this smoke passes, switch to the full dataset by using the same roots and
-running the commands below with `MAX_VIDEOS=0`, `MAX_IMAGE_OBJECTS=0`, and
-`SA1B_COUNT` set to the desired full sampled count.
+After this smoke passes, run the formal full matrix. This uses all SA-V test
+videos and a deterministic 1000-image SA1B sample:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+SAV_ROOT=data/sa-v/sav_test \
+SA1B_ROOT=data/sa1b/extracted_two_tar \
+SA1B_IMAGE_ROOT=data/sa1b/extracted_two_tar \
+RUN_ID="${RUN_ID}" \
+bash scripts/run_thor_formal_full_matrix.sh
+```
+
+Formal full outputs:
+
+```text
+results/thor/formal_full/<run_id>/thor_formal_full_summary.csv
+results/thor/formal_full/<run_id>/thor_formal_smoke_summary.csv
+results/thor/formal_full/<run_id>/manifests/sav_videos.jsonl
+results/thor/formal_full/<run_id>/manifests/sa1b_images.jsonl
+results/thor/formal_full/<run_id>/prepared/sav_videos/
+results/thor/formal_full/<run_id>/prepared/sa1b_mask_layout/
+results/thor/formal_full/<run_id>/sav_sam2d/
+results/thor/formal_full/<run_id>/sav_efficienttam/
+results/thor/formal_full/<run_id>/sa1b_sam_family/
+results/thor/formal_full/<run_id>/sa1b_sam2d/
+overlays/thor/formal_full/<run_id>/
+```
+
+The full wrapper sets `SAV_VIDEO_COUNT=0`, `SAV_MANIFEST_COUNT=0`,
+`SAV_MAX_FRAMES=0`, `MAX_IMAGE_OBJECTS=0`, `SA1B_COUNT=1000`,
+`SA1B_LIMIT=1000`, and `SA1B_MAX_IMAGE_OBJECTS=0`.
 
 ### SA-V Test: SAM2 / Stage1 TinyViT / EdgeTAM
 
