@@ -620,6 +620,19 @@ Recommended Thor file layout before the smoke run:
     mobilesam/mobile_sam.pt
     mobilesam/sam_vit_h_4b8939.pth
     instinctsam/instinctsam_vitb_concept.pt
+    sam2_distill/
+      stage1/
+        tv21m_mse.pt
+        tv21m_mse_cos.pt
+        tv21m_highres.pt
+        tv11m_mse.pt
+        tv11m_mse_cos.pt
+        tv5m_mse.pt
+        tv5m_mse_cos.pt
+      tinyvit/
+        tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors
+        tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors
+        tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors
   external/
     sam2/
     EdgeTAM/
@@ -654,6 +667,58 @@ TV5_MSE_COS
 TINYVIT21_CKPT
 TINYVIT11_CKPT
 TINYVIT5_CKPT
+```
+
+These TinyViT rows are image-encoder-only checkpoints, not full SAM2
+checkpoints. The benchmark loads a normal SAM2.1-L or EdgeTAM model first, then
+replaces only the image encoder/features path with the distilled TinyViT
+encoder. The prompt encoder, mask decoder, and SAM2 memory modules stay from
+SAM2.1-L unless the row name ends in `_edgetam`, where they stay from official
+EdgeTAM.
+
+Recommended Thor placement for the distilled SAM2 image encoders:
+
+| short name | default Thor path | used with |
+| --- | --- | --- |
+| `tv21m_mse` | `checkpoints/sam2_distill/stage1/tv21m_mse.pt` | SAM2.1-L prompt/mask/memory |
+| `tv21m_mse_cos` | `checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt` | SAM2.1-L prompt/mask/memory |
+| `tv21m_highres` | `checkpoints/sam2_distill/stage1/tv21m_highres.pt` | SAM2.1-L prompt/mask/memory |
+| `tv11m_mse` | `checkpoints/sam2_distill/stage1/tv11m_mse.pt` | SAM2.1-L prompt/mask/memory |
+| `tv11m_mse_cos` | `checkpoints/sam2_distill/stage1/tv11m_mse_cos.pt` | SAM2.1-L prompt/mask/memory |
+| `tv5m_mse` | `checkpoints/sam2_distill/stage1/tv5m_mse.pt` | SAM2.1-L prompt/mask/memory |
+| `tv5m_mse_cos` | `checkpoints/sam2_distill/stage1/tv5m_mse_cos.pt` | SAM2.1-L prompt/mask/memory |
+| `tv21m_mse_cos_edgetam` | `checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt` | official EdgeTAM prompt/mask/memory |
+
+The Stage1 loader also needs the original TinyViT initialization weights:
+
+| TinyViT size | default Thor path |
+| --- | --- |
+| 21M | `checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors` |
+| 11M | `checkpoints/sam2_distill/tinyvit/tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors` |
+| 5M | `checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors` |
+
+If you want to keep the checkpoints in the original
+SAM2-Distillation-Pipeline run folders instead, pass explicit env vars:
+
+```bash
+TV21_MSE=/path/to/tv21m_mse/checkpoints/best.pt \
+TV21_MSE_COS=/path/to/tv21m_mse_cos/checkpoints/best.pt \
+TV21_HIGHRES=/path/to/tv21m_highres/checkpoints/best.pt \
+TV11_MSE=/path/to/tv11m_mse/checkpoints/best.pt \
+TV11_MSE_COS=/path/to/tv11m_mse_cos/checkpoints/best.pt \
+TV5_MSE=/path/to/tv5m_mse/checkpoints/best.pt \
+TV5_MSE_COS=/path/to/tv5m_mse_cos/checkpoints/best.pt \
+TINYVIT21_CKPT=/path/to/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
+TINYVIT11_CKPT=/path/to/tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors \
+TINYVIT5_CKPT=/path/to/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
+bash scripts/run_thor_formal_smoke_matrix.sh
+```
+
+Those Stage1 rows are included in the smoke and full benchmark:
+
+```text
+SA-V video tracking: J&F, J, F, elapsed_sec, sec_per_video
+SA-V/SA1B image segmentation: mIoU, AP, AP50, AP75, set_image/prompt latency
 ```
 
 ### One-Video / One-Image Smoke Matrix

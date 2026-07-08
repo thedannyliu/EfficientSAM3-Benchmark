@@ -9,18 +9,57 @@ OUT_ROOT="${OUT_ROOT:-results/thor/offline/sav_test_sam2_distill/${RUN_ID}}"
 PREP_ROOT="${PREP_ROOT:-${OUT_ROOT}/prepared_sav_test_links}"
 STAGE="${1:-all}"
 
-case "${SAV_ROOT}" in
-  /*) ;;
-  *) SAV_ROOT="$(pwd)/${SAV_ROOT}" ;;
-esac
-case "${OUT_ROOT}" in
-  /*) ;;
-  *) OUT_ROOT="$(pwd)/${OUT_ROOT}" ;;
-esac
-case "${PREP_ROOT}" in
-  /*) ;;
-  *) PREP_ROOT="$(pwd)/${PREP_ROOT}" ;;
-esac
+PROJECT_ROOT="$(pwd)"
+SAM2_DISTILL_CHECKPOINT_ROOT="${SAM2_DISTILL_CHECKPOINT_ROOT:-checkpoints/sam2_distill}"
+SAM2_STAGE1_ROOT="${SAM2_STAGE1_ROOT:-${SAM2_DISTILL_CHECKPOINT_ROOT}/stage1}"
+SAM2_TINYVIT_ROOT="${SAM2_TINYVIT_ROOT:-${SAM2_DISTILL_CHECKPOINT_ROOT}/tinyvit}"
+
+SAM2_ROOT="${SAM2_ROOT:-external/sam2}"
+EDGETAM_ROOT="${EDGETAM_ROOT:-external/EdgeTAM}"
+SAM2L_CKPT="${SAM2L_CKPT:-checkpoints/sam2/sam2.1_hiera_large.pt}"
+SAM2B_CKPT="${SAM2B_CKPT:-checkpoints/sam2/sam2.1_hiera_base_plus.pt}"
+EDGETAM_CHECKPOINT="${EDGETAM_CHECKPOINT:-checkpoints/edgetam/edgetam.pt}"
+
+TINYVIT21_CKPT="${TINYVIT21_CKPT:-${SAM2_TINYVIT_ROOT}/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors}"
+TINYVIT11_CKPT="${TINYVIT11_CKPT:-${SAM2_TINYVIT_ROOT}/tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors}"
+TINYVIT5_CKPT="${TINYVIT5_CKPT:-${SAM2_TINYVIT_ROOT}/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors}"
+
+TV21_MSE="${TV21_MSE:-${SAM2_STAGE1_ROOT}/tv21m_mse.pt}"
+TV21_MSE_COS="${TV21_MSE_COS:-${SAM2_STAGE1_ROOT}/tv21m_mse_cos.pt}"
+TV21_HIGHRES="${TV21_HIGHRES:-${SAM2_STAGE1_ROOT}/tv21m_highres.pt}"
+TV11_MSE="${TV11_MSE:-${SAM2_STAGE1_ROOT}/tv11m_mse.pt}"
+TV11_MSE_COS="${TV11_MSE_COS:-${SAM2_STAGE1_ROOT}/tv11m_mse_cos.pt}"
+TV5_MSE="${TV5_MSE:-${SAM2_STAGE1_ROOT}/tv5m_mse.pt}"
+TV5_MSE_COS="${TV5_MSE_COS:-${SAM2_STAGE1_ROOT}/tv5m_mse_cos.pt}"
+
+abs_path() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "${PROJECT_ROOT}/$1" ;;
+  esac
+}
+
+SAV_ROOT="$(abs_path "${SAV_ROOT}")"
+OUT_ROOT="$(abs_path "${OUT_ROOT}")"
+PREP_ROOT="$(abs_path "${PREP_ROOT}")"
+SAM2_DISTILL_CHECKPOINT_ROOT="$(abs_path "${SAM2_DISTILL_CHECKPOINT_ROOT}")"
+SAM2_STAGE1_ROOT="$(abs_path "${SAM2_STAGE1_ROOT}")"
+SAM2_TINYVIT_ROOT="$(abs_path "${SAM2_TINYVIT_ROOT}")"
+SAM2_ROOT="$(abs_path "${SAM2_ROOT}")"
+EDGETAM_ROOT="$(abs_path "${EDGETAM_ROOT}")"
+SAM2L_CKPT="$(abs_path "${SAM2L_CKPT}")"
+SAM2B_CKPT="$(abs_path "${SAM2B_CKPT}")"
+EDGETAM_CHECKPOINT="$(abs_path "${EDGETAM_CHECKPOINT}")"
+TINYVIT21_CKPT="$(abs_path "${TINYVIT21_CKPT}")"
+TINYVIT11_CKPT="$(abs_path "${TINYVIT11_CKPT}")"
+TINYVIT5_CKPT="$(abs_path "${TINYVIT5_CKPT}")"
+TV21_MSE="$(abs_path "${TV21_MSE}")"
+TV21_MSE_COS="$(abs_path "${TV21_MSE_COS}")"
+TV21_HIGHRES="$(abs_path "${TV21_HIGHRES}")"
+TV11_MSE="$(abs_path "${TV11_MSE}")"
+TV11_MSE_COS="$(abs_path "${TV11_MSE_COS}")"
+TV5_MSE="$(abs_path "${TV5_MSE}")"
+TV5_MSE_COS="$(abs_path "${TV5_MSE_COS}")"
 
 MAX_VIDEOS="${MAX_VIDEOS:-0}"
 MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS:-0}"
@@ -98,6 +137,19 @@ run_sam2_suite() {
     cd "${SAM2D_PIPELINE}"
     PREP_ROOT="${PREP_ROOT}" \
     OUT_ROOT="${OUT_ROOT}/sam2_stage1" \
+    SAM2_ROOT="${SAM2_ROOT}" \
+    SAM2L_CKPT="${SAM2L_CKPT}" \
+    SAM2B_CKPT="${SAM2B_CKPT}" \
+    TINYVIT21_CKPT="${TINYVIT21_CKPT}" \
+    TINYVIT11_CKPT="${TINYVIT11_CKPT}" \
+    TINYVIT5_CKPT="${TINYVIT5_CKPT}" \
+    TV21_MSE="${TV21_MSE}" \
+    TV21_MSE_COS="${TV21_MSE_COS}" \
+    TV21_HIGHRES="${TV21_HIGHRES}" \
+    TV11_MSE="${TV11_MSE}" \
+    TV11_MSE_COS="${TV11_MSE_COS}" \
+    TV5_MSE="${TV5_MSE}" \
+    TV5_MSE_COS="${TV5_MSE_COS}" \
     MAX_VIDEOS="${MAX_VIDEOS}" \
     MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS}" \
     IMAGE_ARTIFACT_VIDEOS="${IMAGE_ARTIFACT_VIDEOS}" \
@@ -111,6 +163,19 @@ run_sam2_suite() {
 
     PREP_ROOT="${PREP_ROOT}" \
     OUT_ROOT="${OUT_ROOT}/sam2_stage1" \
+    SAM2_ROOT="${SAM2_ROOT}" \
+    SAM2L_CKPT="${SAM2L_CKPT}" \
+    SAM2B_CKPT="${SAM2B_CKPT}" \
+    TINYVIT21_CKPT="${TINYVIT21_CKPT}" \
+    TINYVIT11_CKPT="${TINYVIT11_CKPT}" \
+    TINYVIT5_CKPT="${TINYVIT5_CKPT}" \
+    TV21_MSE="${TV21_MSE}" \
+    TV21_MSE_COS="${TV21_MSE_COS}" \
+    TV21_HIGHRES="${TV21_HIGHRES}" \
+    TV11_MSE="${TV11_MSE}" \
+    TV11_MSE_COS="${TV11_MSE_COS}" \
+    TV5_MSE="${TV5_MSE}" \
+    TV5_MSE_COS="${TV5_MSE_COS}" \
     MAX_VIDEOS="${MAX_VIDEOS}" \
     MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS}" \
     IMAGE_ARTIFACT_VIDEOS="${IMAGE_ARTIFACT_VIDEOS}" \
@@ -135,6 +200,10 @@ run_edgetam_suite() {
     cd "${SAM2D_PIPELINE}"
     PREP_ROOT="${PREP_ROOT}" \
     OUT_ROOT="${OUT_ROOT}/edgetam" \
+    SAM2_ROOT="${SAM2_ROOT}" \
+    EDGETAM_ROOT="${EDGETAM_ROOT}" \
+    EDGETAM_CHECKPOINT="${EDGETAM_CHECKPOINT}" \
+    TV21_MSE_COS="${TV21_MSE_COS}" \
     MAX_VIDEOS="${MAX_VIDEOS}" \
     MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS}" \
     IMAGE_ARTIFACT_VIDEOS="${IMAGE_ARTIFACT_VIDEOS}" \
@@ -147,6 +216,10 @@ run_edgetam_suite() {
 
     PREP_ROOT="${PREP_ROOT}" \
     OUT_ROOT="${OUT_ROOT}/edgetam" \
+    SAM2_ROOT="${SAM2_ROOT}" \
+    EDGETAM_ROOT="${EDGETAM_ROOT}" \
+    EDGETAM_CHECKPOINT="${EDGETAM_CHECKPOINT}" \
+    TV21_MSE_COS="${TV21_MSE_COS}" \
     MAX_VIDEOS="${MAX_VIDEOS}" \
     MAX_IMAGE_OBJECTS="${MAX_IMAGE_OBJECTS}" \
     IMAGE_ARTIFACT_VIDEOS="${IMAGE_ARTIFACT_VIDEOS}" \
