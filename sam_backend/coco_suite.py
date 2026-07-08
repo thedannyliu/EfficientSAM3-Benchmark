@@ -60,6 +60,9 @@ MODEL_SUMMARY_FIELDS = [
     "mean_total_ms",
     "miou_best",
     "miou_merged",
+    "AP",
+    "AP50",
+    "AP75",
     "mean_cuda_peak_allocated_mb",
     "mean_cuda_peak_reserved_mb",
     "mean_image_encoder_ms",
@@ -212,7 +215,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "sam2p1_hiera_tiny",
         "sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/sam2/sam2.1_hiera_tiny.pt",
         model_config="configs/sam2.1/sam2.1_hiera_t.yaml",
         external_repo="external/sam2",
@@ -220,7 +223,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "sam2p1_hiera_small",
         "sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/sam2/sam2.1_hiera_small.pt",
         model_config="configs/sam2.1/sam2.1_hiera_s.yaml",
         external_repo="external/sam2",
@@ -228,7 +231,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "sam2p1_hiera_base_plus",
         "sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/sam2/sam2.1_hiera_base_plus.pt",
         model_config="configs/sam2.1/sam2.1_hiera_b+.yaml",
         external_repo="external/sam2",
@@ -236,7 +239,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "sam2p1_hiera_large",
         "sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/sam2/sam2.1_hiera_large.pt",
         model_config="configs/sam2.1/sam2.1_hiera_l.yaml",
         external_repo="external/sam2",
@@ -244,7 +247,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficient_sam2p1_hiera_tiny",
         "efficient-sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_tiny.pt",
         model_config="configs/sam2.1/sam2.1_hiera_t.yaml",
         external_repo="external/Efficient-SAM2",
@@ -252,7 +255,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficient_sam2p1_hiera_small",
         "efficient-sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_small.pt",
         model_config="configs/sam2.1/sam2.1_hiera_s.yaml",
         external_repo="external/Efficient-SAM2",
@@ -260,7 +263,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficient_sam2p1_hiera_base_plus",
         "efficient-sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_base_plus.pt",
         model_config="configs/sam2.1/sam2.1_hiera_b+.yaml",
         external_repo="external/Efficient-SAM2",
@@ -268,7 +271,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficient_sam2p1_hiera_large",
         "efficient-sam2",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficient-sam2/sam2.1_hiera_large.pt",
         model_config="configs/sam2.1/sam2.1_hiera_l.yaml",
         external_repo="external/Efficient-SAM2",
@@ -276,7 +279,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficienttam_ti",
         "efficienttam",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficienttam/efficienttam_ti.pt",
         model_config="configs/efficienttam/efficienttam_ti.yaml",
         external_repo="external/EfficientTAM",
@@ -284,15 +287,23 @@ DEFAULT_RUNS = [
     CocoRun(
         "efficienttam_s",
         "efficienttam",
-        "point",
+        "all",
         checkpoint_path="checkpoints/efficienttam/efficienttam_s.pt",
         model_config="configs/efficienttam/efficienttam_s.yaml",
         external_repo="external/EfficientTAM",
     ),
     CocoRun(
+        "official_edgetam",
+        "sam2",
+        "all",
+        checkpoint_path="checkpoints/edgetam/edgetam.pt",
+        model_config="configs/edgetam.yaml",
+        external_repo="external/EdgeTAM",
+    ),
+    CocoRun(
         "mobilesam_vit_t",
         "mobilesam",
-        "point",
+        "all",
         checkpoint_path="checkpoints/mobilesam/mobile_sam.pt",
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_t"),
@@ -300,7 +311,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "mobilesam_vit_b",
         "mobilesam",
-        "point",
+        "all",
         checkpoint_path="checkpoints/mobilesam/sam_vit_b_01ec64.pth",
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_b"),
@@ -308,7 +319,7 @@ DEFAULT_RUNS = [
     CocoRun(
         "mobilesam_vit_l",
         "mobilesam",
-        "point",
+        "all",
         checkpoint_path="checkpoints/mobilesam/sam_vit_l_0b3195.pth",
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_l"),
@@ -316,7 +327,15 @@ DEFAULT_RUNS = [
     CocoRun(
         "mobilesam_vit_h",
         "mobilesam",
-        "point",
+        "all",
+        checkpoint_path="checkpoints/mobilesam/sam_vit_h_4b8939.pth",
+        external_repo="external/MobileSAM",
+        extra_args=("--mobile-sam-model-type", "vit_h"),
+    ),
+    CocoRun(
+        "sam1_vit_h",
+        "sam1",
+        "all",
         checkpoint_path="checkpoints/mobilesam/sam_vit_h_4b8939.pth",
         external_repo="external/MobileSAM",
         extra_args=("--mobile-sam-model-type", "vit_h"),
@@ -485,6 +504,9 @@ def collect_component_summary_rows(output_dir: Path) -> list[dict[str, object]]:
                 "effective_fps": 1000.0 / total_ms if isinstance(total_ms, float) and total_ms > 0 else "",
                 "miou_best": _mean(prompt_rows, "best_iou"),
                 "miou_merged": _mean(prompt_rows, "merged_iou"),
+                "AP": _average_precision(prompt_rows, 0.50, 0.95),
+                "AP50": _average_precision(prompt_rows, 0.50, 0.50),
+                "AP75": _average_precision(prompt_rows, 0.75, 0.75),
                 "mean_cuda_peak_allocated_mb": _mean(prompt_rows, "cuda_peak_allocated_mb"),
                 "mean_cuda_peak_reserved_mb": _mean(prompt_rows, "cuda_peak_reserved_mb"),
             }
@@ -518,6 +540,9 @@ def collect_model_summary_rows(output_dir: Path) -> list[dict[str, object]]:
                 "effective_fps": 1000.0 / total_ms if isinstance(total_ms, float) and total_ms > 0 else "",
                 "miou_best": _mean(prompt_rows, "best_iou"),
                 "miou_merged": _mean(prompt_rows, "merged_iou"),
+                "AP": _average_precision(prompt_rows, 0.50, 0.95),
+                "AP50": _average_precision(prompt_rows, 0.50, 0.50),
+                "AP75": _average_precision(prompt_rows, 0.75, 0.75),
                 "mean_cuda_peak_allocated_mb": _mean(prompt_rows, "cuda_peak_allocated_mb"),
                 "mean_cuda_peak_reserved_mb": _mean(prompt_rows, "cuda_peak_reserved_mb"),
             }
@@ -541,6 +566,48 @@ def _mean(rows: list[dict[str, str]], key: str) -> float | str:
         except ValueError:
             continue
     return sum(values) / len(values) if values else ""
+
+
+def _average_precision(rows: list[dict[str, str]], threshold_start: float, threshold_end: float) -> float | str:
+    thresholds = [threshold_start] if threshold_start == threshold_end else [
+        round(threshold_start + index * 0.05, 2)
+        for index in range(int(round((threshold_end - threshold_start) / 0.05)) + 1)
+    ]
+    values = [_average_precision_at(rows, threshold) for threshold in thresholds]
+    return sum(values) / len(values) if values else ""
+
+
+def _average_precision_at(rows: list[dict[str, str]], threshold: float) -> float:
+    scored = []
+    for row in rows:
+        iou = row.get("best_iou", "")
+        if iou in ("", None):
+            continue
+        score = row.get("score_max", 0.0)
+        try:
+            scored.append((float(score) if score not in ("", None) else 0.0, float(iou)))
+        except (TypeError, ValueError):
+            continue
+    if not scored:
+        return 0.0
+    scored.sort(key=lambda item: item[0], reverse=True)
+    tp_cum = []
+    fp_cum = []
+    for index, (_, iou) in enumerate(scored):
+        tp = 1.0 if iou >= threshold else 0.0
+        fp = 1.0 - tp
+        tp_cum.append(tp + (tp_cum[index - 1] if index else 0.0))
+        fp_cum.append(fp + (fp_cum[index - 1] if index else 0.0))
+    recalls = [value / max(len(scored), 1) for value in tp_cum]
+    precisions = [
+        tp_cum[index] / max(tp_cum[index] + fp_cum[index], 1e-12)
+        for index in range(len(tp_cum))
+    ]
+    ap = 0.0
+    for recall_threshold in [index / 100.0 for index in range(101)]:
+        valid = [precision for precision, recall in zip(precisions, recalls) if recall >= recall_threshold]
+        ap += max(valid) if valid else 0.0
+    return ap / 101.0
 
 
 def _readable_param_weight_fields(row: dict[str, object]) -> dict[str, float | str]:

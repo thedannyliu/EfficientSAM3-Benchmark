@@ -121,7 +121,7 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
         torch_module.cuda.reset_peak_memory_stats()
     params = parameter_counts(getattr(backend, "model", None))
 
-    interactive_only_backends = {"sam2", "efficient-sam2", "efficienttam", "mobilesam"}
+    interactive_only_backends = {"sam2", "efficient-sam2", "efficienttam", "mobilesam", "sam1"}
     if args.backend in interactive_only_backends and args.prompt_mode == "text":
         raise ValueError(f"{args.backend} supports point prompts in this benchmark, not text prompts")
     prompt_modes = _prompt_modes(args.prompt_mode)
@@ -320,6 +320,9 @@ def _summarize(args: argparse.Namespace, rows: list[dict[str, Any]]) -> dict[str
                 "mean_total_ms": mean(float(row["total_ms"]) for row in mode_rows),
                 "miou_best": _mean_numeric([row["best_iou"] for row in mode_rows]),
                 "miou_merged": _mean_numeric([row["merged_iou"] for row in mode_rows]),
+                "AP": _average_precision(mode_rows, 0.50, 0.95),
+                "AP50": _average_precision(mode_rows, 0.50, 0.50),
+                "AP75": _average_precision(mode_rows, 0.75, 0.75),
             }
             for mode, mode_rows in sorted(by_mode.items())
         },
@@ -338,6 +341,48 @@ def _mean_numeric(values: list[Any]) -> float | str:
     return mean(numeric) if numeric else ""
 
 
+def _average_precision(rows: list[dict[str, Any]], threshold_start: float, threshold_end: float) -> float | str:
+    thresholds = [threshold_start] if threshold_start == threshold_end else [
+        round(threshold_start + index * 0.05, 2)
+        for index in range(int(round((threshold_end - threshold_start) / 0.05)) + 1)
+    ]
+    values = [_average_precision_at(rows, threshold) for threshold in thresholds]
+    return mean(values) if values else ""
+
+
+def _average_precision_at(rows: list[dict[str, Any]], threshold: float) -> float:
+    scored = []
+    for row in rows:
+        iou = row.get("best_iou", "")
+        if iou in ("", None):
+            continue
+        score = row.get("score_max", 0.0)
+        try:
+            scored.append((float(score) if score not in ("", None) else 0.0, float(iou)))
+        except (TypeError, ValueError):
+            continue
+    if not scored:
+        return 0.0
+    scored.sort(key=lambda item: item[0], reverse=True)
+    tp = [1.0 if iou >= threshold else 0.0 for _, iou in scored]
+    fp = [1.0 - value for value in tp]
+    tp_cum = []
+    fp_cum = []
+    for index, value in enumerate(tp):
+        tp_cum.append(value + (tp_cum[index - 1] if index else 0.0))
+        fp_cum.append(fp[index] + (fp_cum[index - 1] if index else 0.0))
+    recalls = [value / max(len(scored), 1) for value in tp_cum]
+    precisions = [
+        tp_cum[index] / max(tp_cum[index] + fp_cum[index], 1e-12)
+        for index in range(len(tp_cum))
+    ]
+    ap = 0.0
+    for recall_threshold in [index / 100.0 for index in range(101)]:
+        valid = [precision for precision, recall in zip(precisions, recalls) if recall >= recall_threshold]
+        ap += max(valid) if valid else 0.0
+    return ap / 101.0
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Profile a backend on a fixed COCO manifest with IoU metrics.")
     parser.add_argument("--manifest", type=Path, required=True)
@@ -345,7 +390,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-id", default="sam3-coco")
     parser.add_argument(
         "--backend",
-        choices=["null", "sam3", "efficientsam3", "sam2", "efficient-sam2", "efficienttam", "mobilesam"],
+        choices=["null", "sam3", "efficientsam3", "sam2", "efficient-sam2", "efficienttam", "mobilesam", "sam1"],
         default="sam3",
     )
     parser.add_argument("--checkpoint-path")

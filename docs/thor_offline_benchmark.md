@@ -236,6 +236,9 @@ effective_fps
 prompt_mode
 miou_best
 miou_merged
+AP
+AP50
+AP75
 mean_cuda_peak_allocated_mb
 mean_image_encoder_ms
 mean_text_encoder_ms
@@ -485,8 +488,9 @@ PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
 
 After the smoke run, run the full matrix. This includes all YOLOE-seg sizes,
 YOLO11 segmentation sizes, SAM2.1 sizes, Efficient-SAM2.1 sizes,
-EfficientSAM3 variants, InstinctSAM ViT-B, EfficientTAM-Ti/S, and MobileSAM
-`vit_t/vit_b/vit_l/vit_h` when the checkpoints are available:
+EfficientSAM3 variants, InstinctSAM ViT-B, official EdgeTAM, EfficientTAM-Ti/S,
+MobileSAM `vit_t/vit_b/vit_l/vit_h`, and SAM1-H when the checkpoints are
+available:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
@@ -507,8 +511,8 @@ overlays/thor/offline/coco_all/<run_id>/yolo/<model_id>/*.png
 `coco_all_model_summary.csv` is the first table to inspect after the run. It
 keeps one row per model/prompt mode and includes `suite`, `model_id`, `family`,
 `backend`, `prompt_mode`, `effective_fps`, `mean_total_ms`, `miou_best`,
-`miou_merged`, CUDA peak memory, total/component parameter counts, total/component
-weight sizes, `checkpoint_file_mb`, and `source_csv`.
+`miou_merged`, `AP`, `AP50`, `AP75`, CUDA peak memory, total/component parameter
+counts, total/component weight sizes, `checkpoint_file_mb`, and `source_csv`.
 
 Optional model subsets are space-separated:
 
@@ -542,6 +546,290 @@ python -m sam_backend.coco_suite \
 
 This should produce one overlay per selected model and no failed rows in
 `coco_suite_summary.csv`.
+
+## 9b. Formal Thor SA-V Test And SA1B Runs
+
+Use this section for the current Thor comparison matrix. It intentionally does
+not run SA-Co/text-prompt benchmarks.
+
+Model IDs and scope:
+
+| model_id | SA-V test J&F/latency | SA1B mIoU/AP/latency | runner |
+| --- | --- | --- | --- |
+| `sam2p1_l` | yes | yes | SAM2-Distillation-Pipeline |
+| `sam2p1_bplus` | yes | yes | SAM2-Distillation-Pipeline |
+| `official_edgetam` | yes | yes | SAM2-Distillation-Pipeline for SA-V, this repo for SA1B |
+| `tv21m_mse` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv21m_mse_cos` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv21m_highres` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv11m_mse` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv11m_mse_cos` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv5m_mse` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv5m_mse_cos` | yes | yes | SAM2-Distillation-Pipeline |
+| `tv21m_mse_cos_edgetam` | yes | yes | SAM2-Distillation-Pipeline |
+| `efficienttam_ti`, `efficienttam_s` | yes | yes | this repo |
+| `sam3` | geometry prompt tracking path only | yes | this repo |
+| `instinctsam_vitb` | no native SA-V memory path here | yes | this repo |
+| `mobilesam_vit_t` | no | yes | this repo |
+| `sam1_vit_h` | no | yes | this repo |
+
+SAM1-family rows, including MobileSAM, are image-only in this plan and should
+not be included in SA-V J&F. The Stage1 TinyViT rows are encoder-only
+checkpoints; they are evaluated by replacing the SAM2.1-L or EdgeTAM image
+encoder while keeping the original prompt, mask, and memory modules.
+
+Set the Thor environment first:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+export THOR_VENV=/path/to/venv
+export SAM3_SOURCE=/path/to/efficientsam3/sam3
+export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
+source scripts/source_thor_ros_env.sh
+```
+
+Expected checkpoint/source roots:
+
+```text
+checkpoints/sam3/sam3.pt
+checkpoints/sam2/sam2.1_hiera_large.pt
+checkpoints/sam2/sam2.1_hiera_base_plus.pt
+checkpoints/edgetam/edgetam.pt
+checkpoints/efficienttam/efficienttam_ti.pt
+checkpoints/efficienttam/efficienttam_s.pt
+checkpoints/mobilesam/mobile_sam.pt
+checkpoints/mobilesam/sam_vit_h_4b8939.pth
+checkpoints/instinctsam/instinctsam_vitb_concept.pt
+external/sam2
+external/EdgeTAM
+external/EfficientTAM
+external/MobileSAM
+```
+
+Recommended Thor file layout before the smoke run:
+
+```text
+~/EfficientSAM3-Benchmark/
+  checkpoints/
+    sam3/sam3.pt
+    sam2/sam2.1_hiera_large.pt
+    sam2/sam2.1_hiera_base_plus.pt
+    edgetam/edgetam.pt
+    efficienttam/efficienttam_ti.pt
+    efficienttam/efficienttam_s.pt
+    mobilesam/mobile_sam.pt
+    mobilesam/sam_vit_h_4b8939.pth
+    instinctsam/instinctsam_vitb_concept.pt
+  external/
+    sam2/
+    EdgeTAM/
+    EfficientTAM/
+    MobileSAM/
+  data/
+    sa-v/sav_test/
+      JPEGImages_24fps/<video>/<frame>.jpg
+      Annotations_6fps/<video>/<object>/<frame>.png
+    sa1b/extracted_two_tar/
+      <shard or flat dirs>/*.jpg
+      <shard or flat dirs>/*.json
+```
+
+The two SA1B tar files can be extracted either flat or in shard subdirectories.
+The smoke manifest builder recursively scans JSON files under
+`data/sa1b/extracted_two_tar` and resolves images by `image.file_name`,
+same-stem image name, or the matching relative directory under
+`SA1B_IMAGE_ROOT`.
+
+The Stage1 TinyViT checkpoints are resolved by the SAM2-Distillation-Pipeline
+defaults unless overridden:
+
+```text
+TV21_MSE
+TV21_MSE_COS
+TV21_HIGHRES
+TV11_MSE
+TV11_MSE_COS
+TV5_MSE
+TV5_MSE_COS
+TINYVIT21_CKPT
+TINYVIT11_CKPT
+TINYVIT5_CKPT
+```
+
+### One-Video / One-Image Smoke Matrix
+
+Run this before the full dataset. It runs one SA-V video and one SA1B image,
+then writes a single total summary CSV:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
+SAV_ROOT=data/sa-v/sav_test \
+SA1B_ROOT=data/sa1b/extracted_two_tar \
+SA1B_IMAGE_ROOT=data/sa1b/extracted_two_tar \
+RUN_ID="${RUN_ID}" \
+bash scripts/run_thor_formal_smoke_matrix.sh
+```
+
+Smoke outputs:
+
+```text
+results/thor/formal_smoke/<run_id>/thor_formal_smoke_summary.csv
+results/thor/formal_smoke/<run_id>/manifests/sav_one_video.jsonl
+results/thor/formal_smoke/<run_id>/manifests/sa1b_one_image.jsonl
+results/thor/formal_smoke/<run_id>/prepared/sav_one_video/
+results/thor/formal_smoke/<run_id>/prepared/sa1b_one_image_mask_layout/
+results/thor/formal_smoke/<run_id>/sav_sam2d/
+results/thor/formal_smoke/<run_id>/sav_efficienttam/
+results/thor/formal_smoke/<run_id>/sa1b_sam_family/
+results/thor/formal_smoke/<run_id>/sa1b_sam2d/
+overlays/thor/formal_smoke/<run_id>/
+```
+
+By default the SA1B image smoke runs every SAM-family model currently
+registered in `sam_backend.coco_suite`: official SAM3, EfficientSAM3 variants,
+InstinctSAM, SAM2.1 tiny/small/base-plus/large, Efficient-SAM2.1
+tiny/small/base-plus/large, official EdgeTAM, EfficientTAM-Ti/S, MobileSAM
+ViT-T/B/L/H, and SAM1-H. The SA-V smoke runs the SAM2-Distillation-Pipeline
+video-capable rows plus EfficientTAM-Ti/S. SAM1/MobileSAM are still image-only.
+
+`thor_formal_smoke_summary.csv` normalizes the completed sub-runs into:
+
+```text
+task,dataset,suite,model_id,backend,prompt_mode,status,samples,videos,rows,
+mIoU,AP,AP50,AP75,J&F,J,F,mean_total_ms,effective_fps,mean_iou,
+mean_effective_fps,elapsed_sec,sec_per_video,source_csv
+```
+
+After this smoke passes, switch to the full dataset by using the same roots and
+running the commands below with `MAX_VIDEOS=0`, `MAX_IMAGE_OBJECTS=0`, and
+`SA1B_COUNT` set to the desired full sampled count.
+
+### SA-V Test: SAM2 / Stage1 TinyViT / EdgeTAM
+
+Use SA-V test, not the old raw train shard. `SAV_ROOT` must contain:
+
+```text
+JPEGImages_24fps/<video>/<frame>.jpg
+Annotations_6fps/<video>/<object>/<frame>.png
+```
+
+Run the SAM2.1-L/B+ and Stage1 TinyViT rows:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
+SAV_ROOT=/path/to/SA-V/sav_test \
+OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
+MAX_VIDEOS=0 \
+MAX_IMAGE_OBJECTS=0 \
+NUM_EVAL_PROCESSES=4 \
+bash scripts/run_thor_sam2_distill_sav_suite.sh sam2
+```
+
+Run official EdgeTAM and `tv21m_mse_cos_edgetam`:
+
+```bash
+SAM2D_PIPELINE=/storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
+SAV_ROOT=/path/to/SA-V/sav_test \
+OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
+MAX_VIDEOS=0 \
+MAX_IMAGE_OBJECTS=0 \
+NUM_EVAL_PROCESSES=4 \
+bash scripts/run_thor_sam2_distill_sav_suite.sh edgetam
+```
+
+The wrapper creates `<OUT_ROOT>/prepared_sav_test_links/` with symlinks and a
+`sav_train_benchmark.txt` file because the upstream SAM2-Distillation-Pipeline
+suite uses that filename even when the input is already a prepared val/test
+layout.
+
+Primary outputs:
+
+```text
+results/thor/offline/sav_test_sam2_distill/<run_id>/sam2_stage1/benchmark_summary.csv
+results/thor/offline/sav_test_sam2_distill/<run_id>/sam2_stage1/benchmark_summary.json
+results/thor/offline/sav_test_sam2_distill/<run_id>/edgetam/benchmark_summary.csv
+results/thor/offline/sav_test_sam2_distill/<run_id>/edgetam/benchmark_summary.json
+```
+
+For SA-V, read the VOS rows in `benchmark_summary.csv`: `J&F`, `J`, `F`,
+`elapsed_sec`, and `sec_per_video`. Image rows in the same summary include
+`mIoU`, `AP`, `AP50`, `AP75`, and latency fields.
+
+### SA-V Test: EfficientTAM
+
+EfficientTAM is already supported by this repo's native SA-V profiler. It
+reports mean IoU and latency over selected objects, not the official SA-V
+evaluator's global J&F table.
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+python -m sam_backend.sav_manifest \
+  --sav-root /path/to/SA-V/sav_test \
+  --count 10 \
+  --output data/manifests/sav_test_fixed10.jsonl
+
+python -m sam_backend.profile_sav_video \
+  --model-id efficienttam_ti \
+  --backend efficienttam \
+  --external-repo external/EfficientTAM \
+  --checkpoint-path checkpoints/efficienttam/efficienttam_ti.pt \
+  --model-config configs/efficienttam/efficienttam_ti.yaml \
+  --device cuda \
+  --manifest data/manifests/sav_test_fixed10.jsonl \
+  --eval-mode both \
+  --max-frames 0 \
+  --autocast-bfloat16 \
+  --csv-output "results/thor/offline/sav_test/${RUN_ID}/efficienttam_ti/frames.csv" \
+  --summary-output "results/thor/offline/sav_test/${RUN_ID}/efficienttam_ti/summary.json" \
+  --overlay-root "overlays/thor/offline/sav_test/${RUN_ID}/efficienttam_ti"
+```
+
+Repeat with `efficienttam_s` and
+`--model-config configs/efficienttam/efficienttam_s.yaml`.
+
+### SA1B Two-Tar Image Segmentation
+
+Extract the two random SA1B tar files under one root, then build a deterministic
+manifest. The manifest builder expects SA1B JSON annotations and same-stem or
+metadata-referenced image files.
+
+```bash
+SA1B_ROOT=/path/to/sa1b_two_tar_extracted \
+SA1B_IMAGE_ROOT=/path/to/sa1b_two_tar_extracted \
+SA1B_COUNT=100 \
+bash scripts/prepare_sa1b_fixed_subset.sh
+```
+
+Run the image suite for the non-Stage1 rows:
+
+```bash
+RUN_ID="$(date +%Y%m%d-%H%M%S)"
+SA1B_COUNT=100 \
+MODELS="sam3 instinctsam_vitb sam2p1_hiera_large sam2p1_hiera_base_plus official_edgetam efficienttam_ti efficienttam_s mobilesam_vit_t sam1_vit_h" \
+LIMIT=0 \
+bash scripts/run_thor_sa1b_image_benchmarks.sh
+```
+
+Primary output:
+
+```text
+results/thor/offline/sa1b/<run_id>/coco_suite_model_summary.csv
+```
+
+Read `prompt_mode=point` and `prompt_mode=box` where available. The summary
+contains `miou_best`, `miou_merged`, `AP`, `AP50`, `AP75`, `mean_total_ms`, and
+`effective_fps`.
+
+For Stage1 TinyViT SA1B image rows, reuse the SAM2-Distillation-Pipeline image
+stage against the same extracted SA1B annotations if they have per-object masks.
+If the two SA1B tar files only contain original SA1B RLE JSON, first use the
+manifest above for this repo's SAM/SAM2/EfficientTAM rows and do not force the
+Stage1 wrapper until a JSON-to-mask extraction step is added.
 
 ## 10. Run SA-V Video Tracking
 

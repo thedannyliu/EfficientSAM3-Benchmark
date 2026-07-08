@@ -92,6 +92,7 @@ class CocoSuiteTest(unittest.TestCase):
                         "total_ms",
                         "best_iou",
                         "merged_iou",
+                        "score_max",
                         "image_encoder_ms",
                         "params_total",
                         "weight_total_bytes",
@@ -107,6 +108,7 @@ class CocoSuiteTest(unittest.TestCase):
                         "total_ms": "10",
                         "best_iou": "0.2",
                         "merged_iou": "0.3",
+                        "score_max": "0.9",
                         "image_encoder_ms": "4",
                         "params_total": "12",
                         "weight_total_bytes": "48",
@@ -140,6 +142,7 @@ class CocoSuiteTest(unittest.TestCase):
                         "total_ms",
                         "best_iou",
                         "merged_iou",
+                        "score_max",
                         "params_total",
                         "weight_total_bytes",
                     ],
@@ -154,6 +157,7 @@ class CocoSuiteTest(unittest.TestCase):
                         "total_ms": "10",
                         "best_iou": "0.2",
                         "merged_iou": "0.3",
+                        "score_max": "0.8",
                         "params_total": "2000000",
                         "weight_total_bytes": "8000000",
                     }
@@ -167,6 +171,7 @@ class CocoSuiteTest(unittest.TestCase):
                         "total_ms": "30",
                         "best_iou": "0.4",
                         "merged_iou": "0.5",
+                        "score_max": "0.9",
                         "params_total": "2000000",
                         "weight_total_bytes": "8000000",
                     }
@@ -184,6 +189,7 @@ class CocoSuiteTest(unittest.TestCase):
             self.assertEqual(rows[0]["rows"], "1")
             self.assertEqual(rows[0]["effective_fps"], str(1000.0 / 30.0))
             self.assertAlmostEqual(float(rows[0]["miou_best"]), 0.4)
+            self.assertAlmostEqual(float(rows[0]["AP50"]), 0.0)
             self.assertEqual(rows[0]["params_total_m"], "2.0")
             self.assertEqual(rows[1]["prompt_mode"], "text")
             self.assertEqual(rows[1]["effective_fps"], "100.0")

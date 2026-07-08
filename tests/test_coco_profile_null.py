@@ -85,6 +85,9 @@ class CocoProfileNullTest(unittest.TestCase):
             self.assertEqual(summary["samples"], 1)
             self.assertEqual(summary["rows"], 2)
             self.assertEqual(summary["prompt_modes"]["text"]["miou_best"], 0.0)
+            self.assertEqual(summary["prompt_modes"]["text"]["AP"], 0.0)
+            self.assertEqual(summary["prompt_modes"]["text"]["AP50"], 0.0)
+            self.assertEqual(summary["prompt_modes"]["text"]["AP75"], 0.0)
             self.assertEqual(summary["prompt_modes"]["point"]["miou_best"], 0.0)
 
             with csv_path.open(newline="", encoding="utf-8") as f:
