@@ -46,6 +46,7 @@ def write_smoke_summary(root: Path, output: Path) -> Path:
     rows.extend(_sam2d_rows(root / "sa1b_sam2d" / "sam2_stage1" / "benchmark_summary.csv", "sa1b", "sam2d_sam2_stage1"))
     rows.extend(_sam2d_rows(root / "sa1b_sam2d" / "edgetam" / "benchmark_summary.csv", "sa1b", "sam2d_edgetam"))
     rows.extend(_coco_suite_rows(root / "sa1b_sam_family" / "coco_suite_model_summary.csv", "sa1b", "sam_family"))
+    rows.extend(_coco_suite_rows(root / "sav_image_sam_family" / "coco_suite_model_summary.csv", "sav", "sam_family_image_box"))
     rows.extend(_sav_video_rows(root / "sav_efficienttam" / "sav_video_suite_summary.csv", "sav", "efficienttam"))
     if not rows:
         raise RuntimeError(f"no smoke summary inputs found under {root}")

@@ -816,6 +816,7 @@ results/thor/formal_full/<run_id>/prepared/sav_videos/
 results/thor/formal_full/<run_id>/prepared/sa1b_mask_layout/
 results/thor/formal_full/<run_id>/sav_sam2d/
 results/thor/formal_full/<run_id>/sav_efficienttam/
+results/thor/formal_full/<run_id>/sav_image_sam_family/
 results/thor/formal_full/<run_id>/sa1b_sam_family/
 results/thor/formal_full/<run_id>/sa1b_sam2d/
 overlays/thor/formal_full/<run_id>/
@@ -1096,6 +1097,39 @@ python -m sam_backend.profile_sav_frames \
 `frames_summary.csv` groups rows by video/object/prompt mode and reports mean
 IoU, latency, FPS, CUDA memory, and component timing. SAM2-family and MobileSAM
 image backends are point-only in this frame benchmark.
+
+### SA-V Test Image Box Backfill
+
+Use this when you need a COCO-style **SA-V test image segmentation** run with
+box prompts. It samples individual annotated SA-V test frames, converts the PNG
+masks into COCO RLE in the manifest, and writes the same per-model summary
+format used by `sa1b_sam_family`:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+RUN_ID="<formal_full_run_id>"
+RUN_ID="${RUN_ID}" \
+SAV_ROOT=data/sa-v/sav_test \
+SAV_IMAGE_COUNT=1000 \
+MODELS="mobilesam_vit_t sam1_vit_l sam3" \
+bash scripts/run_thor_sav_image_box_benchmarks.sh
+```
+
+Outputs:
+
+```text
+results/thor/formal_full/<run_id>/manifests/sav_test_image_box_1000.jsonl
+results/thor/formal_full/<run_id>/sav_image_sam_family/<model_id>/profile.csv
+results/thor/formal_full/<run_id>/sav_image_sam_family/<model_id>/summary.json
+results/thor/formal_full/<run_id>/sav_image_sam_family/coco_suite_model_summary.csv
+results/thor/formal_full/<run_id>/thor_formal_full_summary.csv
+overlays/thor/formal_full/<run_id>/sav_image_sam_family/<model_id>/
+```
+
+`thor_formal_full_summary.csv` includes these rows with `dataset=sav` and
+`suite=sam_family_image_box`.
 
 ## 10c. Run SA-Co/VEval-SAV Per-Image Segmentation
 
