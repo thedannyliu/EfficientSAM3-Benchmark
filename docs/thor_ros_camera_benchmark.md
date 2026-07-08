@@ -21,6 +21,110 @@ For the first video-streaming demo, use a recorded video as the ROS frame
 publisher. This is still a live ROS topic pipeline: the video file only replaces
 the physical camera as the image source.
 
+## Code-Audited Camera Tracking Status
+
+As of 2026-07-08, the checked-in ROS camera code has these behaviors:
+
+| family | ROS camera node | first prompt UI | subsequent tracking | status |
+| --- | --- | --- | --- | --- |
+| MobileSAM | `mobile_sam_interactive_node` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
+| SAM1 ViT-B/L/H | `mobile_sam_interactive_node` with `backend:=sam1` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
+| SAM2.1 / Efficient-SAM2.1 image backends | `sam_backend_node` | fixed parameter point only | independent per-frame image segmentation | implemented, not memory tracking |
+| SAM2.1 native video memory tracking | none in ROS camera yet | target: click point or drag box | target: `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | not implemented in ROS camera |
+| SAM2.1 + distilled TinyViT encoders | none in ROS camera yet | target: click point or drag box | target: SAM2 memory with distilled image encoder swapped in | not implemented in ROS camera |
+| SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
+| SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt only, after a fixed clip is captured | native `start_session` + `add_prompt` + `propagate_in_video` over the captured clip | implemented for text clip tracking only |
+| SAM3 geometry prompt tracking | none in ROS camera yet | target: click point or drag box | target: native SAM3 video session with geometry prompt | not implemented in ROS camera |
+
+Do not use `sam_backend_node` runs as evidence of SAM2/SAM3 memory tracking.
+Those rows are useful for per-frame image latency, but they do not carry SAM2 or
+SAM3 video memory across frames. For SAM1-family models, the intended camera
+tracking baseline is different: the first point or box prompt creates a mask,
+then the previous mask bounding box is passed as the next frame prompt.
+
+### Thor File Layout For Camera Runs
+
+Keep the camera files aligned with the offline benchmark layout:
+
+```text
+~/EfficientSAM3-Benchmark/
+  checkpoints/
+    sam3/sam3.pt
+    sam2/sam2.1_hiera_tiny.pt
+    sam2/sam2.1_hiera_small.pt
+    sam2/sam2.1_hiera_base_plus.pt
+    sam2/sam2.1_hiera_large.pt
+    efficient-sam2/sam2.1_hiera_tiny.pt
+    efficient-sam2/sam2.1_hiera_small.pt
+    efficient-sam2/sam2.1_hiera_base_plus.pt
+    efficient-sam2/sam2.1_hiera_large.pt
+    edgetam/edgetam.pt
+    efficienttam/efficienttam_ti.pt
+    efficienttam/efficienttam_s.pt
+    mobilesam/mobile_sam.pt
+    mobilesam/sam_vit_b_01ec64.pth
+    mobilesam/sam_vit_l_0b3195.pth
+    mobilesam/sam_vit_h_4b8939.pth
+    instinctsam/instinctsam_vitb_concept.pt
+    sam2_distill/
+      stage1/
+        tv21m_mse.pt
+        tv21m_mse_cos.pt
+        tv21m_highres.pt
+        tv11m_mse.pt
+        tv11m_mse_cos.pt
+        tv5m_mse.pt
+        tv5m_mse_cos.pt
+      tinyvit/
+        tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors
+        tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors
+        tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors
+  external/
+    sam3/
+    sam2/
+    Efficient-SAM2/
+    EfficientTAM/
+    EdgeTAM/
+    MobileSAM/
+    SAM2-Distillation-Pipeline/
+  results/thor/ros_camera/
+  overlays/thor/ros_camera/
+```
+
+The `sam2_distill/` weights are recorded here because they are required for the
+planned SAM2 native-memory camera path. The current ROS camera code does not yet
+load those Stage1 TinyViT encoder replacements.
+
+### Acceptance Criteria For Native Camera Memory Tracking
+
+Before marking a camera stream row as SAM2/SAM3 memory tracking, verify all of
+the following in code and in the CSV:
+
+```text
+initial prompt:
+  OpenCV left click produces prompt_mode=point, or left-button drag/release produces prompt_mode=box
+
+SAM2 native:
+  node initializes one video state after the first prompt
+  first prompt calls add_new_points_or_box with either points/labels or box
+  later frames come from propagate_in_video, not repeated sam_backend_node image calls
+  result rows include stream_mode=native_video or equivalent
+
+SAM2 distilled TinyViT:
+  same SAM2 native path, but image encoder is replaced by the selected Stage1 TinyViT variant
+  prompt encoder, mask decoder, and memory modules stay from SAM2.1-L or EdgeTAM as documented
+
+SAM3 native geometry:
+  node starts a SAM3 video session after the first point or box prompt
+  add_prompt receives geometry prompt data, not only text
+  later frames come from propagate_in_video
+  result rows include stream_mode=native_geometry or equivalent
+
+SAM1/MobileSAM:
+  first prompt may be point or box
+  later frames intentionally use bbox_chain, not native memory
+```
+
 Supported Terminal B backends in this guide:
 
 ```text
@@ -32,13 +136,14 @@ SAM3 native clip tracking:
   node=sam3_native_clip_node
   checkpoint_path=checkpoints/sam3/sam3.pt
   prompt=monitor
+  note=text prompt only; captures a fixed clip before native propagation
 
-MobileSAM live bbox-chain tracking:
+MobileSAM live point/box bbox-chain tracking:
   node=mobile_sam_interactive_node
   backend=mobilesam
   checkpoint_path=checkpoints/mobilesam/mobile_sam.pt
 
-SAM1-H live bbox-chain tracking:
+SAM1-H live point/box bbox-chain tracking:
   node=mobile_sam_interactive_node
   backend=sam1
   checkpoint_path=checkpoints/mobilesam/sam_vit_h_4b8939.pth
@@ -66,19 +171,23 @@ Camera-stream support matrix:
 
 ```text
 MobileSAM:
-  live interactive point prompt -> mask -> bbox -> next-frame box prompt
+  live interactive click point or drag box -> mask -> bbox -> next-frame box prompt
   overlay window shows FPS, backend latency, callback latency, and end-to-end latency
 
 SAM1-H:
   same live interactive bbox-chain path as MobileSAM, with backend=sam1 and vit_h weights
   overlay window shows FPS, backend latency, callback latency, and end-to-end latency
 
+SAM2.1 / Efficient-SAM2.1:
+  current ROS camera path is per-frame point-prompt image segmentation through sam_backend_node
+  native memory tracking is available in offline stream profilers, not in a live ROS camera node yet
+
 SAM3:
-  live ROS camera path uses per-frame text-prompt segmentation through sam_backend_node
-  native video tracking uses sam3_native_clip_node, which first captures a fixed
+  live ROS camera path uses per-frame text/point image segmentation through sam_backend_node
+  current native video tracking uses sam3_native_clip_node, which first captures a fixed
   camera clip, materializes it as a frame folder, then starts the native SAM3
-  tracking session
-  use prompt for one noun phrase, or prompts for multiple nouns/phrases
+  tracking session with text prompts
+  live geometry prompt native tracking from click point or drag box is not implemented yet
 ```
 
 For SAM3 multi-object text prompts, prefer comma-separated values:
@@ -162,7 +271,7 @@ The commands below use `image_topic:=/image` for recorded video. For the
 RealSense camera source, replace it with
 `image_topic:=/camera/camera/color/image_raw`.
 
-For **MobileSAM interactive point prompt tracking**, use the source topic from
+For **MobileSAM interactive point/box prompt tracking**, use the source topic from
 Terminal A. Use `/image` for video stream or
 `/camera/camera/color/image_raw` for RealSense:
 
@@ -185,7 +294,7 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For **SAM1-H interactive point prompt tracking**, use the same node with SAM1-H
+For **SAM1-H interactive point/box prompt tracking**, use the same node with SAM1-H
 weights:
 
 ```bash
@@ -211,14 +320,18 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
 MobileSAM and SAM1-H controls:
 
 ```text
-left click on the image    initialize or reset the point prompt
-r                          clear tracking state
-q or Esc                   exit
+left click on the image             initialize or reset with a point prompt
+left-button drag, then release      initialize or reset with a box prompt
+r                                  clear tracking state
+q or Esc                           exit
 ```
 
-The clicked point is shown on the overlay. After the first point prompt, the
-node uses the previous mask's bounding box as the next frame's box prompt.
+The clicked point or dragged box is shown on the overlay. After the first point
+or box prompt, the node uses the previous mask's bounding box as the next
+frame's box prompt.
 `bbox_scale:=1.2` expands that next-frame box by about 20% around its center.
+`box_drag_min_pixels:=5.0` controls the minimum drag width and height before a
+mouse gesture is treated as a box instead of a point click.
 Set `record_overlay:=true` to save the overlay MP4 at `overlay_video_output`.
 The recorder preserves ROS timestamp timing by default, so a slow backend will
 not make the saved MP4 play 4x faster.
@@ -660,11 +773,12 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For MobileSAM, click the image to initialize or reset the point prompt; clicks
-on the profiling panel are ignored. Later frames use the previous mask bounding
-box as the next box prompt. Press `r` to reset tracking, or `q`/`Esc` to exit.
-The clicked point is shown as a persistent marker on the overlay until reset or
-until another point is clicked.
+For MobileSAM, click the image to initialize or reset with a point prompt, or
+left-button drag and release to initialize or reset with a box prompt. Clicks
+and drags on the profiling panel are ignored. Later frames use the previous mask
+bounding box as the next box prompt. Press `r` to reset tracking, or `q`/`Esc`
+to exit. The clicked point or dragged box is shown as a persistent prompt marker
+on the overlay until reset or until another prompt is selected.
 The next-frame box prompt defaults to `bbox_scale:=1.2`, which expands the
 mask-derived box by about 20% around its center before passing it to the next
 frame.
@@ -695,8 +809,9 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For SAM1-H, click the image to initialize the point prompt. Later frames use the
-previous mask bounding box expanded by `bbox_scale:=1.2` as the next box prompt.
+For SAM1-H, click the image to initialize with a point prompt, or left-button
+drag and release to initialize with a box prompt. Later frames use the previous
+mask bounding box expanded by `bbox_scale:=1.2` as the next box prompt.
 Press `r` to reset tracking, or `q`/`Esc` to exit.
 
 Terminal B option 6, run YOLOE open-vocabulary segmentation with a text prompt
@@ -957,7 +1072,8 @@ left: live RGB frame with mask overlay     right: profiling metrics panel
 Controls:
 
 ```text
-left click on the image: initialize or reset the point prompt
+left click on the image: initialize or reset with a point prompt
+left-button drag, then release: initialize or reset with a box prompt
 r: clear current tracking state
 q or Esc: exit
 ```
@@ -965,10 +1081,10 @@ q or Esc: exit
 Tracking behavior:
 
 ```text
-first click -> point prompt
+first click or drag -> point or box prompt
 next frames -> previous mask bbox becomes the next box prompt
-new click -> reset and track the clicked object
-empty mask -> tracking lost until the next click
+new click or drag -> reset and track the selected object
+empty mask -> tracking lost until the next prompt
 ```
 
 Verify the outputs:
@@ -1293,6 +1409,13 @@ overlays/thor/ros_camera/es3p1_weak_image_weak_text/
 Point prompt is fixed relative to the incoming image when `point_normalized` is
 true. `point_x:=0.5 -p point_y:=0.5` means the center of the frame.
 
+The SAM2.1, Efficient-SAM2.1, and EfficientTAM commands in this section use
+`sam_backend_node`, so they are independent per-frame image segmentation checks.
+They do not initialize SAM2 memory, do not call `propagate_in_video`, and should
+not be reported as SAM2 video-memory tracking. Use them only for ROS transport
+and point-prompt image latency checks until a native SAM2 interactive camera
+node is added.
+
 SAM2.1 tiny:
 
 ```bash
@@ -1438,8 +1561,9 @@ ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
 ```
 
 For MobileSAM and SAM1-H, click the left side of the model window once to
-initialize tracking. The node records the first prompt as a point prompt and
-uses the previous predicted mask bbox as the next frame's box prompt.
+initialize tracking with a point prompt, or left-button drag and release to
+initialize with a box prompt. The node uses the previous predicted mask bbox as
+the next frame's box prompt.
 
 ## 12. Read The ROS Profiling Output
 

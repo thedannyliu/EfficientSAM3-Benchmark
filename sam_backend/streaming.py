@@ -50,14 +50,34 @@ def masks_to_bbox_xyxy(
 
 
 def left_panel_click_to_image_point(
-    x: int,
-    y: int,
+    x: float,
+    y: float,
     frame_hw: tuple[int, int],
 ) -> tuple[float, float] | None:
     height, width = frame_hw
     if x < 0 or y < 0 or x >= width or y >= height:
         return None
     return (float(x), float(y))
+
+
+def left_panel_drag_to_image_box(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    frame_hw: tuple[int, int],
+    min_size: float = 5.0,
+) -> tuple[float, float, float, float] | None:
+    height, width = frame_hw
+    x1 = min(start[0], end[0])
+    y1 = min(start[1], end[1])
+    x2 = max(start[0], end[0])
+    y2 = max(start[1], end[1])
+    x1 = max(0.0, min(float(width - 1), x1))
+    y1 = max(0.0, min(float(height - 1), y1))
+    x2 = max(0.0, min(float(width - 1), x2))
+    y2 = max(0.0, min(float(height - 1), y2))
+    if (x2 - x1) < min_size or (y2 - y1) < min_size:
+        return None
+    return (x1, y1, x2, y2)
 
 
 def parse_tegrastats_gr3d(line: str) -> float | None:

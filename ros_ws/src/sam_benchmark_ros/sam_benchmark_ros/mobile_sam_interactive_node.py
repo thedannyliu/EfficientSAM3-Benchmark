@@ -17,7 +17,12 @@ from std_msgs.msg import String
 from sam_backend import BackendConfig, Prompt, create_backend
 from sam_backend.overlay import overlay_prediction, to_numpy
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
-from sam_backend.streaming import left_panel_click_to_image_point, masks_to_bbox_xyxy, masks_to_mono8
+from sam_backend.streaming import (
+    left_panel_click_to_image_point,
+    left_panel_drag_to_image_box,
+    masks_to_bbox_xyxy,
+    masks_to_mono8,
+)
 
 from .video_recording import TimedVideoRecorder, stamp_to_seconds
 
@@ -46,6 +51,7 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("overlay_video_preserve_timing", True)
         self.declare_parameter("bbox_min_area", 25)
         self.declare_parameter("bbox_scale", 1.2)
+        self.declare_parameter("box_drag_min_pixels", 5.0)
         self.declare_parameter("enable_display", True)
         self.declare_parameter("auto_start", False)
         self.declare_parameter("initial_point_x", 0.5)
@@ -66,14 +72,18 @@ class MobileSamInteractiveNode(Node):
         )
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
         self.bbox_scale = float(self.get_parameter("bbox_scale").value)
+        self.box_drag_min_pixels = float(self.get_parameter("box_drag_min_pixels").value)
         self.enable_display = bool(self.get_parameter("enable_display").value)
         self.auto_start = bool(self.get_parameter("auto_start").value)
         self.initial_point_x = float(self.get_parameter("initial_point_x").value)
         self.initial_point_y = float(self.get_parameter("initial_point_y").value)
         self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.pending_point: tuple[float, float] | None = None
+        self.pending_box: tuple[float, float, float, float] | None = None
         self.prompt_point: tuple[float, float] | None = None
+        self.prompt_box: tuple[float, float, float, float] | None = None
         self.tracking_bbox: tuple[float, float, float, float] | None = None
+        self.drag_start: tuple[float, float] | None = None
         self.latest_frame: np.ndarray | None = None
         self.latest_display: np.ndarray | None = None
         self.latest_result: dict[str, Any] = {"tracking_state": "waiting_for_click"}
@@ -124,17 +134,48 @@ class MobileSamInteractiveNode(Node):
             self.get_logger().info(f"listening on {image_topic}; display disabled and waiting for an external prompt")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
-        if event != cv2.EVENT_LBUTTONDOWN or self.latest_frame is None:
+        if self.latest_frame is None:
             return
         scale = self.current_display_scale if self.current_display_scale > 0 else 1.0
         point = left_panel_click_to_image_point(x / scale, y / scale, self.latest_frame.shape[:2])
         if point is None:
+            if event == cv2.EVENT_LBUTTONUP:
+                self.drag_start = None
             return
-        self.pending_point = point
-        self.prompt_point = point
+        if event == cv2.EVENT_LBUTTONDOWN:
+            self.drag_start = point
+            return
+        if event == cv2.EVENT_MOUSEMOVE and self.drag_start is not None and flags & cv2.EVENT_FLAG_LBUTTON:
+            return
+        if event != cv2.EVENT_LBUTTONUP or self.drag_start is None:
+            return
+
+        start = self.drag_start
+        self.drag_start = None
+        box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
         self.tracking_bbox = None
-        self.latest_result = {"tracking_state": "pending_click", "point_x": point[0], "point_y": point[1]}
-        self.get_logger().info(f"received point prompt x={point[0]:.1f} y={point[1]:.1f}")
+        if box is None:
+            self.pending_point = point
+            self.pending_box = None
+            self.prompt_point = point
+            self.prompt_box = None
+            self.latest_result = {"tracking_state": "pending_click", "point_x": point[0], "point_y": point[1]}
+            self.get_logger().info(f"received point prompt x={point[0]:.1f} y={point[1]:.1f}")
+        else:
+            self.pending_point = None
+            self.pending_box = box
+            self.prompt_point = None
+            self.prompt_box = box
+            self.latest_result = {
+                "tracking_state": "pending_box",
+                "box_x1": box[0],
+                "box_y1": box[1],
+                "box_x2": box[2],
+                "box_y2": box[3],
+            }
+            self.get_logger().info(
+                f"received box prompt x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
+            )
 
     def on_image(self, msg: Image) -> None:
         callback_start = perf_counter()
@@ -186,6 +227,7 @@ class MobileSamInteractiveNode(Node):
                 prediction=prediction,
             )
         _draw_prompt_marker(overlay, self.prompt_point)
+        _draw_prompt_box(overlay, self.prompt_box)
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         result["tracking_fps"] = self._tracking_fps()
         self.recorder.write(overlay, stamp_to_seconds(msg.header.stamp))
@@ -207,12 +249,19 @@ class MobileSamInteractiveNode(Node):
             raise SystemExit
         if key == ord("r"):
             self.pending_point = None
+            self.pending_box = None
             self.prompt_point = None
+            self.prompt_box = None
             self.tracking_bbox = None
+            self.drag_start = None
             self.latest_result = {"tracking_state": "waiting_for_click"}
             self.get_logger().info(f"reset {self.model_label} tracking state")
 
     def _next_prompt(self) -> Prompt | None:
+        if self.pending_box is not None:
+            box = self.pending_box
+            self.pending_box = None
+            return Prompt(boxes=[box])
         if self.pending_point is not None:
             point = self.pending_point
             self.pending_point = None
@@ -357,6 +406,19 @@ def _draw_prompt_marker(image_rgb: np.ndarray, point: tuple[float, float] | None
     cv2.line(image_rgb, (min(width - 1, x + 7), y), (min(width - 1, x + 14), y), (255, 255, 255), 2, cv2.LINE_AA)
     cv2.line(image_rgb, (x, max(0, y - 14)), (x, max(0, y - 7)), (255, 255, 255), 2, cv2.LINE_AA)
     cv2.line(image_rgb, (x, min(height - 1, y + 7)), (x, min(height - 1, y + 14)), (255, 255, 255), 2, cv2.LINE_AA)
+
+
+def _draw_prompt_box(image_rgb: np.ndarray, box: tuple[float, float, float, float] | None) -> None:
+    if box is None:
+        return
+    height, width = image_rgb.shape[:2]
+    x1, y1, x2, y2 = [int(round(value)) for value in box]
+    x1 = max(0, min(width - 1, x1))
+    y1 = max(0, min(height - 1, y1))
+    x2 = max(0, min(width - 1, x2))
+    y2 = max(0, min(height - 1, y2))
+    cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (255, 255, 255), 3, cv2.LINE_AA)
+    cv2.rectangle(image_rgb, (x1, y1), (x2, y2), (30, 220, 255), 1, cv2.LINE_AA)
 
 
 def _draw_text(image_bgr: np.ndarray, text: str, origin: tuple[int, int], scale: float = 0.7) -> None:
