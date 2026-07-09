@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from collections import OrderedDict, deque
 from time import perf_counter
 from typing import Any
@@ -160,13 +161,13 @@ class Sam2OnlineTrackingNode(Node):
         self.drag_start = None
         box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
         if box is None:
-            self._reset_and_start({"prompt_mode": "point", "point": point, "label": 1})
-            self.get_logger().info(f"reset online SAM2 tracking from point x={point[0]:.1f} y={point[1]:.1f}")
+            if self._reset_and_start({"prompt_mode": "point", "point": point, "label": 1}):
+                self.get_logger().info(f"reset online SAM2 tracking from point x={point[0]:.1f} y={point[1]:.1f}")
         else:
-            self._reset_and_start({"prompt_mode": "box", "box": box})
-            self.get_logger().info(
-                f"reset online SAM2 tracking from box x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
-            )
+            if self._reset_and_start({"prompt_mode": "box", "box": box}):
+                self.get_logger().info(
+                    f"reset online SAM2 tracking from box x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
+                )
 
     def on_image(self, msg: Image) -> None:
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
@@ -192,9 +193,9 @@ class Sam2OnlineTrackingNode(Node):
 
         self._track_frame(frame, msg.header)
 
-    def _reset_and_start(self, prompt: dict[str, Any]) -> None:
+    def _reset_and_start(self, prompt: dict[str, Any]) -> bool:
         if self.latest_frame is None or self.latest_header is None:
-            return
+            return False
         self.state = "processing"
         self.prompt = prompt
         self.frame_index = 0
@@ -226,10 +227,12 @@ class Sam2OnlineTrackingNode(Node):
             masks = _binary_masks(video_res_masks)
             self._publish_frame(0, masks, obj_ids, add_prompt_ms, add_prompt_ms, self.prompt)
             self.state = "tracking"
+            return True
         except Exception:
             self.state = "waiting_for_prompt"
             self.inference_state = None
-            raise
+            self.get_logger().error(f"failed to start online SAM2 tracking:\n{traceback.format_exc()}")
+            return False
 
     def _track_frame(self, frame: np.ndarray, header: Any) -> None:
         if self.inference_state is None or self.prompt is None:
@@ -252,6 +255,10 @@ class Sam2OnlineTrackingNode(Node):
             self._prune_history(frame_idx)
             masks = _binary_masks(video_res_masks)
             self._publish_frame(frame_idx, masks, obj_ids, latency_ms, "", self.prompt)
+        except Exception:
+            self.state = "waiting_for_prompt"
+            self.inference_state = None
+            self.get_logger().error(f"failed during online SAM2 tracking:\n{traceback.format_exc()}")
         finally:
             if self.state == "processing":
                 self.state = "tracking"
@@ -260,6 +267,31 @@ class Sam2OnlineTrackingNode(Node):
         assert self.inference_state is not None
         obj_ids = self.inference_state["obj_ids"]
         batch_size = self.predictor._get_obj_num(self.inference_state)
+        if self._uses_global_output_dict():
+            with self.torch_module.inference_mode():
+                output_dict = self.inference_state["output_dict"]
+                current_out, pred_masks = self.predictor._run_single_frame_inference(
+                    inference_state=self.inference_state,
+                    output_dict=output_dict,
+                    frame_idx=frame_idx,
+                    batch_size=batch_size,
+                    is_init_cond_frame=False,
+                    point_inputs=None,
+                    mask_inputs=None,
+                    reverse=False,
+                    run_mem_encoder=True,
+                )
+                output_dict["non_cond_frame_outputs"][frame_idx] = current_out
+                self.predictor._add_output_per_object(
+                    self.inference_state,
+                    frame_idx,
+                    current_out,
+                    "non_cond_frame_outputs",
+                )
+                self.inference_state["frames_already_tracked"][frame_idx] = {"reverse": False}
+            _, video_res_masks = self.predictor._get_orig_video_res_output(self.inference_state, pred_masks)
+            return obj_ids, video_res_masks
+
         pred_masks_per_obj = []
         with self.torch_module.inference_mode():
             for obj_idx in range(batch_size):
@@ -288,6 +320,10 @@ class Sam2OnlineTrackingNode(Node):
             all_pred_masks = pred_masks_per_obj[0]
         _, video_res_masks = self.predictor._get_orig_video_res_output(self.inference_state, all_pred_masks)
         return obj_ids, video_res_masks
+
+    def _uses_global_output_dict(self) -> bool:
+        external_repo = str(self.get_parameter("external_repo").value).lower()
+        return "edgetam" in external_repo
 
     def _new_inference_state(self, frame: np.ndarray) -> dict[str, Any]:
         compute_device = self.predictor.device
@@ -341,7 +377,7 @@ class Sam2OnlineTrackingNode(Node):
             non_cond = obj_output_dict["non_cond_frame_outputs"]
             for old_idx in [idx for idx in non_cond if idx < min_keep]:
                 non_cond.pop(old_idx, None)
-            frames_tracked = self.inference_state["frames_tracked_per_obj"][obj_idx]
+            frames_tracked = self.inference_state["frames_tracked_per_obj"].get(obj_idx, {})
             for old_idx in [idx for idx in frames_tracked if idx < min_keep]:
                 frames_tracked.pop(old_idx, None)
         if "output_dict" in self.inference_state:

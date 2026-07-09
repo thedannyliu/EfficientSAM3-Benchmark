@@ -32,7 +32,7 @@ As of 2026-07-08, the checked-in ROS camera code has these behaviors:
 | SAM2.1 / Efficient-SAM2.1 image backends | `sam_backend_node` | fixed parameter point only | independent per-frame image segmentation | implemented, not memory tracking |
 | SAM2.1 online memory tracking | `sam2_online_tracking_node` | click point or left-button drag box in the OpenCV window | initializes SAM2 memory from the prompt frame, then tracks each incoming ROS frame with memory encoder updates | implemented for online camera streams |
 | SAM2.1 native video memory tracking | `sam2_native_clip_node` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | implemented for bounded clips |
-| EdgeTAM native video memory tracking | `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs EdgeTAM's SAM2-compatible memory predictor | implemented for bounded clips |
+| EdgeTAM native video memory tracking | `sam2_online_tracking_node` or `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | click point or left-button drag box in the OpenCV window | online node tracks each incoming ROS frame; clip node captures a bounded clip, then runs EdgeTAM's SAM2-compatible memory predictor | implemented for online streams and bounded clips |
 | SAM2.1 + distilled TinyViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | click point or left-button drag box in the OpenCV window | same SAM2/EdgeTAM memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for online streams and bounded clips |
 | SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
 | SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt, click point, or left-button drag box in the OpenCV window | captures a bounded clip, then runs native `start_session` + `add_prompt` + `propagate_in_video` | implemented for bounded text/geometry clips |
@@ -417,6 +417,26 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
 Use `auto_start:=true` when you want a non-interactive smoke run from the first
 incoming frame. With `auto_start`, `initial_point_x/y` can be normalized
 coordinates such as `0.5,0.5`.
+
+For **EdgeTAM online point/box memory tracking**, use the same online node with
+the EdgeTAM repo, checkpoint, and config:
+
+```bash
+ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p external_repo:=external/EdgeTAM \
+  -p model_kind:=sam2 \
+  -p checkpoint_path:=checkpoints/edgetam/edgetam.pt \
+  -p model_config:=configs/edgetam.yaml \
+  -p device:=cuda \
+  -p input_queue_size:=3 \
+  -p image_qos_reliability:=best_effort \
+  -p memory_history_size:=32 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay
+```
 
 For **SAM2.1 native point/box bounded clip memory tracking**, use the source
 topic from Terminal A. Click the OpenCV window for a point prompt, or
