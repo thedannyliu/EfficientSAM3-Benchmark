@@ -13,6 +13,7 @@ from std_msgs.msg import String
 
 FIELDS = [
     "frame_index",
+    "source_frame_index",
     "latency_ms",
     "callback_total_ms",
     "end_to_end_ms",
@@ -21,6 +22,8 @@ FIELDS = [
     "stream_mode",
     "tracking_state",
     "model_kind",
+    "memory_history_size",
+    "queue_depth",
     "image_encoder_ms",
     "text_encoder_ms",
     "prompt_encoder_ms",
@@ -142,6 +145,7 @@ class ResultRecorderNode(Node):
         stamp = data.get("stamp", {})
         row = {
             "frame_index": data.get("frame_index", len(self.rows)),
+            "source_frame_index": data.get("source_frame_index"),
             "latency_ms": data.get("latency_ms"),
             "callback_total_ms": data.get("callback_total_ms"),
             "end_to_end_ms": data.get("end_to_end_ms"),
@@ -150,6 +154,8 @@ class ResultRecorderNode(Node):
             "stream_mode": data.get("stream_mode"),
             "tracking_state": data.get("tracking_state"),
             "model_kind": data.get("model_kind"),
+            "memory_history_size": data.get("memory_history_size"),
+            "queue_depth": data.get("queue_depth"),
             "image_encoder_ms": data.get("image_encoder_ms"),
             "text_encoder_ms": data.get("text_encoder_ms"),
             "prompt_encoder_ms": data.get("prompt_encoder_ms"),
