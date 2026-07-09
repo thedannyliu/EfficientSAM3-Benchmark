@@ -11,6 +11,7 @@ import rclpy
 from cv_bridge import CvBridge
 from PIL import Image as PILImage
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -52,6 +53,7 @@ class Sam2OnlineTrackingNode(Node):
         self.declare_parameter("tinyvit_model_name", "tiny_vit_21m_512.dist_in22k_ft_in1k")
         self.declare_parameter("device", "cuda")
         self.declare_parameter("input_queue_size", 3)
+        self.declare_parameter("image_qos_reliability", "best_effort")
         self.declare_parameter("memory_history_size", 32)
         self.declare_parameter("window_name", "SAM2 Online Memory")
         self.declare_parameter("display_fps", 30.0)
@@ -98,6 +100,7 @@ class Sam2OnlineTrackingNode(Node):
             self.torch_module.cuda.reset_peak_memory_stats()
 
         image_topic = str(self.get_parameter("image_topic").value)
+        image_qos = self._image_qos()
         result_topic = str(self.get_parameter("result_topic").value)
         mask_topic = str(self.get_parameter("mask_topic").value)
         segmented_image_topic = str(self.get_parameter("segmented_image_topic").value)
@@ -108,7 +111,7 @@ class Sam2OnlineTrackingNode(Node):
         self.mask_publisher = self.create_publisher(Image, mask_topic, 10)
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
-        self.subscription = self.create_subscription(Image, image_topic, self.on_image, self.input_queue_size)
+        self.subscription = self.create_subscription(Image, image_topic, self.on_image, image_qos)
         self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
 
         if self.enable_display:
@@ -116,7 +119,24 @@ class Sam2OnlineTrackingNode(Node):
             cv2.setMouseCallback(self.window_name, self.on_mouse)
         self.get_logger().info(
             f"listening on {image_topic}; click for point or drag for box; "
-            f"input_queue_size={self.input_queue_size} memory_history_size={self.memory_history_size}"
+            f"input_queue_size={self.input_queue_size} "
+            f"image_qos_reliability={self.get_parameter('image_qos_reliability').value} "
+            f"memory_history_size={self.memory_history_size}"
+        )
+
+    def _image_qos(self) -> QoSProfile:
+        reliability_value = str(self.get_parameter("image_qos_reliability").value).strip().lower()
+        if reliability_value in {"reliable", "1", "true"}:
+            reliability = ReliabilityPolicy.RELIABLE
+        elif reliability_value in {"best_effort", "besteffort", "best-effort", "0", "false"}:
+            reliability = ReliabilityPolicy.BEST_EFFORT
+        else:
+            raise ValueError("image_qos_reliability must be 'best_effort' or 'reliable'")
+        return QoSProfile(
+            history=HistoryPolicy.KEEP_LAST,
+            depth=self.input_queue_size,
+            reliability=reliability,
+            durability=DurabilityPolicy.VOLATILE,
         )
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:

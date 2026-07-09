@@ -382,6 +382,7 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
   -p device:=cuda \
   -p input_queue_size:=3 \
+  -p image_qos_reliability:=best_effort \
   -p memory_history_size:=32 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
@@ -405,6 +406,7 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
   -p device:=cuda \
   -p input_queue_size:=3 \
+  -p image_qos_reliability:=best_effort \
   -p memory_history_size:=32 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
