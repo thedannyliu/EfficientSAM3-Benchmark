@@ -615,6 +615,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p device:=cuda \
   -p prompt_mode:=text \
   -p prompt:=monitor \
+  -p text_prompt_topic:=/sam/text_prompt \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
@@ -1427,6 +1428,7 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p device:=cuda \
   -p prompt_mode:=text \
   -p prompt:=monitor \
+  -p text_prompt_topic:=/sam/text_prompt \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
@@ -1434,7 +1436,24 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p segmented_image_topic:=/segmented_image
 ```
 
-Terminals C and D:
+Terminal C, open the interactive image-segmentation viewer:
+
+```bash
+cd EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros live_viewer_node --ros-args \
+  -p image_topic:=/image \
+  -p segmented_image_topic:=/segmented_image \
+  -p result_topic:=/sam/result_json \
+  -p text_prompt_topic:=/sam/text_prompt
+```
+
+Focus the viewer and press `t` to edit the current prompt. Type the complete
+English prompt and press `Enter`; `Backspace` edits and `Esc` cancels. The
+backend uses the submitted prompt on its next processed image.
+
+Terminals D and E, record metrics and overlays:
 
 ```bash
 mkdir -p results/thor/ros_camera/sam3 overlays/thor/ros_camera/sam3
@@ -1488,6 +1507,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p external_repo:=external/sam3 \
   -p prompt_mode:=text \
   -p prompt:=monitor \
+  -p text_prompt_topic:=/sam/text_prompt \
   -p clip_frames:=120 \
   -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
   -p result_topic:=/sam/result_json \
@@ -1495,6 +1515,23 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
+
+The native tracking window uses one prompt interface:
+
+| input | action |
+| --- | --- |
+| left click | start a new point-prompt tracking clip |
+| left-button drag and release | start a new box-prompt tracking clip |
+| `t`, type, `Enter` | start a new text-prompt tracking clip |
+| `Backspace` | delete the last text character while editing |
+| `Esc` | cancel text editing; outside editing, close the node |
+| `r` | clear the current tracking state |
+| `q` | close the node |
+
+Submitting any new point, box, or text prompt replaces the previous target and
+starts capture from the current camera frame. The initial
+`prompt_mode:=text` only selects startup behavior; the window can switch among
+all three prompt types afterward.
 
 For SAM3 native point/box tracking in the same recorder setup, replace Terminal
 B with:
@@ -1513,12 +1550,16 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-This is the SAM3 native tracking path. Click once for a point prompt, or
-left-button drag/release for a box prompt. Do not compare its end-to-end
+This is the SAM3 native tracking path. The same window also accepts `t` for a
+text prompt after starting with `prompt_mode:=interactive`. Do not compare its end-to-end
 latency directly against per-frame live backends unless you explicitly want the
 capture-then-track delay included.
 
 ## 10. Run EfficientSAM3 Text-Prompt Camera Benchmark
+
+The `live_viewer_node` text interface from Section 8 also applies to every
+text-prompt image backend in this section because `sam_backend_node` subscribes
+to `/sam/text_prompt` by default.
 
 EfficientSAM3 weak image / weak text:
 
