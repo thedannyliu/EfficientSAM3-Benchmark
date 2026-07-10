@@ -533,11 +533,21 @@ ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p device:=cuda \
   -p prompt_mode:=text \
   -p prompt:=monitor \
+  -p text_prompt_topic:=/sam/text_prompt \
   -p image_topic:=/image \
   -p result_topic:=/sam/result_json \
   -p overlay_topic:=/sam/overlay \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image
+```
+
+Change the SAM3 image-segmentation prompt at runtime from another terminal.
+The complete message is treated as one prompt, including spaces, and takes
+effect on the next image frame:
+
+```bash
+source scripts/source_thor_ros_env.sh
+ros2 topic pub --once /sam/text_prompt std_msgs/msg/String "{data: 'person wearing a red shirt'}"
 ```
 
 For **SAM3 native text clip tracking**, the node first captures a fixed clip
@@ -551,6 +561,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p external_repo:=external/sam3 \
   -p prompt_mode:=text \
   -p prompt:=monitor \
+  -p text_prompt_topic:=/sam/text_prompt \
   -p clip_frames:=120 \
   -p frame_dir:=results/thor/ros_camera/sam3_native_clip/frames \
   -p result_topic:=/sam/result_json \
@@ -558,6 +569,12 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
+
+The same `/sam/text_prompt` command changes native SAM3 video tracking. During
+clip capture it immediately discards the old partial clip and starts a new clip
+from the current camera frame. If native propagation is already processing a
+completed clip, the single-threaded node applies the queued prompt after that
+propagation finishes, then starts the next clip.
 
 For **SAM3 native point/box clip tracking**, use the same node with
 `prompt_mode:=interactive`. Click the OpenCV window for a point prompt, or

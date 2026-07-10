@@ -34,6 +34,7 @@ class SamBackendNode(Node):
         self.declare_parameter("prompt_mode", "auto")
         self.declare_parameter("prompt", "person")
         self.declare_parameter("prompts", "")
+        self.declare_parameter("text_prompt_topic", "/sam/text_prompt")
         self.declare_parameter("point_x", 0.5)
         self.declare_parameter("point_y", 0.5)
         self.declare_parameter("point_normalized", True)
@@ -101,6 +102,17 @@ class SamBackendNode(Node):
             self.create_publisher(Image, segmented_image_topic, 10) if segmented_image_topic else None
         )
         self.subscription = self.create_subscription(Image, image_topic, self.on_image, 10)
+        self.text_prompt_subscription = None
+        if self.prompt_mode == "text":
+            text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
+            if text_prompt_topic:
+                self.text_prompt_subscription = self.create_subscription(
+                    String,
+                    text_prompt_topic,
+                    self.on_text_prompt,
+                    10,
+                )
+                self.get_logger().info(f"accepting runtime text prompts on {text_prompt_topic}")
         self.get_logger().info(f"listening on {image_topic}, publishing {result_topic}")
         if overlay_topic:
             self.get_logger().info(f"publishing overlays on {overlay_topic}")
@@ -108,6 +120,15 @@ class SamBackendNode(Node):
             self.get_logger().info(f"publishing mono8 masks on {mask_topic}")
         if segmented_image_topic:
             self.get_logger().info(f"publishing segmented images on {segmented_image_topic}")
+
+    def on_text_prompt(self, msg: String) -> None:
+        prompt = msg.data.strip()
+        if not prompt:
+            self.get_logger().warning("ignoring empty runtime text prompt")
+            return
+        self.prompt_text = prompt
+        self.prompt_texts = [prompt]
+        self.get_logger().info(f"updated runtime text prompt to: {prompt}")
 
     def on_image(self, msg: Image) -> None:
         callback_start = perf_counter()

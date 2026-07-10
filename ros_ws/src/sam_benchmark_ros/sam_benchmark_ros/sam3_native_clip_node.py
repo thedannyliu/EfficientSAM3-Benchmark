@@ -39,6 +39,7 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("external_repo", "external/sam3")
         self.declare_parameter("prompt", "monitor")
         self.declare_parameter("prompts", "")
+        self.declare_parameter("text_prompt_topic", "/sam/text_prompt")
         self.declare_parameter("clip_frames", 120)
         self.declare_parameter("frame_dir", "results/thor/ros_camera/sam3_native_clip/frames")
         self.declare_parameter("version", "sam3")
@@ -115,6 +116,16 @@ class Sam3NativeClipNode(Node):
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
         self.subscription = self.create_subscription(Image, image_topic, self.on_image, 1)
+        self.text_prompt_subscription = None
+        if self.prompt_mode == "text":
+            text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
+            if text_prompt_topic:
+                self.text_prompt_subscription = self.create_subscription(
+                    String,
+                    text_prompt_topic,
+                    self.on_text_prompt,
+                    10,
+                )
         display_fps = float(self.get_parameter("display_fps").value)
         self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
 
@@ -125,7 +136,8 @@ class Sam3NativeClipNode(Node):
         if self.prompt_mode == "text":
             self.get_logger().info(
                 f"capturing {self.clip_frames} frames from {image_topic}; "
-                f"SAM3 text native tracking will run after the clip is materialized"
+                f"SAM3 text native tracking will run after the clip is materialized; "
+                f"runtime prompts accepted on {self.get_parameter('text_prompt_topic').value}"
             )
         elif self.auto_start:
             self.get_logger().info(f"listening on {image_topic}; auto-starting native SAM3 point tracking")
@@ -133,6 +145,24 @@ class Sam3NativeClipNode(Node):
             self.get_logger().info(
                 f"listening on {image_topic}; click for point or drag for box; clip_frames={self.clip_frames}"
             )
+
+    def on_text_prompt(self, msg: String) -> None:
+        prompt = msg.data.strip()
+        if not prompt:
+            self.get_logger().warning("ignoring empty runtime text prompt")
+            return
+        self.prompt = prompt
+        self.prompt_texts = [prompt]
+        self.processing_started = False
+        self.geometry_prompt = None
+        self.prompt_display_start = None
+        self.frames = []
+        self.headers = []
+        if self.latest_frame is not None and self.latest_header is not None:
+            self.frames.append(self.latest_frame.copy())
+            self.headers.append(self.latest_header)
+        self.state = "capturing"
+        self.get_logger().info(f"updated SAM3 tracking text prompt and restarted clip capture: {prompt}")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
         if self.prompt_mode == "text" or self.latest_frame is None or self.state == "processing":
