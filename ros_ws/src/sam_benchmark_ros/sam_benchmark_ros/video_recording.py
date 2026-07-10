@@ -56,10 +56,12 @@ class TimedVideoRecorder:
             self.writer.write(frame_bgr)
             self.frames += 1
 
-    def release(self, logger: Any) -> None:
+    def release(self, logger: Any | None = None) -> None:
         if self.writer is not None:
             self.writer.release()
-            logger.info(f"wrote {self.frames} overlay frames to {self.output_path}")
+            self.writer = None
+            if logger is not None:
+                logger.info(f"wrote {self.frames} overlay frames to {self.output_path}")
 
     def _ensure_writer(self, frame_rgb: np.ndarray) -> None:
         if self.writer is not None:

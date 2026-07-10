@@ -45,7 +45,8 @@ class OverlayVideoRecorderNode(Node):
         self.recorder.write(frame_rgb, stamp_to_seconds(msg.header.stamp))
 
     def destroy_node(self) -> bool:
-        self.recorder.release(self.get_logger())
+        logger = self.get_logger() if rclpy.ok() else None
+        self.recorder.release(logger)
         return super().destroy_node()
 
 
@@ -58,4 +59,5 @@ def main() -> None:
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
