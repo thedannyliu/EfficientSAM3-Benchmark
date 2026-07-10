@@ -15,6 +15,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
 from sam_benchmark_ros.video_recording import prompt_is_visible, stamp_to_seconds
+from sam_benchmark_ros.text_prompt_ui import TextPromptEditor
 
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.overlay import overlay_prediction
@@ -60,6 +61,7 @@ class Sam3NativeClipNode(Node):
         self.prompt_mode = str(self.get_parameter("prompt_mode").value)
         if self.prompt_mode not in {"text", "point", "box", "interactive"}:
             raise ValueError("prompt_mode must be one of: text, point, box, interactive")
+        self.geometry_prompt_mode = self.prompt_mode if self.prompt_mode in {"point", "box"} else "interactive"
         self.prompt = str(self.get_parameter("prompt").value)
         self.prompt_texts = parse_text_prompts(self.prompt, str(self.get_parameter("prompts").value))
         if self.prompt_mode == "text" and not self.prompt_texts:
@@ -91,6 +93,7 @@ class Sam3NativeClipNode(Node):
         self.result_times: deque[float] = deque(maxlen=60)
         self.state = "waiting_for_prompt" if self.prompt_mode != "text" else "capturing"
         self.processing_started = False
+        self.text_prompt_editor = TextPromptEditor()
 
         external_repo = str(self.get_parameter("external_repo").value)
         checkpoint_path = str(self.get_parameter("checkpoint_path").value)
@@ -116,16 +119,9 @@ class Sam3NativeClipNode(Node):
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
         self.subscription = self.create_subscription(Image, image_topic, self.on_image, 1)
-        self.text_prompt_subscription = None
-        if self.prompt_mode == "text":
-            text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
-            if text_prompt_topic:
-                self.text_prompt_subscription = self.create_subscription(
-                    String,
-                    text_prompt_topic,
-                    self.on_text_prompt,
-                    10,
-                )
+        text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
+        self.text_prompt_subscription = self.create_subscription(String, text_prompt_topic, self.on_text_prompt, 10)
+        self.text_prompt_publisher = self.create_publisher(String, text_prompt_topic, 10)
         display_fps = float(self.get_parameter("display_fps").value)
         self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
 
@@ -153,6 +149,7 @@ class Sam3NativeClipNode(Node):
             return
         self.prompt = prompt
         self.prompt_texts = [prompt]
+        self.prompt_mode = "text"
         self.processing_started = False
         self.geometry_prompt = None
         self.prompt_display_start = None
@@ -165,7 +162,7 @@ class Sam3NativeClipNode(Node):
         self.get_logger().info(f"updated SAM3 tracking text prompt and restarted clip capture: {prompt}")
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
-        if self.prompt_mode == "text" or self.latest_frame is None or self.state == "processing":
+        if self.latest_frame is None or self.state == "processing" or self.text_prompt_editor.active:
             return
         scale = self.current_display_scale if self.current_display_scale > 0 else 1.0
         point = left_panel_click_to_image_point(x / scale, y / scale, self.latest_frame.shape[:2])
@@ -184,13 +181,15 @@ class Sam3NativeClipNode(Node):
         start = self.drag_start
         self.drag_start = None
         box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
-        if self.prompt_mode == "box" and box is None:
+        if self.geometry_prompt_mode == "box" and box is None:
             self.get_logger().info("drag a larger box to start SAM3 box tracking")
             return
-        if self.prompt_mode == "point" or box is None:
+        if self.geometry_prompt_mode == "point" or box is None:
+            self.prompt_mode = "point"
             self._start_capture({"prompt_mode": "point", "point": point, "label": 1})
             self.get_logger().info(f"received native SAM3 point prompt x={point[0]:.1f} y={point[1]:.1f}")
         else:
+            self.prompt_mode = "box"
             self._start_capture({"prompt_mode": "box", "box": box})
             self.get_logger().info(
                 f"received native SAM3 box prompt x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
@@ -224,6 +223,8 @@ class Sam3NativeClipNode(Node):
         if self.state == "capturing":
             self.frames.append(frame_rgb.copy())
             self.headers.append(msg.header)
+            status = _status_overlay(frame_rgb, f"Capturing {len(self.frames)}/{self.clip_frames}")
+            self.latest_display = _scale_display(status, self.display_scale, self.display_max_width)[0]
             if len(self.frames) % 30 == 0 or len(self.frames) == self.clip_frames:
                 self.get_logger().info(f"captured {len(self.frames)}/{self.clip_frames} frames")
         if self.state == "capturing" and len(self.frames) >= self.clip_frames:
@@ -387,8 +388,18 @@ class Sam3NativeClipNode(Node):
     def display(self) -> None:
         if self.latest_display is None:
             return
-        cv2.imshow(self.window_name, self.latest_display)
+        display = self.latest_display.copy()
+        self.text_prompt_editor.draw(display)
+        cv2.imshow(self.window_name, display)
         key = cv2.waitKey(1) & 0xFF
+        if self.text_prompt_editor.active:
+            prompt = self.text_prompt_editor.handle_key(key)
+            if prompt is not None:
+                self.text_prompt_publisher.publish(String(data=prompt))
+            return
+        if key == ord("t"):
+            self.text_prompt_editor.start(self.prompt if self.prompt_mode == "text" else "")
+            return
         if key in {27, ord("q")}:
             raise SystemExit
         if key == ord("r"):

@@ -18,6 +18,7 @@ from std_msgs.msg import String
 
 from sam_backend.streaming import parse_tegrastats_gr3d
 
+from .text_prompt_ui import TextPromptEditor
 from .video_recording import TimedVideoRecorder, stamp_to_seconds
 
 
@@ -27,6 +28,7 @@ class LiveViewerNode(Node):
         self.declare_parameter("image_topic", "/image")
         self.declare_parameter("segmented_image_topic", "/segmented_image")
         self.declare_parameter("result_topic", "/sam/result_json")
+        self.declare_parameter("text_prompt_topic", "/sam/text_prompt")
         self.declare_parameter("window_name", "SAM3 ROS Streaming")
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("display_scale", 1.0)
@@ -53,6 +55,7 @@ class LiveViewerNode(Node):
         self.latest_segmented: np.ndarray | None = None
         self.latest_segmented_stamp: float | None = None
         self.latest_metrics: dict[str, Any] = {}
+        self.text_prompt_editor = TextPromptEditor()
         self.segmented_times: deque[float] = deque(maxlen=60)
         self.gpu_monitor = TegrastatsMonitor()
         self.gpu_monitor.start()
@@ -60,9 +63,11 @@ class LiveViewerNode(Node):
         image_topic = self.get_parameter("image_topic").value
         segmented_image_topic = self.get_parameter("segmented_image_topic").value
         result_topic = self.get_parameter("result_topic").value
+        text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
         self.image_subscription = self.create_subscription(Image, image_topic, self.on_image, 10)
         self.segmented_subscription = self.create_subscription(Image, segmented_image_topic, self.on_segmented, 10)
         self.result_subscription = self.create_subscription(String, result_topic, self.on_result, 10)
+        self.text_prompt_publisher = self.create_publisher(String, text_prompt_topic, 10)
         self.timer = self.create_timer(1.0 / display_fps, self.display)
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         self.get_logger().info(
@@ -103,8 +108,18 @@ class LiveViewerNode(Node):
             gpu_util=self.gpu_monitor.gpu_util,
         )
         combined = _scale_display(combined, self.display_scale, self.display_max_width)
+        self.text_prompt_editor.draw(combined)
         cv2.imshow(self.window_name, combined)
         key = cv2.waitKey(1) & 0xFF
+        if self.text_prompt_editor.active:
+            prompt = self.text_prompt_editor.handle_key(key)
+            if prompt is not None:
+                self.text_prompt_publisher.publish(String(data=prompt))
+                self.get_logger().info(f"published runtime text prompt: {prompt}")
+            return
+        if key == ord("t"):
+            self.text_prompt_editor.start(str(self.latest_metrics.get("prompt_text", "")))
+            return
         if key in {27, ord("q")}:
             raise SystemExit
 
