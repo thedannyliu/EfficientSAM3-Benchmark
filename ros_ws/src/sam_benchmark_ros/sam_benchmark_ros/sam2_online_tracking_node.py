@@ -34,6 +34,7 @@ from sam_benchmark_ros.sam2_native_clip_node import (
     _stamp_delta_ms,
     _status_overlay,
 )
+from sam_benchmark_ros.video_recording import prompt_is_visible, stamp_to_seconds
 
 
 class Sam2OnlineTrackingNode(Node):
@@ -66,6 +67,7 @@ class Sam2OnlineTrackingNode(Node):
         self.declare_parameter("initial_point_y", 0.5)
         self.declare_parameter("initial_point_normalized", True)
         self.declare_parameter("box_drag_min_pixels", 5.0)
+        self.declare_parameter("prompt_display_seconds", 0.5)
 
         self.bridge = CvBridge()
         self.input_queue_size = max(1, int(self.get_parameter("input_queue_size").value))
@@ -79,12 +81,14 @@ class Sam2OnlineTrackingNode(Node):
         self.initial_point_y = float(self.get_parameter("initial_point_y").value)
         self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.box_drag_min_pixels = float(self.get_parameter("box_drag_min_pixels").value)
+        self.prompt_display_seconds = float(self.get_parameter("prompt_display_seconds").value)
         self.current_display_scale = 1.0
 
         self.latest_frame: np.ndarray | None = None
         self.latest_header: Any | None = None
         self.latest_display: np.ndarray | None = None
         self.prompt: dict[str, Any] | None = None
+        self.prompt_display_start: float | None = None
         self.drag_start: tuple[float, float] | None = None
         self.state = "waiting_for_prompt"
         self.frame_index = -1
@@ -198,6 +202,7 @@ class Sam2OnlineTrackingNode(Node):
             return False
         self.state = "processing"
         self.prompt = prompt
+        self.prompt_display_start = stamp_to_seconds(self.latest_header.stamp)
         self.frame_index = 0
         self.original_frames = {0: self.latest_frame.copy()}
         self.headers = {0: self.latest_header}
@@ -410,7 +415,8 @@ class Sam2OnlineTrackingNode(Node):
         if frame is None or header is None:
             return
         overlay = overlay_prediction(frame, masks)
-        _draw_prompt(overlay, prompt)
+        if prompt_is_visible(self.prompt_display_start, header.stamp, self.prompt_display_seconds):
+            _draw_prompt(overlay, prompt)
         mask = masks_to_mono8(masks, frame.shape[:2])
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         memory = cuda_memory_mb(self.torch_module)
@@ -473,6 +479,7 @@ class Sam2OnlineTrackingNode(Node):
     def _clear_state(self) -> None:
         self.state = "waiting_for_prompt"
         self.prompt = None
+        self.prompt_display_start = None
         self.drag_start = None
         self.frame_index = -1
         self.inference_state = None

@@ -14,6 +14,27 @@ overlay_video_recorder_node -> overlay MP4
 live_viewer_node -> image with segmentation overlay, metrics panel on the right
 ```
 
+Every image-segmentation and video-tracking node in this guide can be recorded
+through `/sam/overlay`. Start this recorder in another terminal; it uses the
+source ROS timestamps to preserve the live camera speed even when inference
+drops frames:
+
+```bash
+source scripts/source_thor_ros_env.sh
+mkdir -p overlays/thor/ros_camera/live
+
+ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
+  -p overlay_topic:=/sam/overlay \
+  -p video_output:=overlays/thor/ros_camera/live/overlay.mp4 \
+  -p fps:=30.0 \
+  -p preserve_timing:=true
+```
+
+Stop the recorder with `Ctrl-C` so the MP4 is finalized. Set `fps` to the
+camera's configured output rate (for example `30.0` for `640x480x30`). Point
+and box prompt markers default to 0.5 seconds on interactive model overlays;
+override this with `-p prompt_display_seconds:=0.5` on the model node.
+
 Use this path after the offline benchmark works. The ROS numbers include model
 latency plus callback and transport overhead.
 
@@ -368,6 +389,8 @@ mouse gesture is treated as a box instead of a point click.
 Set `record_overlay:=true` to save the overlay MP4 at `overlay_video_output`.
 The recorder preserves ROS timestamp timing by default, so a slow backend will
 not make the saved MP4 play 4x faster.
+Point and box markers disappear after `prompt_display_seconds` (default 0.5)
+while the mask and tracking state remain visible.
 
 For **SAM2.1 online point/box memory tracking**, use the source topic from
 Terminal A. Click the OpenCV window for a point prompt, or left-button drag and

@@ -14,6 +14,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+from sam_benchmark_ros.video_recording import prompt_is_visible, stamp_to_seconds
+
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.overlay import overlay_prediction
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
@@ -51,6 +53,7 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("initial_point_y", 0.5)
         self.declare_parameter("initial_point_normalized", True)
         self.declare_parameter("box_drag_min_pixels", 5.0)
+        self.declare_parameter("prompt_display_seconds", 0.5)
 
         self.bridge = CvBridge()
         self.prompt_mode = str(self.get_parameter("prompt_mode").value)
@@ -73,6 +76,7 @@ class Sam3NativeClipNode(Node):
         self.initial_point_y = float(self.get_parameter("initial_point_y").value)
         self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.box_drag_min_pixels = float(self.get_parameter("box_drag_min_pixels").value)
+        self.prompt_display_seconds = float(self.get_parameter("prompt_display_seconds").value)
         self.current_display_scale = 1.0
 
         self.latest_frame: np.ndarray | None = None
@@ -81,6 +85,7 @@ class Sam3NativeClipNode(Node):
         self.frames: list[np.ndarray] = []
         self.headers: list[Any] = []
         self.geometry_prompt: dict[str, Any] | None = None
+        self.prompt_display_start: float | None = None
         self.drag_start: tuple[float, float] | None = None
         self.result_times: deque[float] = deque(maxlen=60)
         self.state = "waiting_for_prompt" if self.prompt_mode != "text" else "capturing"
@@ -200,6 +205,7 @@ class Sam3NativeClipNode(Node):
         if self.latest_frame is None or self.latest_header is None:
             return
         self.geometry_prompt = prompt
+        self.prompt_display_start = stamp_to_seconds(self.latest_header.stamp)
         self.frames = [self.latest_frame.copy()]
         self.headers = [self.latest_header]
         self.state = "capturing"
@@ -300,7 +306,8 @@ class Sam3NativeClipNode(Node):
         header = self.headers[frame_index]
         mask = masks_to_mono8(masks, frame.shape[:2])
         overlay = overlay_prediction(frame, masks)
-        _draw_prompt(overlay, prompt)
+        if prompt_is_visible(self.prompt_display_start, header.stamp, self.prompt_display_seconds):
+            _draw_prompt(overlay, prompt)
         callback_total_ms = latency_ms
         end_to_end_ms = self._end_to_end_ms(header)
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
@@ -358,6 +365,7 @@ class Sam3NativeClipNode(Node):
             self.state = "waiting_for_prompt" if self.prompt_mode != "text" else "capturing"
             self.processing_started = False
             self.geometry_prompt = None
+            self.prompt_display_start = None
             self.frames = []
             self.headers = []
             self.drag_start = None

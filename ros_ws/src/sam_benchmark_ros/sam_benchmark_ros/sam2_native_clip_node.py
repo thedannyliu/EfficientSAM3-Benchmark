@@ -16,6 +16,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
+from sam_benchmark_ros.video_recording import prompt_is_visible, stamp_to_seconds
+
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.overlay import overlay_prediction
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
@@ -55,6 +57,7 @@ class Sam2NativeClipNode(Node):
         self.declare_parameter("initial_point_y", 0.5)
         self.declare_parameter("initial_point_normalized", True)
         self.declare_parameter("box_drag_min_pixels", 5.0)
+        self.declare_parameter("prompt_display_seconds", 0.5)
 
         self.bridge = CvBridge()
         self.clip_frames = int(self.get_parameter("clip_frames").value)
@@ -70,6 +73,7 @@ class Sam2NativeClipNode(Node):
         self.initial_point_y = float(self.get_parameter("initial_point_y").value)
         self.initial_point_normalized = bool(self.get_parameter("initial_point_normalized").value)
         self.box_drag_min_pixels = float(self.get_parameter("box_drag_min_pixels").value)
+        self.prompt_display_seconds = float(self.get_parameter("prompt_display_seconds").value)
         self.current_display_scale = 1.0
 
         self.latest_frame: np.ndarray | None = None
@@ -78,6 +82,7 @@ class Sam2NativeClipNode(Node):
         self.frames: list[np.ndarray] = []
         self.headers: list[Any] = []
         self.prompt: dict[str, Any] | None = None
+        self.prompt_display_start: float | None = None
         self.drag_start: tuple[float, float] | None = None
         self.state = "waiting_for_prompt"
         self.frame_index = 0
@@ -171,6 +176,7 @@ class Sam2NativeClipNode(Node):
         if self.latest_frame is None or self.latest_header is None:
             return
         self.prompt = prompt
+        self.prompt_display_start = stamp_to_seconds(self.latest_header.stamp)
         self.frames = [self.latest_frame.copy()]
         self.headers = [self.latest_header]
         self.state = "capturing"
@@ -247,7 +253,8 @@ class Sam2NativeClipNode(Node):
         frame = self.frames[frame_index]
         header = self.headers[frame_index]
         overlay = overlay_prediction(frame, masks)
-        _draw_prompt(overlay, prompt)
+        if prompt_is_visible(self.prompt_display_start, header.stamp, self.prompt_display_seconds):
+            _draw_prompt(overlay, prompt)
         mask = masks_to_mono8(masks, frame.shape[:2])
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         memory = cuda_memory_mb(self.torch_module)
@@ -303,6 +310,7 @@ class Sam2NativeClipNode(Node):
         if key == ord("r"):
             self.state = "waiting_for_prompt"
             self.prompt = None
+            self.prompt_display_start = None
             self.frames = []
             self.headers = []
             self.drag_start = None

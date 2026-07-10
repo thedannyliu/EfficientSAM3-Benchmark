@@ -14,6 +14,15 @@ def stamp_to_seconds(stamp: Any) -> float | None:
     return seconds
 
 
+def prompt_is_visible(start_seconds: float | None, stamp: Any, duration_seconds: float) -> bool:
+    if start_seconds is None or duration_seconds <= 0.0:
+        return False
+    current_seconds = stamp_to_seconds(stamp)
+    if current_seconds is None:
+        return False
+    return 0.0 <= current_seconds - start_seconds <= duration_seconds
+
+
 class TimedVideoRecorder:
     def __init__(
         self,

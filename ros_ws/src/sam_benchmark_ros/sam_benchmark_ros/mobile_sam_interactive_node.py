@@ -24,7 +24,7 @@ from sam_backend.streaming import (
     masks_to_mono8,
 )
 
-from .video_recording import TimedVideoRecorder, stamp_to_seconds
+from .video_recording import TimedVideoRecorder, prompt_is_visible, stamp_to_seconds
 
 
 class MobileSamInteractiveNode(Node):
@@ -52,6 +52,7 @@ class MobileSamInteractiveNode(Node):
         self.declare_parameter("bbox_min_area", 25)
         self.declare_parameter("bbox_scale", 1.2)
         self.declare_parameter("box_drag_min_pixels", 5.0)
+        self.declare_parameter("prompt_display_seconds", 0.5)
         self.declare_parameter("enable_display", True)
         self.declare_parameter("auto_start", False)
         self.declare_parameter("initial_point_x", 0.5)
@@ -73,6 +74,7 @@ class MobileSamInteractiveNode(Node):
         self.bbox_min_area = int(self.get_parameter("bbox_min_area").value)
         self.bbox_scale = float(self.get_parameter("bbox_scale").value)
         self.box_drag_min_pixels = float(self.get_parameter("box_drag_min_pixels").value)
+        self.prompt_display_seconds = float(self.get_parameter("prompt_display_seconds").value)
         self.enable_display = bool(self.get_parameter("enable_display").value)
         self.auto_start = bool(self.get_parameter("auto_start").value)
         self.initial_point_x = float(self.get_parameter("initial_point_x").value)
@@ -82,6 +84,7 @@ class MobileSamInteractiveNode(Node):
         self.pending_box: tuple[float, float, float, float] | None = None
         self.prompt_point: tuple[float, float] | None = None
         self.prompt_box: tuple[float, float, float, float] | None = None
+        self.prompt_display_start: float | None = None
         self.tracking_bbox: tuple[float, float, float, float] | None = None
         self.drag_start: tuple[float, float] | None = None
         self.latest_frame: np.ndarray | None = None
@@ -159,6 +162,7 @@ class MobileSamInteractiveNode(Node):
             self.pending_box = None
             self.prompt_point = point
             self.prompt_box = None
+            self.prompt_display_start = None
             self.latest_result = {"tracking_state": "pending_click", "point_x": point[0], "point_y": point[1]}
             self.get_logger().info(f"received point prompt x={point[0]:.1f} y={point[1]:.1f}")
         else:
@@ -166,6 +170,7 @@ class MobileSamInteractiveNode(Node):
             self.pending_box = box
             self.prompt_point = None
             self.prompt_box = box
+            self.prompt_display_start = None
             self.latest_result = {
                 "tracking_state": "pending_box",
                 "box_x1": box[0],
@@ -182,6 +187,8 @@ class MobileSamInteractiveNode(Node):
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
         self.latest_frame = frame
         prompt = self._next_prompt()
+        if prompt is not None and self.prompt_display_start is None:
+            self.prompt_display_start = stamp_to_seconds(msg.header.stamp)
         if prompt is None:
             mask = np.zeros(frame.shape[:2], dtype=np.uint8)
             overlay = _status_overlay(frame, "Click left image to initialize")
@@ -226,8 +233,9 @@ class MobileSamInteractiveNode(Node):
                 bbox=next_bbox,
                 prediction=prediction,
             )
-        _draw_prompt_marker(overlay, self.prompt_point)
-        _draw_prompt_box(overlay, self.prompt_box)
+        if prompt_is_visible(self.prompt_display_start, msg.header.stamp, self.prompt_display_seconds):
+            _draw_prompt_marker(overlay, self.prompt_point)
+            _draw_prompt_box(overlay, self.prompt_box)
         self.result_times.append(self.get_clock().now().nanoseconds / 1_000_000_000.0)
         result["tracking_fps"] = self._tracking_fps()
         self.recorder.write(overlay, stamp_to_seconds(msg.header.stamp))
@@ -252,6 +260,7 @@ class MobileSamInteractiveNode(Node):
             self.pending_box = None
             self.prompt_point = None
             self.prompt_box = None
+            self.prompt_display_start = None
             self.tracking_bbox = None
             self.drag_start = None
             self.latest_result = {"tracking_state": "waiting_for_click"}
