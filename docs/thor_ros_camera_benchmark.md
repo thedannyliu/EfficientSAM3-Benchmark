@@ -51,10 +51,10 @@ As of 2026-07-08, the checked-in ROS camera code has these behaviors:
 | MobileSAM | `mobile_sam_interactive_node` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
 | SAM1 ViT-B/L/H | `mobile_sam_interactive_node` with `backend:=sam1` | click point or left-button drag box in the OpenCV window | previous mask bbox becomes the next frame box prompt | implemented |
 | SAM2.1 / Efficient-SAM2.1 image backends | `sam_backend_node` | fixed parameter point only | independent per-frame image segmentation | implemented, not memory tracking |
-| SAM2.1 online memory tracking | `sam2_online_tracking_node` | click point or left-button drag box in the OpenCV window | initializes SAM2 memory from the prompt frame, then tracks each incoming ROS frame with memory encoder updates | implemented for online camera streams |
+| SAM2.1 online memory tracking | `sam2_online_tracking_node` | each point click or left-button drag adds an object | tracks multiple objects on each incoming ROS frame with per-object IDs and memory encoder updates | implemented for online camera streams |
 | SAM2.1 native video memory tracking | `sam2_native_clip_node` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | implemented for bounded clips |
-| EdgeTAM native video memory tracking | `sam2_online_tracking_node` or `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | click point or left-button drag box in the OpenCV window | online node tracks each incoming ROS frame; clip node captures a bounded clip, then runs EdgeTAM's SAM2-compatible memory predictor | implemented for online streams and bounded clips |
-| SAM2.1 + distilled TinyViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | click point or left-button drag box in the OpenCV window | same SAM2/EdgeTAM memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for online streams and bounded clips |
+| EdgeTAM native video memory tracking | `sam2_online_tracking_node` or `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | each point click or left-button drag adds an object | online node supports multiple objects by re-anchoring existing masks when the EdgeTAM object batch grows; clip node runs bounded tracking | implemented for online streams and bounded clips |
+| SAM2.1 + distilled TinyViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | each point click or left-button drag adds an object online | same multi-object SAM2 memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for online streams and bounded clips |
 | SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
 | SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt, click point, or left-button drag box in the OpenCV window | captures a bounded clip, then runs native `start_session` + `add_prompt` + `propagate_in_video` | implemented for bounded text/geometry clips |
 | SAM3 geometry prompt tracking | `sam3_native_clip_node` with `prompt_mode:=interactive`, `point`, or `box` | click point or left-button drag box in the OpenCV window | same SAM3 native video session, with geometry prompt data passed to `add_prompt` | implemented for bounded clips |
@@ -392,10 +392,11 @@ not make the saved MP4 play 4x faster.
 Point and box markers disappear after `prompt_display_seconds` (default 0.5)
 while the mask and tracking state remain visible.
 
-For **SAM2.1 online point/box memory tracking**, use the source topic from
-Terminal A. Click the OpenCV window for a point prompt, or left-button drag and
-release for a box prompt. A second click or drag resets the current object and
-starts a new SAM2 memory session from the current frame:
+For **SAM2.1 online multi-object point/box memory tracking**, use the source
+topic from Terminal A. Each click adds a new point-prompt object and each
+left-button drag/release adds a new box-prompt object. Existing objects keep
+tracking when another object is added. Press `r` to clear every object and
+start a new session:
 
 ```bash
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
@@ -460,6 +461,17 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p segmented_image_topic:=/segmented_image \
   -p overlay_topic:=/sam/overlay
 ```
+
+The same multi-object controls apply to official SAM2.1, every distilled
+TinyViT SAM2 encoder, and EdgeTAM. Overlays use a different color and an `ID`
+label for each object. `/sam/result_json` and recorder CSV rows include
+`object_count`, `object_ids`, and `prompt_object_id`.
+
+Official SAM2.1 and TinyViT add a new object while retaining the existing
+memory history. EdgeTAM's predictor does not permit increasing the object batch
+after propagation starts, so the online node re-anchors all existing objects
+from their latest masks on the current frame when a new object is added. This
+keeps all objects active, but EdgeTAM memory history restarts at that frame.
 
 For **SAM2.1 native point/box bounded clip memory tracking**, use the source
 topic from Terminal A. Click the OpenCV window for a point prompt, or

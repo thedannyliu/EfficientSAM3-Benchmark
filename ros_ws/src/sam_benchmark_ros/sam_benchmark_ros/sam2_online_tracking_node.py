@@ -16,7 +16,6 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
-from sam_backend.overlay import overlay_prediction
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
 from sam_backend.streaming import (
     left_panel_click_to_image_point,
@@ -88,7 +87,12 @@ class Sam2OnlineTrackingNode(Node):
         self.latest_header: Any | None = None
         self.latest_display: np.ndarray | None = None
         self.prompt: dict[str, Any] | None = None
+        self.prompt_object_id: int | None = None
         self.prompt_display_start: float | None = None
+        self.next_object_id = 1
+        self.object_prompts: OrderedDict[int, dict[str, Any]] = OrderedDict()
+        self.last_masks: np.ndarray | None = None
+        self.last_obj_ids: list[int] = []
         self.drag_start: tuple[float, float] | None = None
         self.state = "waiting_for_prompt"
         self.frame_index = -1
@@ -126,7 +130,7 @@ class Sam2OnlineTrackingNode(Node):
             f"listening on {image_topic}; click for point or drag for box; "
             f"input_queue_size={self.input_queue_size} "
             f"image_qos_reliability={self.get_parameter('image_qos_reliability').value} "
-            f"memory_history_size={self.memory_history_size}"
+            f"memory_history_size={self.memory_history_size}; each point or box adds an object"
         )
 
     def _image_qos(self) -> QoSProfile:
@@ -165,12 +169,15 @@ class Sam2OnlineTrackingNode(Node):
         self.drag_start = None
         box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
         if box is None:
-            if self._reset_and_start({"prompt_mode": "point", "point": point, "label": 1}):
-                self.get_logger().info(f"reset online SAM2 tracking from point x={point[0]:.1f} y={point[1]:.1f}")
+            obj_id = self._add_object({"prompt_mode": "point", "point": point, "label": 1})
+            if obj_id is not None:
+                self.get_logger().info(f"added object {obj_id} from point x={point[0]:.1f} y={point[1]:.1f}")
         else:
-            if self._reset_and_start({"prompt_mode": "box", "box": box}):
+            obj_id = self._add_object({"prompt_mode": "box", "box": box})
+            if obj_id is not None:
                 self.get_logger().info(
-                    f"reset online SAM2 tracking from box x1={box[0]:.1f} y1={box[1]:.1f} x2={box[2]:.1f} y2={box[3]:.1f}"
+                    f"added object {obj_id} from box x1={box[0]:.1f} y1={box[1]:.1f} "
+                    f"x2={box[2]:.1f} y2={box[3]:.1f}"
                 )
 
     def on_image(self, msg: Image) -> None:
@@ -185,7 +192,7 @@ class Sam2OnlineTrackingNode(Node):
                 point = (self.initial_point_x * float(width), self.initial_point_y * float(height))
             else:
                 point = (self.initial_point_x, self.initial_point_y)
-            self._reset_and_start({"prompt_mode": "point", "point": point, "label": 1})
+            self._add_object({"prompt_mode": "point", "point": point, "label": 1})
             return
 
         if self.state == "waiting_for_prompt":
@@ -197,11 +204,52 @@ class Sam2OnlineTrackingNode(Node):
 
         self._track_frame(frame, msg.header)
 
-    def _reset_and_start(self, prompt: dict[str, Any]) -> bool:
+    def _add_object(self, prompt: dict[str, Any]) -> int | None:
+        obj_id = self.next_object_id
+        if self.inference_state is None or self.state == "waiting_for_prompt":
+            return obj_id if self._reset_and_start(prompt, obj_id) else None
+        if self.latest_frame is None or self.latest_header is None or self.state != "tracking":
+            return None
+
+        self.state = "processing"
+        try:
+            self._sync()
+            start = perf_counter()
+            if self._uses_global_output_dict():
+                obj_ids, video_res_masks = self._restart_edgetam_with_new_object(prompt, obj_id)
+                frame_idx = 0
+            else:
+                assert self.inference_state is not None
+                frame_idx = self.frame_index
+                _, obj_ids, video_res_masks = self._apply_prompt(
+                    self.inference_state,
+                    frame_idx,
+                    obj_id,
+                    prompt,
+                )
+                self.predictor.propagate_in_video_preflight(self.inference_state)
+            self._sync()
+            add_prompt_ms = (perf_counter() - start) * 1000.0
+            self.prompt = prompt
+            self.prompt_object_id = obj_id
+            self.prompt_display_start = stamp_to_seconds(self.latest_header.stamp)
+            self.object_prompts[obj_id] = prompt
+            self.next_object_id += 1
+            masks = _binary_masks(video_res_masks)
+            self._publish_frame(frame_idx, masks, obj_ids, add_prompt_ms, add_prompt_ms, prompt)
+            self.state = "tracking"
+            return obj_id
+        except Exception:
+            self.state = "tracking"
+            self.get_logger().error(f"failed to add online SAM2 object {obj_id}:\n{traceback.format_exc()}")
+            return None
+
+    def _reset_and_start(self, prompt: dict[str, Any], obj_id: int = 1) -> bool:
         if self.latest_frame is None or self.latest_header is None:
             return False
         self.state = "processing"
         self.prompt = prompt
+        self.prompt_object_id = obj_id
         self.prompt_display_start = stamp_to_seconds(self.latest_header.stamp)
         self.frame_index = 0
         self.original_frames = {0: self.latest_frame.copy()}
@@ -211,25 +259,13 @@ class Sam2OnlineTrackingNode(Node):
         try:
             self._sync()
             start = perf_counter()
-            if prompt["prompt_mode"] == "box":
-                _, obj_ids, video_res_masks = self.predictor.add_new_points_or_box(
-                    inference_state=self.inference_state,
-                    frame_idx=0,
-                    obj_id=1,
-                    box=np.asarray(prompt["box"], dtype=np.float32),
-                )
-            else:
-                _, obj_ids, video_res_masks = self.predictor.add_new_points_or_box(
-                    inference_state=self.inference_state,
-                    frame_idx=0,
-                    obj_id=1,
-                    points=np.asarray([prompt["point"]], dtype=np.float32),
-                    labels=np.asarray([prompt.get("label", 1)], dtype=np.int32),
-                )
+            _, obj_ids, video_res_masks = self._apply_prompt(self.inference_state, 0, obj_id, prompt)
             self.predictor.propagate_in_video_preflight(self.inference_state)
             self._sync()
             add_prompt_ms = (perf_counter() - start) * 1000.0
             masks = _binary_masks(video_res_masks)
+            self.object_prompts = OrderedDict([(obj_id, prompt)])
+            self.next_object_id = obj_id + 1
             self._publish_frame(0, masks, obj_ids, add_prompt_ms, add_prompt_ms, self.prompt)
             self.state = "tracking"
             return True
@@ -238,6 +274,59 @@ class Sam2OnlineTrackingNode(Node):
             self.inference_state = None
             self.get_logger().error(f"failed to start online SAM2 tracking:\n{traceback.format_exc()}")
             return False
+
+    def _apply_prompt(
+        self,
+        inference_state: dict[str, Any],
+        frame_idx: int,
+        obj_id: int,
+        prompt: dict[str, Any],
+    ) -> tuple[Any, Any, Any]:
+        if prompt["prompt_mode"] == "box":
+            return self.predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=frame_idx,
+                obj_id=obj_id,
+                box=np.asarray(prompt["box"], dtype=np.float32),
+            )
+        return self.predictor.add_new_points_or_box(
+            inference_state=inference_state,
+            frame_idx=frame_idx,
+            obj_id=obj_id,
+            points=np.asarray([prompt["point"]], dtype=np.float32),
+            labels=np.asarray([prompt.get("label", 1)], dtype=np.int32),
+        )
+
+    def _restart_edgetam_with_new_object(
+        self,
+        prompt: dict[str, Any],
+        obj_id: int,
+    ) -> tuple[list[Any], Any]:
+        if self.latest_frame is None or self.latest_header is None:
+            raise RuntimeError("latest camera frame is unavailable")
+        if self.last_masks is None or len(self.last_obj_ids) != len(self.object_prompts):
+            raise RuntimeError("latest EdgeTAM per-object masks are unavailable")
+
+        inference_state = self._new_inference_state(self.latest_frame)
+        video_res_masks = None
+        obj_ids: list[Any] = []
+        for mask_index, existing_obj_id in enumerate(self.last_obj_ids):
+            mask = np.squeeze(self.last_masks[mask_index]).astype(bool)
+            _, obj_ids, video_res_masks = self.predictor.add_new_mask(
+                inference_state=inference_state,
+                frame_idx=0,
+                obj_id=existing_obj_id,
+                mask=mask,
+            )
+        _, obj_ids, video_res_masks = self._apply_prompt(inference_state, 0, obj_id, prompt)
+        self.predictor.propagate_in_video_preflight(inference_state)
+        self.inference_state = inference_state
+        self.frame_index = 0
+        self.original_frames = {0: self.latest_frame.copy()}
+        self.headers = {0: self.latest_header}
+        if video_res_masks is None:
+            raise RuntimeError("EdgeTAM did not return masks while adding an object")
+        return obj_ids, video_res_masks
 
     def _track_frame(self, frame: np.ndarray, header: Any) -> None:
         if self.inference_state is None or self.prompt is None:
@@ -414,7 +503,10 @@ class Sam2OnlineTrackingNode(Node):
         header = self.headers.get(frame_index, self.latest_header)
         if frame is None or header is None:
             return
-        overlay = overlay_prediction(frame, masks)
+        obj_id_values = [int(obj_id) for obj_id in obj_ids]
+        overlay = _overlay_multi_object(frame, masks, obj_id_values)
+        self.last_masks = np.asarray(masks).copy()
+        self.last_obj_ids = obj_id_values
         if prompt_is_visible(self.prompt_display_start, header.stamp, self.prompt_display_seconds):
             _draw_prompt(overlay, prompt)
         mask = masks_to_mono8(masks, frame.shape[:2])
@@ -428,6 +520,8 @@ class Sam2OnlineTrackingNode(Node):
             "backend": _backend_label(str(self.get_parameter("external_repo").value)),
             "stream_mode": "native_online",
             "tracking_state": "tracking",
+            "object_count": len(obj_id_values),
+            "prompt_object_id": self.prompt_object_id if self.prompt_object_id is not None else "",
             "prompt_mode": prompt["prompt_mode"],
             "point_x": prompt.get("point", ("", ""))[0] if prompt["prompt_mode"] == "point" else "",
             "point_y": prompt.get("point", ("", ""))[1] if prompt["prompt_mode"] == "point" else "",
@@ -437,12 +531,12 @@ class Sam2OnlineTrackingNode(Node):
             "box_y2": prompt.get("box", ("", "", "", ""))[3] if prompt["prompt_mode"] == "box" else "",
             "latency_ms": latency_ms,
             "init_state_ms": "" if frame_index else 0.0,
-            "add_prompt_ms": add_prompt_ms if frame_index == 0 else "",
+            "add_prompt_ms": add_prompt_ms,
             "callback_total_ms": latency_ms,
             "end_to_end_ms": self._end_to_end_ms(header),
             "tracking_fps": self._tracking_fps(),
             "mask_count": _safe_len(masks),
-            "object_ids": ",".join(str(obj_id) for obj_id in obj_ids),
+            "object_ids": ",".join(str(obj_id) for obj_id in obj_id_values),
             "model_kind": str(self.get_parameter("model_kind").value),
             "memory_history_size": self.memory_history_size,
             "queue_depth": self.input_queue_size,
@@ -479,7 +573,12 @@ class Sam2OnlineTrackingNode(Node):
     def _clear_state(self) -> None:
         self.state = "waiting_for_prompt"
         self.prompt = None
+        self.prompt_object_id = None
         self.prompt_display_start = None
+        self.next_object_id = 1
+        self.object_prompts = OrderedDict()
+        self.last_masks = None
+        self.last_obj_ids = []
         self.drag_start = None
         self.frame_index = -1
         self.inference_state = None
@@ -521,6 +620,7 @@ def _display_with_metrics(overlay_rgb: np.ndarray, result: dict[str, Any]) -> np
         f"Prompt: {result.get('prompt_mode', '')}",
         f"Frame: {result.get('frame_index', '')}",
         f"State: {result.get('tracking_state', '')}",
+        f"Objects: {result.get('object_count', '')}",
         f"Latency: {_format_float(result.get('latency_ms'))} ms",
         f"FPS: {_format_float(result.get('tracking_fps'))}",
         f"CUDA: {_format_float(result.get('cuda_allocated_mb'))} MB",
@@ -532,6 +632,57 @@ def _display_with_metrics(overlay_rgb: np.ndarray, result: dict[str, Any]) -> np
         cv2.putText(panel, line, (16, y), cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), 1, cv2.LINE_AA)
         y += 30 if idx == 0 else 24
     return np.hstack([overlay_bgr, panel])
+
+
+_OBJECT_COLORS = [
+    (30, 220, 80),
+    (255, 80, 30),
+    (40, 150, 255),
+    (230, 210, 40),
+    (210, 70, 230),
+    (50, 220, 220),
+]
+
+
+def _overlay_multi_object(
+    frame_rgb: np.ndarray,
+    masks: Any,
+    obj_ids: list[int],
+    alpha: float = 0.45,
+) -> np.ndarray:
+    overlay = frame_rgb.copy()
+    values = np.asarray(masks)
+    if values.ndim == 4 and values.shape[1] == 1:
+        values = values[:, 0]
+    elif values.ndim == 2:
+        values = values[None, ...]
+    if values.ndim != 3:
+        return overlay
+
+    height, width = frame_rgb.shape[:2]
+    for index, obj_id in enumerate(obj_ids):
+        if index >= len(values):
+            break
+        mask = values[index].astype(bool)
+        if mask.shape != (height, width):
+            mask = cv2.resize(mask.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST).astype(bool)
+        if not mask.any():
+            continue
+        color = _OBJECT_COLORS[index % len(_OBJECT_COLORS)]
+        color_layer = np.empty_like(overlay)
+        color_layer[:] = color
+        overlay = np.where(
+            mask[..., None],
+            (overlay * (1.0 - alpha) + color_layer * alpha).astype(np.uint8),
+            overlay,
+        )
+        ys, xs = np.nonzero(mask)
+        label_x = int(xs.min())
+        label_y = max(18, int(ys.min()) - 6)
+        label = f"ID {obj_id}"
+        cv2.putText(overlay, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4, cv2.LINE_AA)
+        cv2.putText(overlay, label, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+    return overlay
 
 
 def main() -> None:
