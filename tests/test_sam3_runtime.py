@@ -36,6 +36,22 @@ class Sam3RuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "square matrix"):
             generic_nms_torch(torch.zeros(2, 3), torch.zeros(2))
 
+    def test_connected_components_preserves_empty_batch(self) -> None:
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is not installed")
+
+        from sam_backend.sam3_runtime import connected_components_cpu_safe
+
+        values = torch.zeros((0, 1, 32, 32), dtype=torch.uint8)
+        labels, counts = connected_components_cpu_safe(values)
+
+        self.assertEqual(labels.shape, values.shape)
+        self.assertEqual(counts.shape, values.shape)
+        self.assertEqual(labels.dtype, torch.int64)
+        self.assertEqual(counts.dtype, torch.int64)
+
 
 if __name__ == "__main__":
     unittest.main()
