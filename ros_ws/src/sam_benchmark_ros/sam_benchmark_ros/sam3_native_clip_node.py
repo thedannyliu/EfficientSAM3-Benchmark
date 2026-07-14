@@ -302,6 +302,7 @@ class Sam3NativeClipNode(Node):
             cv2.imwrite(str(path), cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
 
         session_id = None
+        completed = False
         try:
             self._sync()
             start_init = perf_counter()
@@ -334,11 +335,15 @@ class Sam3NativeClipNode(Node):
                     continue
                 masks = _sam3_output_masks(response.get("outputs", {}), self.frames[frame_index].shape[:2])
                 self._publish_frame(frame_index, masks, latency_ms, init_ms, add_prompt_ms, prompt_record)
+            completed = True
         finally:
             if session_id is not None:
                 self.predictor.handle_request({"type": "close_session", "session_id": session_id})
             self.state = "done"
-            self.get_logger().info("native SAM3 clip tracking complete; click or drag again to reset and run another clip")
+            if completed:
+                self.get_logger().info(
+                    "native SAM3 clip tracking complete; click or drag again to reset and run another clip"
+                )
 
     def _add_prompt(self, session_id: str) -> dict[str, Any]:
         if self.prompt_mode == "text":
