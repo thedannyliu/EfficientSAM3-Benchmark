@@ -31,6 +31,8 @@ class SamBackendNode(Node):
         self.declare_parameter("model_config", "")
         self.declare_parameter("external_repo", "")
         self.declare_parameter("mobile_sam_model_type", "vit_t")
+        self.declare_parameter("instinctsam_text_checkpoint", "")
+        self.declare_parameter("instinctsam_vision_checkpoint", "")
         self.declare_parameter("prompt_mode", "auto")
         self.declare_parameter("prompt", "person")
         self.declare_parameter("prompts", "")
@@ -58,6 +60,12 @@ class SamBackendNode(Node):
         model_config = self.get_parameter("model_config").value or None
         external_repo = self.get_parameter("external_repo").value or None
         mobile_sam_model_type = self.get_parameter("mobile_sam_model_type").value
+        instinctsam_text_checkpoint = (
+            self.get_parameter("instinctsam_text_checkpoint").value or None
+        )
+        instinctsam_vision_checkpoint = (
+            self.get_parameter("instinctsam_vision_checkpoint").value or None
+        )
         self.backend_name = str(backend_name)
         self.prompt_mode = self._resolve_prompt_mode(str(self.get_parameter("prompt_mode").value))
         self.prompt_text = str(self.get_parameter("prompt").value)
@@ -84,6 +92,8 @@ class SamBackendNode(Node):
                 model_config=model_config,
                 external_repo=external_repo,
                 mobile_sam_model_type=mobile_sam_model_type,
+                instinctsam_text_checkpoint=instinctsam_text_checkpoint,
+                instinctsam_vision_checkpoint=instinctsam_vision_checkpoint,
             )
         )
         self.torch_module = getattr(self.backend, "torch", None)

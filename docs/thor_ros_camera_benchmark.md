@@ -1872,7 +1872,125 @@ initialize tracking with a point prompt, or left-button drag and release to
 initialize with a box prompt. The node uses the previous predicted mask bbox as
 the next frame's box prompt.
 
-## 12. Read The ROS Profiling Output
+## 12. InstinctSAM GIText-Large And Hiera-L Camera Comparison
+
+These two InstinctSAM files are component checkpoints. Keep the official SAM3
+checkpoint because it supplies the remaining SAM3 decoder and segmentation
+heads:
+
+```text
+checkpoints/
+|-- sam3/
+|   `-- sam3.pt
+`-- instinctsam/
+    |-- gitext_large_v4.pt
+    `-- hiera_large_concept_trunk.pt
+```
+
+The GitHub source is accessible over SSH and may be cloned for reference. The
+camera backend below contains the required adapter and does not import this
+clone at runtime:
+
+```bash
+git clone git@github.com:william-Dic/InstinctSAM.git external/InstinctSAM
+```
+
+Accept access to the gated `GM717/InstinctSAM-ViT-B` Hugging Face repository,
+authenticate on Thor, and download both components:
+
+```bash
+source scripts/source_thor_ros_env.sh
+huggingface-cli login
+bash scripts/download_instinctsam_compressed_checkpoints.sh
+```
+
+After pulling this change, rebuild and source the ROS workspace:
+
+```bash
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+colcon build --symlink-install --packages-select sam_benchmark_ros
+cd ..
+source scripts/source_thor_ros_env.sh
+```
+
+Keep the RealSense publisher running on
+`/camera/camera/color/image_raw`. Run exactly one of the following backend
+commands at a time.
+
+Official SAM3 baseline:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=sam3 \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p device:=cuda \
+  -p autocast_dtype:=float16 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+InstinctSAM LiteText with GIText-large and the official SAM3 vision encoder:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=instinctsam \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p instinctsam_text_checkpoint:=checkpoints/instinctsam/gitext_large_v4.pt \
+  -p device:=cuda \
+  -p autocast_dtype:=float16 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+InstinctSAM Hiera-L compressed vision with the official SAM3 text encoder:
+
+```bash
+ros2 run sam_benchmark_ros sam_backend_node --ros-args \
+  -p backend:=instinctsam \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p instinctsam_vision_checkpoint:=checkpoints/instinctsam/hiera_large_concept_trunk.pt \
+  -p device:=cuda \
+  -p autocast_dtype:=float16 \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Use the same UI for all three runs:
+
+```bash
+ros2 run sam_benchmark_ros live_viewer_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p segmented_image_topic:=/segmented_image \
+  -p result_topic:=/sam/result_json \
+  -p text_prompt_topic:=/sam/text_prompt \
+  -p window_name:="InstinctSAM vs SAM3"
+```
+
+Enter a new text prompt in the viewer and press Enter. The backend receives it
+through `/sam/text_prompt` without a restart. These three commands perform
+independent per-frame text-prompt image segmentation and expose comparable
+latency in the viewer. They are not SAM3 native memory-tracking runs.
+
+## 13. Read The ROS Profiling Output
 
 Per-frame CSV:
 
@@ -1916,7 +2034,7 @@ Overlay MP4:
 overlays/thor/ros_camera/<model>/overlay.mp4
 ```
 
-## 13. Benchmark Checklist
+## 14. Benchmark Checklist
 
 For each ROS camera run, record:
 

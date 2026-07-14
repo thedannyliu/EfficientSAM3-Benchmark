@@ -45,6 +45,8 @@ class BackendConfig:
     model_config: str | None = None
     external_repo: str | None = None
     mobile_sam_model_type: str = "vit_t"
+    instinctsam_text_checkpoint: str | None = None
+    instinctsam_vision_checkpoint: str | None = None
 
 
 class SegmentationBackend(Protocol):
@@ -82,6 +84,26 @@ class Sam3ImageBackend:
                 checkpoint_path=self.config.checkpoint_path,
                 device=self.config.device,
                 enable_inst_interactivity=self.config.enable_inst_interactivity,
+            )
+        elif self.config.backend == "instinctsam":
+            if not self.config.checkpoint_path:
+                raise ValueError("--checkpoint-path is required for InstinctSAM SAM3 heads")
+            if not (self.config.instinctsam_text_checkpoint or self.config.instinctsam_vision_checkpoint):
+                raise ValueError("InstinctSAM requires a text or vision component checkpoint")
+            self.model = builder.build_sam3_image_model(
+                checkpoint_path=self.config.checkpoint_path,
+                load_from_HF=False,
+                device=self.config.device,
+                enable_inst_interactivity=self.config.enable_inst_interactivity,
+            )
+            from .instinctsam import install_instinctsam_components
+
+            install_instinctsam_components(
+                self.model,
+                builder,
+                text_checkpoint=self.config.instinctsam_text_checkpoint,
+                vision_checkpoint=self.config.instinctsam_vision_checkpoint,
+                device=self.config.device or "cuda",
             )
         elif self.config.backend == "efficientsam3":
             if not self.config.checkpoint_path:
@@ -296,7 +318,7 @@ def create_backend(config: BackendConfig) -> SegmentationBackend:
     config = resolve_backend_config(config)
     if config.backend == "null":
         return NullBackend()
-    if config.backend in {"sam3", "efficientsam3"}:
+    if config.backend in {"sam3", "efficientsam3", "instinctsam"}:
         return Sam3ImageBackend(config)
     if config.backend in {"sam2", "efficient-sam2"}:
         return Sam2PointImageBackend(config, "sam2")
@@ -333,6 +355,8 @@ def resolve_backend_config(config: BackendConfig) -> BackendConfig:
         model_config=config.model_config,
         external_repo=config.external_repo,
         mobile_sam_model_type=config.mobile_sam_model_type,
+        instinctsam_text_checkpoint=config.instinctsam_text_checkpoint,
+        instinctsam_vision_checkpoint=config.instinctsam_vision_checkpoint,
     )
 
 

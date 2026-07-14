@@ -1,8 +1,194 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
+
+
+def install_instinctsam_components(
+    model: Any,
+    builder: Any,
+    *,
+    text_checkpoint: str | None,
+    vision_checkpoint: str | None,
+    device: str,
+) -> None:
+    """Graft official InstinctSAM component checkpoints into a SAM3 image model."""
+    if text_checkpoint:
+        model.backbone.language_backbone = build_gitext(
+            checkpoint=Path(text_checkpoint),
+            bpe_path=_builder_bpe_path(builder),
+            device=device,
+        )
+    if vision_checkpoint:
+        patch_efficientsam3_hiera(builder)
+        trunk = builder._create_student_vision_backbone("hiera", "large").trunk
+        load_hiera_trunk_checkpoint(trunk, Path(vision_checkpoint), builder.torch)
+        model.backbone.vision_backbone.trunk = trunk.to(device).eval()
+
+
+def build_gitext(
+    *,
+    checkpoint: Path,
+    bpe_path: str,
+    device: str,
+    context_length: int = 16,
+) -> Any:
+    import torch
+    import torch.nn as nn
+    from sam3.model.tokenizer_ve import SimpleTokenizer
+
+    class CleanTextEncoder(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            dim = 512
+            self.context_length = context_length
+            self.tokenizer = SimpleTokenizer(bpe_path=bpe_path)
+            self.token_embedding = nn.Embedding(49408, dim)
+            self.pos_embedding = nn.Parameter(torch.empty(77, dim))
+            layer = nn.TransformerEncoderLayer(
+                d_model=dim,
+                nhead=8,
+                dim_feedforward=dim * 4,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            )
+            self.transformer = nn.TransformerEncoder(layer, num_layers=12)
+            self.ln_final = nn.LayerNorm(dim)
+            self.projector = nn.Linear(dim, 256)
+
+        def set_context_length(self, value: int) -> None:
+            self.context_length = value
+
+        def forward(self, text: Any, input_boxes: Any = None, device: Any = None) -> tuple[Any, Any, Any]:
+            del input_boxes
+            tokens = self.tokenizer(text, context_length=self.context_length).to(device)
+            embeddings = self.token_embedding(tokens) * math.sqrt(512)
+            encoded = embeddings + self.pos_embedding[: tokens.shape[1]].unsqueeze(0)
+            padding = tokens == 0
+            encoded = self.transformer(encoded, src_key_padding_mask=padding)
+            memory = self.projector(self.ln_final(encoded))
+            return padding, memory.transpose(0, 1), embeddings.transpose(0, 1)
+
+    encoder = CleanTextEncoder()
+    state = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    if isinstance(state, dict):
+        state = state.get("model", state.get("state_dict", state))
+    result = encoder.load_state_dict(state, strict=False)
+    if result.missing_keys or result.unexpected_keys:
+        raise RuntimeError(
+            f"GIText checkpoint is incompatible: missing={len(result.missing_keys)} "
+            f"unexpected={len(result.unexpected_keys)}"
+        )
+    return encoder.to(device).eval()
+
+
+def patch_efficientsam3_hiera(builder: Any) -> None:
+    """Add InstinctSAM's SAM2 Hiera-L student trunk to EfficientSAM3."""
+    if getattr(builder, "_sam_bench_instinctsam_hiera", False):
+        return
+    if not hasattr(builder, "_create_student_vision_backbone"):
+        raise RuntimeError(
+            "InstinctSAM Hiera-L requires an EfficientSAM3 model_builder; "
+            "use external/efficientsam3"
+        )
+    original = builder._create_student_vision_backbone
+
+    def create_student_vision_backbone(
+        backbone_type: str,
+        model_name: str,
+        compile_mode: str | None = None,
+        enable_inst_interactivity: bool = True,
+    ) -> Any:
+        if backbone_type != "hiera":
+            return original(
+                backbone_type,
+                model_name,
+                compile_mode=compile_mode,
+                enable_inst_interactivity=enable_inst_interactivity,
+            )
+        if model_name != "large":
+            raise ValueError("InstinctSAM Hiera supports model_name='large' only")
+
+        import timm
+
+        nn = builder.nn
+        position_encoding = builder._create_position_encoding(precompute_resolution=1008)
+        backbone = timm.create_model(
+            "sam2_hiera_large",
+            pretrained=False,
+            features_only=True,
+            out_indices=(2,),
+        )
+
+        class HieraTrunkWrapper(nn.Module):
+            def __init__(self, wrapped: Any) -> None:
+                super().__init__()
+                self.model = wrapped
+                self.channel_list = [wrapped.feature_info.channels()[-1]]
+
+            def forward(self, x: Any) -> Any:
+                x = x[0] if isinstance(x, list) else x
+                if x.shape[-2:] != (1152, 1152):
+                    x = builder.F.interpolate(
+                        x,
+                        size=(1152, 1152),
+                        mode="bilinear",
+                        align_corners=False,
+                    )
+                return self.model(x)[-1]
+
+        wrapped_backbone = HieraTrunkWrapper(backbone)
+        student_encoder = builder.ImageStudentEncoder(
+            backbone=wrapped_backbone,
+            in_channels=wrapped_backbone.channel_list[0],
+            embed_dim=1024,
+            embed_size=72,
+            img_size=1008,
+        )
+        student_encoder.channel_list = [1024]
+
+        class ListWrapper(nn.Module):
+            def __init__(self, wrapped: Any) -> None:
+                super().__init__()
+                self.model = wrapped
+                self.channel_list = wrapped.channel_list
+
+            def forward(self, x: Any) -> list[Any]:
+                return [self.model(x)]
+
+        trunk = ListWrapper(student_encoder)
+        if compile_mode:
+            trunk = builder.torch.compile(trunk, mode=compile_mode)
+        return builder._create_vit_neck(
+            position_encoding,
+            trunk,
+            enable_inst_interactivity=enable_inst_interactivity,
+        )
+
+    builder._create_student_vision_backbone = create_student_vision_backbone
+    builder._sam_bench_instinctsam_hiera = True
+
+
+def load_hiera_trunk_checkpoint(trunk: Any, checkpoint: Path, torch_module: Any) -> tuple[int, int]:
+    payload = torch_module.load(checkpoint, map_location="cpu", weights_only=False)
+    state = payload.get("trunk", payload) if isinstance(payload, dict) else payload
+    prefix = "backbone.vision_backbone.trunk."
+    state = {(key[len(prefix):] if key.startswith(prefix) else key): value for key, value in state.items()}
+    target = trunk.state_dict()
+    compatible = {key: value for key, value in state.items() if key in target and value.shape == target[key].shape}
+    if len(compatible) < int(len(target) * 0.9):
+        raise RuntimeError(
+            f"Hiera-L checkpoint matched only {len(compatible)}/{len(target)} trunk tensors"
+        )
+    result = trunk.load_state_dict(compatible, strict=False)
+    return len(compatible), len(result.missing_keys)
+
+
+def _builder_bpe_path(builder: Any) -> str:
+    return str(Path(builder.__file__).resolve().parent.parent / "assets" / "bpe_simple_vocab_16e6.txt.gz")
 
 
 def patch_efficientsam3_vit_base(builder: Any) -> None:

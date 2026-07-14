@@ -73,6 +73,25 @@ class BackendConfigTest(unittest.TestCase):
         self.assertEqual(config.backbone_type, "tinyvit")
         self.assertEqual(config.model_name, "11m")
 
+    def test_preserves_instinctsam_component_checkpoints(self) -> None:
+        config = resolve_backend_config(
+            BackendConfig(
+                backend="instinctsam",
+                checkpoint_path="checkpoints/sam3/sam3.pt",
+                instinctsam_text_checkpoint="checkpoints/instinctsam/gitext_large_v4.pt",
+                instinctsam_vision_checkpoint="checkpoints/instinctsam/hiera_large_concept_trunk.pt",
+            )
+        )
+
+        self.assertEqual(
+            config.instinctsam_text_checkpoint,
+            "checkpoints/instinctsam/gitext_large_v4.pt",
+        )
+        self.assertEqual(
+            config.instinctsam_vision_checkpoint,
+            "checkpoints/instinctsam/hiera_large_concept_trunk.pt",
+        )
+
     def test_resolves_autocast_dtype_aliases(self) -> None:
         class TorchModule:
             bfloat16 = "bf16"
