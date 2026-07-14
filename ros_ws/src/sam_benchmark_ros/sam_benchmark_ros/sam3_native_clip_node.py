@@ -11,6 +11,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -58,6 +59,7 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("initial_point_normalized", True)
         self.declare_parameter("box_drag_min_pixels", 5.0)
         self.declare_parameter("prompt_display_seconds", 0.5)
+        self.declare_parameter("image_qos_reliability", "best_effort")
 
         self.bridge = CvBridge()
         self.prompt_mode = str(self.get_parameter("prompt_mode").value)
@@ -158,7 +160,8 @@ class Sam3NativeClipNode(Node):
         self.mask_publisher = self.create_publisher(Image, mask_topic, 10)
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
-        self.subscription = self.create_subscription(Image, image_topic, self.on_image, 1)
+        image_qos = _image_qos(str(self.get_parameter("image_qos_reliability").value))
+        self.subscription = self.create_subscription(Image, image_topic, self.on_image, image_qos)
         text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
         self.text_prompt_subscription = self.create_subscription(String, text_prompt_topic, self.on_text_prompt, 10)
         self.text_prompt_publisher = self.create_publisher(String, text_prompt_topic, 10)
@@ -563,6 +566,22 @@ def _safe_len(value: object) -> int:
         return len(value)  # type: ignore[arg-type]
     except TypeError:
         return 0
+
+
+def _image_qos(reliability: str) -> QoSProfile:
+    normalized = reliability.strip().lower()
+    if normalized == "best_effort":
+        policy = ReliabilityPolicy.BEST_EFFORT
+    elif normalized == "reliable":
+        policy = ReliabilityPolicy.RELIABLE
+    else:
+        raise ValueError("image_qos_reliability must be 'best_effort' or 'reliable'")
+    return QoSProfile(
+        reliability=policy,
+        durability=DurabilityPolicy.VOLATILE,
+        history=HistoryPolicy.KEEP_LAST,
+        depth=3,
+    )
 
 
 def _stamp_delta_ms(start_sec: int, start_nanosec: int, end_sec: int, end_nanosec: int) -> float:

@@ -2017,6 +2017,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p version:=sam3 \
   -p instinctsam_text_checkpoint:=checkpoints/instinctsam/gitext_large_v4.pt \
   -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
@@ -2036,6 +2037,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p version:=sam3 \
   -p instinctsam_vision_checkpoint:=checkpoints/instinctsam/hiera_large_concept_trunk.pt \
   -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
@@ -2054,6 +2056,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p checkpoint_path:=checkpoints/sam3/sam3.pt \
   -p version:=sam3 \
   -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
