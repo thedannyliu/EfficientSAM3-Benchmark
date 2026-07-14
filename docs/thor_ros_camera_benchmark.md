@@ -677,13 +677,14 @@ ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
 
 ### Terminal C: Viewer For Non-Interactive Models
 
-Skip Terminal C for MobileSAM and SAM1-H because their node already opens the
-interactive overlay window. For SAM3, EfficientSAM3, SAM3 native clip tracking,
-and YOLOE, open the viewer:
+Skip Terminal C for MobileSAM, SAM1-H, and SAM3 native clip tracking because
+their nodes already open an interactive overlay window. For SAM3,
+EfficientSAM3, and YOLOE, open the viewer:
 
 ```bash
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
+  -p image_qos_reliability:=best_effort \
   -p segmented_image_topic:=/segmented_image \
   -p result_topic:=/sam/result_json \
   -p display_max_width:=1600 \
@@ -697,6 +698,13 @@ on the right, so metrics do not cover the object. Set `record_overlay:=true` to
 save the overlay MP4. The viewer preserves ROS timestamp timing by default, so
 if the model only produces 7.5 FPS of overlays from a 30 FPS stream, the saved
 MP4 keeps the original duration by repeating frames as needed.
+
+Before the first messages arrive, the window remains responsive and reports
+whether it is waiting for the camera image or the segmented image. RealSense
+normally publishes sensor images with best-effort QoS, so keep
+`image_qos_reliability:=best_effort` on both `sam_backend_node` and
+`live_viewer_node`. Use `reliable` only when the image publisher explicitly
+offers reliable QoS.
 
 ### Common Topic And Display Checks
 
@@ -1251,8 +1259,8 @@ ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
-For SAM3 per-frame, SAM3 native clip tracking, EfficientSAM3, or YOLOE,
-Terminal C opens the live overlay viewer:
+For SAM3 per-frame, EfficientSAM3, or YOLOE, Terminal C opens the live overlay
+viewer. SAM3 native clip tracking has its own window:
 
 ```bash
 cd EfficientSAM3-Benchmark
@@ -1260,6 +1268,7 @@ source scripts/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
   -p segmented_image_topic:=/segmented_image \
   -p result_topic:=/sam/result_json \
   -p display_max_width:=1600 \

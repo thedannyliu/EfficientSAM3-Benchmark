@@ -13,6 +13,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -33,6 +34,7 @@ class LiveViewerNode(Node):
         self.declare_parameter("display_fps", 30.0)
         self.declare_parameter("display_scale", 1.0)
         self.declare_parameter("display_max_width", 0)
+        self.declare_parameter("image_qos_reliability", "best_effort")
         self.declare_parameter("record_overlay", False)
         self.declare_parameter("overlay_video_output", "overlays/ros/live_viewer_overlay.mp4")
         self.declare_parameter("overlay_video_fps", 15.0)
@@ -64,7 +66,8 @@ class LiveViewerNode(Node):
         segmented_image_topic = self.get_parameter("segmented_image_topic").value
         result_topic = self.get_parameter("result_topic").value
         text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
-        self.image_subscription = self.create_subscription(Image, image_topic, self.on_image, 10)
+        image_qos = _image_qos(str(self.get_parameter("image_qos_reliability").value))
+        self.image_subscription = self.create_subscription(Image, image_topic, self.on_image, image_qos)
         self.segmented_subscription = self.create_subscription(Image, segmented_image_topic, self.on_segmented, 10)
         self.result_subscription = self.create_subscription(String, result_topic, self.on_result, 10)
         self.text_prompt_publisher = self.create_publisher(String, text_prompt_topic, 10)
@@ -73,6 +76,7 @@ class LiveViewerNode(Node):
         self.get_logger().info(
             f"viewing {image_topic} beside {segmented_image_topic}; metrics from {result_topic}; "
             f"display_scale={self.display_scale:g} display_max_width={self.display_max_width}; "
+            f"image_qos={self.get_parameter('image_qos_reliability').value}; "
             f"record_overlay={self.recorder.enabled}"
         )
 
@@ -91,22 +95,28 @@ class LiveViewerNode(Node):
             self.get_logger().warning("failed to parse result JSON")
 
     def display(self) -> None:
-        if self.latest_image is None or self.latest_segmented is None:
-            return
-        overlay = self.latest_segmented
-        if self.latest_image.shape[:2] != overlay.shape[:2]:
-            overlay = cv2.resize(
-                overlay,
-                (self.latest_image.shape[1], self.latest_image.shape[0]),
-                interpolation=cv2.INTER_LINEAR,
+        if self.latest_image is None:
+            combined = _waiting_display("Waiting for camera image")
+        elif self.latest_segmented is None:
+            combined = _waiting_display(
+                "Waiting for segmented image",
+                image_rgb=self.latest_image,
             )
-        self.recorder.write(overlay, self.latest_segmented_stamp)
-        combined = _display_with_metrics(
-            overlay,
-            viewer_fps=self._viewer_fps(),
-            metrics=self.latest_metrics,
-            gpu_util=self.gpu_monitor.gpu_util,
-        )
+        else:
+            overlay = self.latest_segmented
+            if self.latest_image.shape[:2] != overlay.shape[:2]:
+                overlay = cv2.resize(
+                    overlay,
+                    (self.latest_image.shape[1], self.latest_image.shape[0]),
+                    interpolation=cv2.INTER_LINEAR,
+                )
+            self.recorder.write(overlay, self.latest_segmented_stamp)
+            combined = _display_with_metrics(
+                overlay,
+                viewer_fps=self._viewer_fps(),
+                metrics=self.latest_metrics,
+                gpu_util=self.gpu_monitor.gpu_util,
+            )
         combined = _scale_display(combined, self.display_scale, self.display_max_width)
         self.text_prompt_editor.draw(combined)
         cv2.imshow(self.window_name, combined)
@@ -200,6 +210,31 @@ def _display_with_metrics(
         ],
     )
     return np.hstack([overlay_bgr, panel])
+
+
+def _waiting_display(status: str, image_rgb: np.ndarray | None = None) -> np.ndarray:
+    if image_rgb is None:
+        display = np.full((480, 640, 3), 24, dtype=np.uint8)
+    else:
+        display = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    _draw_text(display, status, (20, 40), scale=0.7)
+    return display
+
+
+def _image_qos(reliability: str) -> QoSProfile:
+    normalized = reliability.strip().lower()
+    if normalized == "best_effort":
+        policy = ReliabilityPolicy.BEST_EFFORT
+    elif normalized == "reliable":
+        policy = ReliabilityPolicy.RELIABLE
+    else:
+        raise ValueError("image_qos_reliability must be 'best_effort' or 'reliable'")
+    return QoSProfile(
+        reliability=policy,
+        durability=DurabilityPolicy.VOLATILE,
+        history=HistoryPolicy.KEEP_LAST,
+        depth=3,
+    )
 
 
 def _metrics_panel(height: int, lines: list[str], width: int = 360) -> np.ndarray:

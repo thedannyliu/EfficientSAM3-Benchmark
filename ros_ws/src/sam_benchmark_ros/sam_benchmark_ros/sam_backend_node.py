@@ -6,6 +6,7 @@ from time import perf_counter
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -46,6 +47,7 @@ class SamBackendNode(Node):
         self.declare_parameter("overlay_topic", "")
         self.declare_parameter("mask_topic", "")
         self.declare_parameter("segmented_image_topic", "")
+        self.declare_parameter("image_qos_reliability", "best_effort")
 
         backend_name = self.get_parameter("backend").value
         checkpoint_path = self.get_parameter("checkpoint_path").value or None
@@ -111,7 +113,8 @@ class SamBackendNode(Node):
         self.segmented_image_publisher = (
             self.create_publisher(Image, segmented_image_topic, 10) if segmented_image_topic else None
         )
-        self.subscription = self.create_subscription(Image, image_topic, self.on_image, 10)
+        image_qos = _image_qos(str(self.get_parameter("image_qos_reliability").value))
+        self.subscription = self.create_subscription(Image, image_topic, self.on_image, image_qos)
         self.text_prompt_subscription = None
         if self.prompt_mode == "text":
             text_prompt_topic = str(self.get_parameter("text_prompt_topic").value)
@@ -123,7 +126,10 @@ class SamBackendNode(Node):
                     10,
                 )
                 self.get_logger().info(f"accepting runtime text prompts on {text_prompt_topic}")
-        self.get_logger().info(f"listening on {image_topic}, publishing {result_topic}")
+        self.get_logger().info(
+            f"listening on {image_topic} with "
+            f"{self.get_parameter('image_qos_reliability').value} QoS, publishing {result_topic}"
+        )
         if overlay_topic:
             self.get_logger().info(f"publishing overlays on {overlay_topic}")
         if mask_topic:
@@ -231,6 +237,22 @@ def _safe_len(value: object) -> int:
         return len(value)  # type: ignore[arg-type]
     except TypeError:
         return 0
+
+
+def _image_qos(reliability: str) -> QoSProfile:
+    normalized = reliability.strip().lower()
+    if normalized == "best_effort":
+        policy = ReliabilityPolicy.BEST_EFFORT
+    elif normalized == "reliable":
+        policy = ReliabilityPolicy.RELIABLE
+    else:
+        raise ValueError("image_qos_reliability must be 'best_effort' or 'reliable'")
+    return QoSProfile(
+        reliability=policy,
+        durability=DurabilityPolicy.VOLATILE,
+        history=HistoryPolicy.KEEP_LAST,
+        depth=3,
+    )
 
 
 def _stamp_delta_ms(start_sec: int, start_nanosec: int, end_sec: int, end_nanosec: int) -> float:
