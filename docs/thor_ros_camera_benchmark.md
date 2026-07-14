@@ -2075,10 +2075,11 @@ prompt, and press Enter to discard the old clip state and capture a new clip
 with the updated prompt. Do not run `live_viewer_node` for these commands.
 
 Thor reports CUDA architecture `sm_110a`. Triton's bundled `ptxas` may reject
-that target while compiling SAM3 mask NMS. `nms_backend:=torch` uses the same
-score ordering and IoU suppression rule through regular device-resident
-PyTorch operations and avoids that Triton kernel. `nms_backend:=auto` also
-selects this fallback automatically on compute capability 10 or newer; use
+that target while compiling SAM3 mask NMS or connected components.
+`nms_backend:=torch` uses the same score ordering and IoU suppression rule
+through regular device-resident PyTorch operations, and uses SAM3's official
+CPU connected-components fallback for hole filling. `nms_backend:=auto` also
+selects these fallbacks automatically on compute capability 10 or newer; use
 `native` only where the installed Triton/PTXAS supports the GPU architecture.
 
 ## 13. Read The ROS Profiling Output

@@ -4,7 +4,7 @@ from typing import Any
 
 
 def configure_sam3_nms(torch_module: Any, backend: str = "auto") -> str:
-    """Select a SAM3 mask NMS implementation without editing the external repo."""
+    """Select Thor-safe SAM3 perflib implementations without editing the external repo."""
     normalized = backend.strip().lower()
     if normalized not in {"auto", "native", "torch"}:
         raise ValueError("nms_backend must be one of: auto, native, torch")
@@ -18,9 +18,11 @@ def configure_sam3_nms(torch_module: Any, backend: str = "auto") -> str:
                 resolved = "torch"
 
     if resolved == "torch":
+        from sam3.perflib import connected_components as cc_module
         from sam3.perflib import nms as nms_module
 
         nms_module.generic_nms = generic_nms_torch
+        cc_module.connected_components = cc_module.connected_components_cpu
     return resolved
 
 

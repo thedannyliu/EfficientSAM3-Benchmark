@@ -120,6 +120,8 @@ class Sam3NativeClipNode(Node):
             str(self.get_parameter("nms_backend").value),
         )
         self.get_logger().info(f"SAM3 mask NMS backend: {self.nms_backend}")
+        if self.nms_backend == "torch":
+            self.get_logger().info("SAM3 connected components backend: cpu")
         if instinctsam_text_checkpoint or instinctsam_vision_checkpoint:
             if version != "sam3":
                 raise ValueError("InstinctSAM native tracking currently requires version:=sam3")
