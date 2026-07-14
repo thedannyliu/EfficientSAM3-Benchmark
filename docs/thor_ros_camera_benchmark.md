@@ -2018,6 +2018,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p instinctsam_text_checkpoint:=checkpoints/instinctsam/gitext_large_v4.pt \
   -p image_topic:=/camera/camera/color/image_raw \
   -p image_qos_reliability:=best_effort \
+  -p nms_backend:=torch \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
@@ -2038,6 +2039,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p instinctsam_vision_checkpoint:=checkpoints/instinctsam/hiera_large_concept_trunk.pt \
   -p image_topic:=/camera/camera/color/image_raw \
   -p image_qos_reliability:=best_effort \
+  -p nms_backend:=torch \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
@@ -2057,6 +2059,7 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p version:=sam3 \
   -p image_topic:=/camera/camera/color/image_raw \
   -p image_qos_reliability:=best_effort \
+  -p nms_backend:=torch \
   -p prompt_mode:=text \
   -p prompt:=monitor \
   -p clip_frames:=120 \
@@ -2070,6 +2073,13 @@ ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
 The native node contains its own camera/tracking UI. Press `t`, type a new
 prompt, and press Enter to discard the old clip state and capture a new clip
 with the updated prompt. Do not run `live_viewer_node` for these commands.
+
+Thor reports CUDA architecture `sm_110a`. Triton's bundled `ptxas` may reject
+that target while compiling SAM3 mask NMS. `nms_backend:=torch` uses the same
+score ordering and IoU suppression rule through regular device-resident
+PyTorch operations and avoids that Triton kernel. `nms_backend:=auto` also
+selects this fallback automatically on compute capability 10 or newer; use
+`native` only where the installed Triton/PTXAS supports the GPU architecture.
 
 ## 13. Read The ROS Profiling Output
 

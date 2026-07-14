@@ -60,6 +60,7 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("box_drag_min_pixels", 5.0)
         self.declare_parameter("prompt_display_seconds", 0.5)
         self.declare_parameter("image_qos_reliability", "best_effort")
+        self.declare_parameter("nms_backend", "auto")
 
         self.bridge = CvBridge()
         self.prompt_mode = str(self.get_parameter("prompt_mode").value)
@@ -112,6 +113,13 @@ class Sam3NativeClipNode(Node):
         torch_module = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         self.torch_module = torch_module
+        from sam_backend.sam3_runtime import configure_sam3_nms
+
+        self.nms_backend = configure_sam3_nms(
+            torch_module,
+            str(self.get_parameter("nms_backend").value),
+        )
+        self.get_logger().info(f"SAM3 mask NMS backend: {self.nms_backend}")
         if instinctsam_text_checkpoint or instinctsam_vision_checkpoint:
             if version != "sam3":
                 raise ValueError("InstinctSAM native tracking currently requires version:=sam3")
