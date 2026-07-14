@@ -26,6 +26,7 @@ setup(
             "sam2_native_clip_node = sam_benchmark_ros.sam2_native_clip_node:main",
             "sam2_online_tracking_node = sam_benchmark_ros.sam2_online_tracking_node:main",
             "sam3_native_clip_node = sam_benchmark_ros.sam3_native_clip_node:main",
+            "sam3_online_tracking_node = sam_benchmark_ros.sam3_online_tracking_node:main",
             "sam_backend_node = sam_benchmark_ros.sam_backend_node:main",
             "video_stream_node = sam_benchmark_ros.video_stream_node:main",
             "yoloe_text_backend_node = sam_benchmark_ros.yoloe_text_backend_node:main",

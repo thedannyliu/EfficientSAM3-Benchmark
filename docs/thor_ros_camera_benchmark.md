@@ -44,7 +44,7 @@ the physical camera as the image source.
 
 ## Code-Audited Camera Tracking Status
 
-As of 2026-07-08, the checked-in ROS camera code has these behaviors:
+As of 2026-07-14, the checked-in ROS camera code has these behaviors:
 
 | family | ROS camera node | first prompt UI | subsequent tracking | status |
 | --- | --- | --- | --- | --- |
@@ -56,20 +56,23 @@ As of 2026-07-08, the checked-in ROS camera code has these behaviors:
 | EdgeTAM native video memory tracking | `sam2_online_tracking_node` or `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | each point click or left-button drag adds an object | online node supports multiple objects by re-anchoring existing masks when the EdgeTAM object batch grows; clip node runs bounded tracking | implemented for online streams and bounded clips |
 | SAM2.1 + distilled TinyViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | each point click or left-button drag adds an object online | same multi-object SAM2 memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for online streams and bounded clips |
 | SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
+| SAM3 online memory tracking | `sam3_online_tracking_node` | text prompt, click point, or left-button drag box in the OpenCV window | appends each incoming ROS frame to one persistent native SAM3 inference state and updates detector/tracker memory immediately | implemented for unbounded online camera streams |
 | SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt, click point, or left-button drag box in the OpenCV window | captures a bounded clip, then runs native `start_session` + `add_prompt` + `propagate_in_video` | implemented for bounded text/geometry clips |
-| SAM3 geometry prompt tracking | `sam3_native_clip_node` with `prompt_mode:=interactive`, `point`, or `box` | click point or left-button drag box in the OpenCV window | same SAM3 native video session, with geometry prompt data passed to `add_prompt` | implemented for bounded clips |
+| SAM3 geometry prompt tracking | `sam3_online_tracking_node` or `sam3_native_clip_node` with `prompt_mode:=interactive`, `point`, or `box` | click point or left-button drag box in the OpenCV window | online state or bounded SAM3 native video session, with geometry prompt data passed to `add_prompt` | implemented for online streams and bounded clips |
 
 Do not use `sam_backend_node` runs as evidence of SAM2/SAM3 memory tracking.
 Those rows are useful for per-frame image latency, but they do not carry SAM2 or
 SAM3 video memory across frames. Use `sam2_online_tracking_node` for SAM2
 online memory tracking on live ROS frames, `sam2_native_clip_node` for
-SAM2/EdgeTAM bounded clip memory tracking, and `sam3_native_clip_node` for SAM3
-memory tracking on ROS camera clips. The SAM2 online node keeps a live
-in-memory predictor state instead of materializing a JPEG frame folder; a new
-point or box prompt resets the tracked object and starts a new memory session
-from the current frame. For SAM1-family models, the intended camera tracking
-baseline is different: the first point or box prompt creates a mask, then the
-previous mask bounding box is passed as the next frame prompt.
+SAM2/EdgeTAM bounded clip memory tracking, `sam3_online_tracking_node` for SAM3
+online memory tracking, and `sam3_native_clip_node` for bounded SAM3 camera
+clips. The SAM2 and SAM3 online nodes keep live in-memory predictor state
+instead of materializing a JPEG frame folder. SAM2 adds each new point or box
+as another tracked object. SAM3 starts a new memory session from the current
+frame when its text, point, or box prompt changes. For SAM1-family models, the
+intended camera tracking baseline is different: the first point or box prompt
+creates a mask, then the previous mask bounding box is passed as the next frame
+prompt.
 
 ### Thor File Layout For Camera Runs
 
@@ -856,7 +859,9 @@ Expected entries include:
 camera_stream_node
 live_viewer_node
 mobile_sam_interactive_node
+sam2_online_tracking_node
 sam3_native_clip_node
+sam3_online_tracking_node
 video_stream_node
 sam_backend_node
 result_recorder_node
@@ -1999,7 +2004,89 @@ through `/sam/text_prompt` without a restart. These three commands perform
 independent per-frame text-prompt image segmentation and expose comparable
 latency in the viewer. They are not SAM3 native memory-tracking runs.
 
-### Native memory tracking
+### Online native memory tracking
+
+`sam3_online_tracking_node` starts from the first available camera frame and
+then runs one native SAM3 detector/tracker/memory update for every incoming
+frame. It does not use `clip_frames`, does not write a frame directory, and
+does not wait for a clip to finish before publishing masks.
+
+Run the official SAM3 online baseline:
+
+```bash
+ros2 run sam_benchmark_ros sam3_online_tracking_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
+  -p input_queue_size:=1 \
+  -p memory_history_size:=32 \
+  -p nms_backend:=torch \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Run InstinctSAM LiteText with GIText-large through the same online memory path:
+
+```bash
+ros2 run sam_benchmark_ros sam3_online_tracking_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p instinctsam_text_checkpoint:=checkpoints/instinctsam/gitext_large_v4.pt \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
+  -p input_queue_size:=1 \
+  -p memory_history_size:=32 \
+  -p nms_backend:=torch \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Run InstinctSAM Hiera-L compressed vision through the same online memory path:
+
+```bash
+ros2 run sam_benchmark_ros sam3_online_tracking_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p instinctsam_vision_checkpoint:=checkpoints/instinctsam/hiera_large_concept_trunk.pt \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p image_qos_reliability:=best_effort \
+  -p input_queue_size:=1 \
+  -p memory_history_size:=32 \
+  -p nms_backend:=torch \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+The online node owns its OpenCV UI, so do not start `live_viewer_node` for
+these commands. Text mode starts automatically with `prompt:=monitor`. In the
+same window, press `t`, type a replacement text prompt, and press Enter; click
+once for a point prompt; or hold the left button, drag, and release for a box
+prompt. Each prompt change discards the previous SAM3 state and starts a new
+native memory session from the current frame. Point and box markers disappear
+after 0.5 seconds. Press `r` to reset and `q` to exit.
+
+`input_queue_size:=1` prioritizes the newest RealSense frame when inference is
+slower than the camera. `memory_history_size:=32` bounds retained raw frame
+tensors and non-conditioning tracker outputs; SAM3's conditioning frames and
+native memory selection remain intact.
+
+### Bounded native clip tracking
 
 For native tracking, `sam3_native_clip_node` first captures `clip_frames` live
 camera frames, starts an official SAM3 video session, adds the text prompt on
