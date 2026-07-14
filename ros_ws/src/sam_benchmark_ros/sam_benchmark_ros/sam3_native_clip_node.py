@@ -44,6 +44,8 @@ class Sam3NativeClipNode(Node):
         self.declare_parameter("clip_frames", 120)
         self.declare_parameter("frame_dir", "results/thor/ros_camera/sam3_native_clip/frames")
         self.declare_parameter("version", "sam3")
+        self.declare_parameter("instinctsam_text_checkpoint", "")
+        self.declare_parameter("instinctsam_vision_checkpoint", "")
         self.declare_parameter("prompt_mode", "text")
         self.declare_parameter("window_name", "SAM3 Native Memory")
         self.declare_parameter("display_fps", 30.0)
@@ -97,14 +99,52 @@ class Sam3NativeClipNode(Node):
 
         external_repo = str(self.get_parameter("external_repo").value)
         checkpoint_path = str(self.get_parameter("checkpoint_path").value)
+        version = str(self.get_parameter("version").value)
+        instinctsam_text_checkpoint = (
+            str(self.get_parameter("instinctsam_text_checkpoint").value) or None
+        )
+        instinctsam_vision_checkpoint = (
+            str(self.get_parameter("instinctsam_vision_checkpoint").value) or None
+        )
         _prepend_repo_path(external_repo)
         torch_module = _import_required("torch")
         builder = _import_required("sam3.model_builder")
         self.torch_module = torch_module
-        self.predictor = builder.build_sam3_predictor(
-            checkpoint_path=checkpoint_path,
-            version=str(self.get_parameter("version").value),
-        )
+        if instinctsam_text_checkpoint or instinctsam_vision_checkpoint:
+            if version != "sam3":
+                raise ValueError("InstinctSAM native tracking currently requires version:=sam3")
+            if not hasattr(builder, "build_sam3_video_predictor"):
+                raise RuntimeError(
+                    "InstinctSAM native tracking requires external/efficientsam3"
+                )
+            self.predictor = builder.build_sam3_video_predictor(
+                checkpoint_path=checkpoint_path,
+                gpus_to_use=[0],
+            )
+            from sam_backend.instinctsam import install_instinctsam_video_components
+
+            install_instinctsam_video_components(
+                self.predictor.model,
+                builder,
+                text_checkpoint=instinctsam_text_checkpoint,
+                vision_checkpoint=instinctsam_vision_checkpoint,
+                device=str(self.predictor.device),
+            )
+            self.backend_name = "instinctsam"
+        else:
+            if hasattr(builder, "build_sam3_predictor"):
+                self.predictor = builder.build_sam3_predictor(
+                    checkpoint_path=checkpoint_path,
+                    version=version,
+                )
+            else:
+                if version != "sam3":
+                    raise ValueError("this SAM3 source supports version:=sam3 only")
+                self.predictor = builder.build_sam3_video_predictor(
+                    checkpoint_path=checkpoint_path,
+                    gpus_to_use=[0],
+                )
+            self.backend_name = "sam3"
         self.params = parameter_counts(getattr(self.predictor, "model", self.predictor))
         if torch_module.cuda.is_available():
             torch_module.cuda.reset_peak_memory_stats()
@@ -348,7 +388,7 @@ class Sam3NativeClipNode(Node):
             "frame_index": frame_index,
             "stamp": {"sec": header.stamp.sec, "nanosec": header.stamp.nanosec},
             "frame_id": header.frame_id,
-            "backend": "sam3",
+            "backend": self.backend_name,
             "stream_mode": "native_clip",
             "tracking_state": "tracking",
             "prompt_mode": prompt["prompt_mode"],
@@ -481,7 +521,7 @@ def _display_with_metrics(overlay_rgb: np.ndarray, result: dict[str, Any]) -> np
     overlay_bgr = cv2.cvtColor(overlay_rgb, cv2.COLOR_RGB2BGR)
     panel = np.full((overlay_bgr.shape[0], 360, 3), 24, dtype=np.uint8)
     lines = [
-        "SAM3 native memory",
+        f"{result.get('backend', 'sam3')} native memory",
         f"Prompt: {result.get('prompt_mode', '')}",
         f"Frame: {result.get('frame_index', '')}",
         f"State: {result.get('tracking_state', '')}",

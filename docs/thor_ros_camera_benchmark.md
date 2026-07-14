@@ -1990,6 +1990,75 @@ through `/sam/text_prompt` without a restart. These three commands perform
 independent per-frame text-prompt image segmentation and expose comparable
 latency in the viewer. They are not SAM3 native memory-tracking runs.
 
+### Native memory tracking
+
+For native tracking, `sam3_native_clip_node` first captures `clip_frames` live
+camera frames, starts an official SAM3 video session, adds the text prompt on
+frame 0, and obtains later masks from `propagate_in_video`. The SAM3 tracker,
+memory, association, and decoder remain unchanged; only the selected detector
+component is replaced. This is bounded live-camera clip tracking, not an
+unbounded online session.
+
+Run the GIText-large native tracker:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p instinctsam_text_checkpoint:=checkpoints/instinctsam/gitext_large_v4.pt \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/instinctsam_gitext_native/frames \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Run the Hiera-L compressed-vision native tracker:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p instinctsam_vision_checkpoint:=checkpoints/instinctsam/hiera_large_concept_trunk.pt \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/instinctsam_hiera_l_native/frames \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+Run the official SAM3 native baseline through the same builder:
+
+```bash
+ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
+  -p external_repo:=external/efficientsam3 \
+  -p checkpoint_path:=checkpoints/sam3/sam3.pt \
+  -p version:=sam3 \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p prompt_mode:=text \
+  -p prompt:=monitor \
+  -p clip_frames:=120 \
+  -p frame_dir:=results/thor/ros_camera/sam3_native_baseline/frames \
+  -p result_topic:=/sam/result_json \
+  -p overlay_topic:=/sam/overlay \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image
+```
+
+The native node contains its own camera/tracking UI. Press `t`, type a new
+prompt, and press Enter to discard the old clip state and capture a new clip
+with the updated prompt. Do not run `live_viewer_node` for these commands.
+
 ## 13. Read The ROS Profiling Output
 
 Per-frame CSV:

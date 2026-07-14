@@ -28,6 +28,27 @@ def install_instinctsam_components(
         model.backbone.vision_backbone.trunk = trunk.to(device).eval()
 
 
+def install_instinctsam_video_components(
+    video_model: Any,
+    builder: Any,
+    *,
+    text_checkpoint: str | None,
+    vision_checkpoint: str | None,
+    device: str,
+) -> None:
+    """Graft InstinctSAM components into the detector used by SAM3 tracking."""
+    detector = getattr(video_model, "detector", None)
+    if detector is None:
+        raise RuntimeError("SAM3 video model does not expose detector")
+    install_instinctsam_components(
+        detector,
+        builder,
+        text_checkpoint=text_checkpoint,
+        vision_checkpoint=vision_checkpoint,
+        device=device,
+    )
+
+
 def build_gitext(
     *,
     checkpoint: Path,
