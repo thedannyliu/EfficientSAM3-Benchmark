@@ -96,6 +96,28 @@ def append_sam3_online_frame(
     return frame_idx
 
 
+def run_sam3_online_step(
+    model: Any,
+    inference_state: dict[str, Any],
+    frame_tensor: Any,
+    torch_module: Any,
+) -> tuple[int, dict[str, Any]]:
+    """Run one native SAM3 frame update without enabling autograd."""
+    with torch_module.inference_mode():
+        frame_idx = append_sam3_online_frame(inference_state, frame_tensor)
+        out = model._run_single_frame_inference(
+            inference_state, frame_idx, reverse=False
+        )
+        outputs = model._postprocess_output(
+            inference_state,
+            out,
+            removed_obj_ids=out.get("removed_obj_ids"),
+            suppressed_obj_ids=out.get("suppressed_obj_ids"),
+            unconfirmed_obj_ids=out.get("unconfirmed_obj_ids"),
+        )
+    return frame_idx, outputs
+
+
 def prune_sam3_online_state(
     inference_state: dict[str, Any], frame_idx: int, history_size: int
 ) -> None:

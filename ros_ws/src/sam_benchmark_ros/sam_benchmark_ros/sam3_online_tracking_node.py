@@ -19,9 +19,9 @@ from std_msgs.msg import String
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
 from sam_backend.sam3_online import (
-    append_sam3_online_frame,
     initialize_sam3_online_state,
     prune_sam3_online_state,
+    run_sam3_online_step,
 )
 from sam_backend.streaming import (
     left_panel_click_to_image_point,
@@ -323,6 +323,15 @@ class Sam3OnlineTrackingNode(Node):
             self.latest_display = display
             self.current_display_scale = scale
             return
+        if self.state == "error":
+            display, scale = _scale_display(
+                _status_overlay(frame, "Tracking error; press r or enter a new prompt"),
+                self.display_scale,
+                self.display_max_width,
+            )
+            self.latest_display = display
+            self.current_display_scale = scale
+            return
         if self.state == "tracking":
             self._track_frame(frame, msg.header)
 
@@ -366,7 +375,7 @@ class Sam3OnlineTrackingNode(Node):
         except Exception:
             self.inference_state = None
             self.active_prompt = None
-            self.state = "waiting_for_frame" if self.prompt_mode == "text" else "waiting_for_prompt"
+            self.state = "error"
             self.get_logger().error(
                 f"failed to start SAM3 online tracking:\n{traceback.format_exc()}"
             )
@@ -411,16 +420,11 @@ class Sam3OnlineTrackingNode(Node):
             self._sync()
             start = perf_counter()
             frame_tensor = self._preprocess_frame(frame)
-            frame_idx = append_sam3_online_frame(self.inference_state, frame_tensor)
-            out = self.model._run_single_frame_inference(
-                self.inference_state, frame_idx, reverse=False
-            )
-            outputs = self.model._postprocess_output(
+            frame_idx, outputs = run_sam3_online_step(
+                self.model,
                 self.inference_state,
-                out,
-                removed_obj_ids=out.get("removed_obj_ids"),
-                suppressed_obj_ids=out.get("suppressed_obj_ids"),
-                unconfirmed_obj_ids=out.get("unconfirmed_obj_ids"),
+                frame_tensor,
+                self.torch_module,
             )
             self._sync()
             latency_ms = (perf_counter() - start) * 1000.0
@@ -432,7 +436,7 @@ class Sam3OnlineTrackingNode(Node):
             self.state = "tracking"
         except Exception:
             self.inference_state = None
-            self.state = "waiting_for_frame" if self.prompt_mode == "text" else "waiting_for_prompt"
+            self.state = "error"
             self.get_logger().error(
                 f"failed during SAM3 online tracking:\n{traceback.format_exc()}"
             )

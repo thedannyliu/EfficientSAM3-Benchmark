@@ -10,6 +10,7 @@ from sam_backend.sam3_online import (
     append_sam3_online_frame,
     initialize_sam3_online_state,
     prune_sam3_online_state,
+    run_sam3_online_step,
 )
 
 
@@ -105,6 +106,38 @@ class Sam3OnlineStateTest(unittest.TestCase):
             append_sam3_online_frame(state, torch.ones(3, 2, 2)),
             4,
         )
+
+    def test_online_step_runs_model_inside_inference_mode(self) -> None:
+        state = self._state()
+        initialize_sam3_online_state(state)
+
+        class FakeModel:
+            def _run_single_frame_inference(
+                self, inference_state, frame_idx, reverse
+            ):
+                self.inference_mode_during_forward = torch.is_inference_mode_enabled()
+                self.state_identity = id(inference_state)
+                return {"obj_id_to_mask": {}, "frame_idx": frame_idx}
+
+            def _postprocess_output(self, inference_state, out, **kwargs):
+                self.inference_mode_during_postprocess = (
+                    torch.is_inference_mode_enabled()
+                )
+                return {"out_binary_masks": [], "frame_idx": out["frame_idx"]}
+
+        model = FakeModel()
+        state_identity = id(state)
+
+        frame_idx, outputs = run_sam3_online_step(
+            model, state, torch.ones(3, 2, 2), torch
+        )
+
+        self.assertEqual(frame_idx, 1)
+        self.assertEqual(outputs["frame_idx"], 1)
+        self.assertEqual(state["num_frames"], 2)
+        self.assertEqual(model.state_identity, state_identity)
+        self.assertTrue(model.inference_mode_during_forward)
+        self.assertTrue(model.inference_mode_during_postprocess)
 
 
 if __name__ == "__main__":
