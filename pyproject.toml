@@ -47,6 +47,7 @@ sam-run-efficientsam3-variants = "sam_backend.variant_runner:main"
 sam-summarize-results = "sam_backend.summarize_results:main"
 sam-thor-pipeline-smoke = "sam_backend.thor_pipeline_smoke:main"
 sam-thor-smoke-summary = "sam_backend.thor_smoke_summary:main"
+sam2-video-demo = "sam_backend.sam2_video_demo:main"
 
 [tool.setuptools.packages.find]
 include = ["sam_backend*"]

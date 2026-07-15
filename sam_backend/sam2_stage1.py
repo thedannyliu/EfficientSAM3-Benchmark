@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import inspect
+import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -144,6 +146,129 @@ def build_stage1_student_compat(
         model_name=model_name,
         checkpoint_path=checkpoint_path,
     )
+
+
+def patch_stage1_forward_image(
+    predictor: Any,
+    torch_module: Any,
+    *,
+    sam2_distill_root: str | Path,
+    student_checkpoint_path: str,
+    sam2_checkpoint_path: str,
+    device: str,
+    requested_family: str,
+    requested_model_name: str,
+    requested_backbone_checkpoint: str,
+    legacy_tinyvit_checkpoint: str,
+    requested_adapter_mode: str,
+    fallback_model_name: str,
+) -> dict[str, Any]:
+    distill_root = Path(sam2_distill_root)
+    if distill_root.exists():
+        sys.path.insert(0, str(distill_root))
+    try:
+        from sam2_distill.edgetam.compat import patch_edgetam_perceiver_view
+    except ImportError as exc:
+        raise RuntimeError(
+            "Stage1 student loading requires SAM2-Distillation-Pipeline on "
+            "sam2_distill_root/PYTHONPATH"
+        ) from exc
+
+    patch_edgetam_perceiver_view()
+    checkpoint = torch_module.load(
+        student_checkpoint_path,
+        map_location="cpu",
+        weights_only=False,
+    )
+    state_dict = extract_stage1_state_dict(checkpoint)
+    student_family, student_model_name, student_adapter_mode = resolve_stage1_spec(
+        checkpoint,
+        state_dict,
+        requested_family=requested_family,
+        requested_model_name=requested_model_name,
+        fallback_model_name=fallback_model_name,
+        requested_adapter_mode=requested_adapter_mode,
+    )
+    if not requested_backbone_checkpoint and student_family == "tinyvit":
+        requested_backbone_checkpoint = legacy_tinyvit_checkpoint
+    backbone_checkpoint = resolve_stage1_backbone_checkpoint(
+        student_model_name,
+        requested_backbone_checkpoint,
+    )
+    student = build_stage1_student_compat(
+        student_family=student_family,
+        model_name=student_model_name,
+        checkpoint_path=(
+            str(backbone_checkpoint) if backbone_checkpoint is not None else None
+        ),
+        adapter_mode=student_adapter_mode,
+    ).to(device)
+    incompatible = student.load_state_dict(state_dict, strict=False)
+    if student_family == "repvit":
+        missing_non_backbone = [
+            key
+            for key in incompatible.missing_keys
+            if not key.startswith("backbone.")
+        ]
+        missing_backbone_without_source = (
+            backbone_checkpoint is None
+            and any(key.startswith("backbone.") for key in incompatible.missing_keys)
+        )
+        if (
+            missing_non_backbone
+            or missing_backbone_without_source
+            or incompatible.unexpected_keys
+        ):
+            raise RuntimeError(
+                "RepViT Stage1 checkpoint is incomplete or incompatible: "
+                f"missing={incompatible.missing_keys[:10]}, "
+                f"unexpected={incompatible.unexpected_keys[:10]}"
+            )
+    student.eval()
+    for param in student.parameters():
+        param.requires_grad_(False)
+
+    position_encoding = predictor.image_encoder.neck.position_encoding
+
+    @torch_module.inference_mode()
+    def forward_image(self: Any, img_batch: Any) -> dict[str, Any]:
+        features = student(img_batch)
+        backbone_fpn = [
+            features["high_res_s0"].float(),
+            features["high_res_s1"].float(),
+            features["image_embed"].float(),
+        ]
+        vision_pos_enc = [position_encoding(feat).float() for feat in backbone_fpn]
+        return {
+            "vision_features": backbone_fpn[-1],
+            "vision_pos_enc": vision_pos_enc,
+            "backbone_fpn": backbone_fpn,
+        }
+
+    predictor.forward_image = types.MethodType(forward_image, predictor)
+    predictor._stage1_student = student
+    return {
+        "student_checkpoint_path": student_checkpoint_path,
+        "student_family": student_family,
+        "student_model_name": student_model_name,
+        "student_backbone_checkpoint_path": (
+            str(backbone_checkpoint) if backbone_checkpoint is not None else ""
+        ),
+        "student_adapter_mode": student_adapter_mode,
+        "tinyvit_checkpoint_path": (
+            str(backbone_checkpoint)
+            if student_family == "tinyvit" and backbone_checkpoint is not None
+            else ""
+        ),
+        "tinyvit_model_name": (
+            student_model_name if student_family == "tinyvit" else ""
+        ),
+        "stage1_checkpoint_step": checkpoint.get("step", ""),
+        "stage1_checkpoint_epoch": checkpoint.get("epoch", ""),
+        "stage1_missing_keys": len(incompatible.missing_keys),
+        "stage1_unexpected_keys": len(incompatible.unexpected_keys),
+        "sam2_checkpoint_path": sam2_checkpoint_path,
+    }
 
 
 def _build_tinyvit_student(

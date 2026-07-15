@@ -444,6 +444,78 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
+## Interactive Three-Object Video Demo
+
+Use the bounded video demo when every source frame must be tracked and the
+same three first-frame prompts must be compared between official SAM2.1-L and
+the TinyViT-5M projection student. This runner reads the video file directly;
+do not start `video_stream_node`, `sam2_online_tracking_node`, or the ROS
+overlay recorder for this workflow.
+
+The first frame opens before either model runs. A click adds a point-prompt
+object and a left-button drag adds a box-prompt object. Select exactly three
+objects, then press Enter or Space. `u` removes the last object, `r` clears all
+objects, and `q` or Escape cancels. Both models reuse the same saved prompts.
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+python -m sam_backend.sam2_video_demo \
+  --video-path videos/iphone16pro_demo.mov \
+  --timing-mode both \
+  --external-repo external/sam2 \
+  --sam2-checkpoint checkpoints/sam2/sam2.1_hiera_large.pt \
+  --sam2-distill-root external/SAM2-Distillation-Pipeline \
+  --tinyvit-stage1-checkpoint checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt \
+  --tinyvit-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
+  --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
+  --device cuda \
+  --output-dir overlays/thor/video_demo/iphone16pro_three_objects
+```
+
+Verify the system encoder once before the run:
+
+```bash
+ffmpeg -version
+```
+
+If that command is missing on Thor, install the Ubuntu package once with
+`sudo apt-get update && sudo apt-get install -y ffmpeg`.
+
+`--timing-mode` accepts:
+
+| Value | Output behavior |
+| --- | --- |
+| `source_fps` | writes every tracked source frame exactly once at the source video's detected FPS; inference waiting is removed and source audio is retained when present |
+| `realtime` | writes at the same nominal source FPS but repeats each overlay according to synchronized per-frame inference latency; this exposes tracking delay and omits audio because the duration changes |
+| `both` | produces both outputs for both models |
+
+The runner preserves the decoded source width, height, frame count, and average
+source FPS. SAM2 inference frames are downscaled to at most 1024 pixels on the
+long side because SAM2 internally evaluates at 1024, while masks are resized
+back onto the original-resolution decoded frames. Output is high-quality H.264
+at CRF 18 by default. Overlay rendering requires re-encoding and OpenCV uses an
+8-bit BGR path, so iPhone HDR/Dolby Vision bit depth and codec metadata are not
+bit-for-bit preserved.
+
+The output directory contains:
+
+```text
+prompts.json
+sam2p1_l_source_fps.mp4
+sam2p1_l_realtime.mp4
+tv5m_projection_source_fps.mp4
+tv5m_projection_realtime.mp4
+summary.json
+```
+
+Each model's `summary.json` record includes `frames`, `prompt_ms`,
+`mean_latency_ms`, `p50_latency_ms`, and `p95_latency_ms`. Tracking latency is
+measured around each native `propagate_in_video` step with CUDA synchronization.
+The separate `prompt_ms` covers initialization of all three objects and is not
+included in `mean_latency_ms`.
+
 For **RepViT-M0.9 Stage1 encoder + SAM2.1-L online memory tracking**, place
 the full distilled Stage1 `best.pt` and optional ImageNet initialization at the
 paths shown in the file layout above. RepViT-M0.9 is the architecture name; the
