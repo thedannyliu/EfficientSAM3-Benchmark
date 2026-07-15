@@ -54,7 +54,7 @@ As of 2026-07-14, the checked-in ROS camera code has these behaviors:
 | SAM2.1 online memory tracking | `sam2_online_tracking_node` | each point click or left-button drag adds an object | tracks multiple objects on each incoming ROS frame with per-object IDs and memory encoder updates | implemented for online camera streams |
 | SAM2.1 native video memory tracking | `sam2_native_clip_node` | click point or left-button drag box in the OpenCV window | captures a bounded clip, then runs `SAM2VideoPredictor.init_state` + `add_new_points_or_box` + `propagate_in_video` | implemented for bounded clips |
 | EdgeTAM native video memory tracking | `sam2_online_tracking_node` or `sam2_native_clip_node` with `external_repo:=external/EdgeTAM` | each point click or left-button drag adds an object | online node supports multiple objects by re-anchoring existing masks when the EdgeTAM object batch grows; clip node runs bounded tracking | implemented for online streams and bounded clips |
-| SAM2.1 + distilled TinyViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | each point click or left-button drag adds an object online | same multi-object SAM2 memory path, with `forward_image` patched to the selected Stage1 TinyViT encoder | implemented for online streams and bounded clips |
+| SAM2.1 + distilled TinyViT/RepViT encoders | `sam2_online_tracking_node` or `sam2_native_clip_node` with `model_kind:=stage1-student` | each point click or left-button drag adds an object online | same multi-object SAM2 memory path, with `forward_image` patched to the selected Stage1 student encoder | implemented for online streams and bounded clips |
 | SAM3 per-frame image backend | `sam_backend_node` | fixed text or fixed parameter point | independent per-frame image segmentation | implemented, not memory tracking |
 | SAM3 online memory tracking | `sam3_online_tracking_node` | text prompt, click point, or left-button drag box in the OpenCV window | appends each incoming ROS frame to one persistent native SAM3 inference state and updates detector/tracker memory immediately | implemented for unbounded online camera streams |
 | SAM3 native video memory tracking | `sam3_native_clip_node` | text prompt, click point, or left-button drag box in the OpenCV window | captures a bounded clip, then runs native `start_session` + `add_prompt` + `propagate_in_video` | implemented for bounded text/geometry clips |
@@ -107,10 +107,13 @@ Keep the camera files aligned with the offline benchmark layout:
         tv11m_mse_cos.pt
         tv5m_mse.pt
         tv5m_mse_cos.pt
+        repvit_m09_proj_sam21l_msehr_cos025_l1010_best.pt
       tinyvit/
         tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors
         tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors
         tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors
+      repvit/
+        repvit_m0_9.dist_450e_in1k.safetensors
   external/
     sam3/
     sam2/
@@ -126,7 +129,7 @@ Keep the camera files aligned with the offline benchmark layout:
 The `sam2_distill/` weights are required when `sam2_native_clip_node` runs with
 `model_kind:=stage1-student`; in that mode the node loads a full SAM2/EdgeTAM
 checkpoint for the prompt, mask, and memory modules, then patches only the
-image encoder with the selected Stage1 TinyViT checkpoint.
+image encoder with the selected Stage1 TinyViT or RepViT checkpoint.
 
 ### Acceptance Criteria For Native Camera Memory Tracking
 
@@ -237,7 +240,7 @@ SAM2.1 / Efficient-SAM2.1:
     memory_history_size bounds old non-conditioning frame outputs
   bounded native memory tracking uses sam2_native_clip_node:
     click point or drag box -> capture a bounded clip -> init_state/add_new_points_or_box/propagate_in_video
-  stage1-student mode patches forward_image to the selected TinyViT encoder before online tracking or propagation
+  stage1-student mode patches forward_image to the selected TinyViT or RepViT encoder before online tracking or propagation
 
 SAM3:
   live ROS camera path uses per-frame text/point image segmentation through sam_backend_node
@@ -441,6 +444,55 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p overlay_topic:=/sam/overlay
 ```
 
+For **RepViT-M0.9 Stage1 encoder + SAM2.1-L online memory tracking**, place
+the full distilled Stage1 `best.pt` and optional ImageNet initialization at the
+paths shown in the file layout above. RepViT-M0.9 is the architecture name; the
+backbone has about 5.5M parameters, not 0.9M parameters. Make sure the Thor
+copy of `external/SAM2-Distillation-Pipeline` contains
+`sam2_distill/models/repvit_adapter.py`. The pipeline's pinned downloader can
+prepare the public ImageNet initialization directly on Thor:
+
+```bash
+python external/SAM2-Distillation-Pipeline/tools/data/download_repvit_pretrained.py \
+  --out-root checkpoints/sam2_distill/repvit
+```
+
+Transfer the distilled M0.9 `best.pt` from the training run's
+`repvit_m09_proj_sam21l_msehr_cos025_l1010/checkpoints/best.pt` to the Stage1
+destination shown above, then run:
+
+```bash
+ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p external_repo:=external/sam2 \
+  -p sam2_distill_root:=external/SAM2-Distillation-Pipeline \
+  -p model_kind:=stage1-student \
+  -p checkpoint_path:=checkpoints/sam2_distill/stage1/repvit_m09_proj_sam21l_msehr_cos025_l1010_best.pt \
+  -p sam2_checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
+  -p student_family:=repvit \
+  -p student_model_name:=repvit_m0_9.dist_450e_in1k \
+  -p student_backbone_checkpoint:=checkpoints/sam2_distill/repvit/repvit_m0_9.dist_450e_in1k.safetensors \
+  -p student_adapter_mode:=projection \
+  -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
+  -p device:=cuda \
+  -p input_queue_size:=3 \
+  -p image_qos_reliability:=best_effort \
+  -p memory_history_size:=32 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay \
+  -p window_name:="SAM2.1-L RepViT-M0.9 Online Memory"
+```
+
+The Stage1 training job stores the complete RepViT backbone and projection
+heads in `best.pt`, so `student_backbone_checkpoint` can be omitted for that
+checkpoint. Keeping the pinned safetensors path makes the initialization
+source explicit and also supports projection-only checkpoints. The node still
+uses SAM2.1-L prompt, mask, object-pointer, memory-attention, and memory-encoder
+weights. Each click or drag adds an object to the same online SAM2 memory
+state; this is not per-frame image segmentation.
+
 Use `auto_start:=true` when you want a non-interactive smoke run from the first
 incoming frame. With `auto_start`, `initial_point_x/y` can be normalized
 coordinates such as `0.5,0.5`.
@@ -466,15 +518,16 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
 ```
 
 The same multi-object controls apply to official SAM2.1, every distilled
-TinyViT SAM2 encoder, and EdgeTAM. Overlays use a different color and an `ID`
-label for each object. `/sam/result_json` and recorder CSV rows include
+TinyViT or RepViT SAM2 encoder, and EdgeTAM. Overlays use a different color and
+an `ID` label for each object. `/sam/result_json` and recorder CSV rows include
 `object_count`, `object_ids`, and `prompt_object_id`.
 
-Official SAM2.1 and TinyViT add a new object while retaining the existing
-memory history. EdgeTAM's predictor does not permit increasing the object batch
-after propagation starts, so the online node re-anchors all existing objects
-from their latest masks on the current frame when a new object is added. This
-keeps all objects active, but EdgeTAM memory history restarts at that frame.
+Official SAM2.1 and the TinyViT/RepViT Stage1 variants add a new object while
+retaining the existing memory history. EdgeTAM's predictor does not permit
+increasing the object batch after propagation starts, so the online node
+re-anchors all existing objects from their latest masks on the current frame
+when a new object is added. This keeps all objects active, but EdgeTAM memory
+history restarts at that frame.
 
 For **SAM2.1 native point/box bounded clip memory tracking**, use the source
 topic from Terminal A. Click the OpenCV window for a point prompt, or
