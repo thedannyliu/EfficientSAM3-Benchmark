@@ -14,6 +14,7 @@ from sam_backend.sam2_video_demo import (
     realtime_repeat_count,
     resize_masks,
     rolling_fps,
+    select_audio_stream_index,
     scale_prompts,
 )
 
@@ -126,6 +127,22 @@ class Sam2VideoDemoTest(unittest.TestCase):
     def test_rolling_display_fps_uses_recent_completion_times(self) -> None:
         self.assertIsNone(rolling_fps(deque([1.0])))
         self.assertEqual(rolling_fps(deque([1.0, 1.5, 2.0])), 2.0)
+
+    def test_selects_first_decodable_audio_stream_from_iphone_mov(self) -> None:
+        payload = {
+            "streams": [
+                {"index": 2, "codec_name": "none"},
+                {"index": 1, "codec_name": "aac"},
+                {"index": 3, "codec_name": "unknown"},
+            ]
+        }
+
+        self.assertEqual(select_audio_stream_index(payload), 1)
+
+    def test_ignores_mov_audio_streams_without_a_decoder(self) -> None:
+        payload = {"streams": [{"index": 2, "codec_name": "none"}]}
+
+        self.assertIsNone(select_audio_stream_index(payload))
 
 
 if __name__ == "__main__":

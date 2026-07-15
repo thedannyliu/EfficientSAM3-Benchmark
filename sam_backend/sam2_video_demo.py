@@ -109,9 +109,23 @@ class FFmpegVideoWriter:
             "-i",
             "pipe:0",
         ]
-        source_has_audio = source_path is not None and _ffprobe_has_audio(source_path)
+        audio_stream_index = (
+            _ffprobe_audio_stream_index(source_path)
+            if source_path is not None
+            else None
+        )
+        source_has_audio = audio_stream_index is not None
         if source_has_audio:
-            command.extend(["-i", str(source_path), "-map", "0:v:0", "-map", "1:a?"])
+            command.extend(
+                [
+                    "-i",
+                    str(source_path),
+                    "-map",
+                    "0:v:0",
+                    "-map",
+                    f"1:{audio_stream_index}?",
+                ]
+            )
         command.extend(
             ffmpeg_video_args(
                 codec,
@@ -1291,27 +1305,50 @@ def _ffprobe_fps(video_path: Path) -> float:
         return 0.0
 
 
-def _ffprobe_has_audio(video_path: Path) -> bool:
+def _ffprobe_audio_stream_index(video_path: Path) -> int | None:
     if shutil.which("ffprobe") is None:
-        return False
+        return None
     result = subprocess.run(
         [
             "ffprobe",
             "-v",
             "error",
             "-select_streams",
-            "a:0",
+            "a",
             "-show_entries",
-            "stream=index",
+            "stream=index,codec_name",
             "-of",
-            "csv=p=0",
+            "json",
             str(video_path),
         ],
         check=False,
         capture_output=True,
         text=True,
     )
-    return result.returncode == 0 and bool(result.stdout.strip())
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return select_audio_stream_index(payload)
+
+
+def select_audio_stream_index(payload: dict[str, Any]) -> int | None:
+    streams = payload.get("streams", [])
+    if not isinstance(streams, list):
+        return None
+    for stream in streams:
+        if not isinstance(stream, dict):
+            continue
+        codec_name = str(stream.get("codec_name", "")).strip().lower()
+        if codec_name in {"", "none", "unknown"}:
+            continue
+        try:
+            return int(stream["index"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return None
 
 
 def _format_fps(fps: float) -> str:

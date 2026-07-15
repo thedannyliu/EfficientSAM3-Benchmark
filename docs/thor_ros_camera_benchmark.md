@@ -501,6 +501,9 @@ The saver prefers `libx264`. If that encoder is absent from the Thor FFmpeg
 build, it automatically checks `h264_nvmpi`, `h264_v4l2m2m`, `h264_nvenc`, and
 finally high-quality `mpeg4`; hardware encoders use a resolution/FPS-scaled
 bitrate instead of unsupported x264 CRF flags.
+For iPhone MOV inputs, the saver probes every audio stream but maps only the
+first stream with a real decoder such as AAC. Auxiliary streams whose reported
+codec is `none` or `unknown` are excluded instead of causing FFmpeg to exit.
 
 `--timing-mode` accepts:
 
