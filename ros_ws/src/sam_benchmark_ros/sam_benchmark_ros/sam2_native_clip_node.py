@@ -21,6 +21,12 @@ from sam_benchmark_ros.video_recording import prompt_is_visible, stamp_to_second
 from sam_backend.backends import _import_required, _prepend_repo_path
 from sam_backend.overlay import overlay_prediction
 from sam_backend.profiling import cuda_memory_mb, parameter_counts
+from sam_backend.sam2_stage1 import (
+    build_stage1_student_compat,
+    extract_stage1_state_dict,
+    resolve_stage1_backbone_checkpoint,
+    resolve_stage1_spec,
+)
 from sam_backend.streaming import (
     left_panel_click_to_image_point,
     left_panel_drag_to_image_box,
@@ -399,14 +405,6 @@ def _patch_stage1_forward_image(
         sys.path.insert(0, str(sam2_distill_root))
     try:
         from sam2_distill.edgetam.compat import patch_edgetam_perceiver_view
-        from sam2_distill.models.stage1_checkpoint import (
-            extract_state_dict,
-            infer_adapter_mode,
-            infer_stage1_model_name,
-            infer_student_family,
-            resolve_student_checkpoint,
-        )
-        from sam2_distill.models.stage1_student import build_stage1_student
     except ImportError as exc:
         raise RuntimeError(
             "model_kind=stage1-student requires SAM2-Distillation-Pipeline on sam2_distill_root/PYTHONPATH"
@@ -414,41 +412,23 @@ def _patch_stage1_forward_image(
 
     patch_edgetam_perceiver_view()
     checkpoint = torch_module.load(student_checkpoint_path, map_location="cpu", weights_only=False)
-    state_dict = extract_state_dict(checkpoint)
+    state_dict = extract_stage1_state_dict(checkpoint)
 
     requested_model_name = str(node.get_parameter("student_model_name").value)
     legacy_tinyvit_model_name = str(node.get_parameter("tinyvit_model_name").value)
     fallback_model_name = requested_model_name or legacy_tinyvit_model_name
-    inferred_model_name = infer_stage1_model_name(
-        checkpoint, state_dict, fallback_model_name
-    )
-    student_model_name = requested_model_name or inferred_model_name
-
     requested_family = str(node.get_parameter("student_family").value).strip().lower()
-    if requested_family not in {"auto", "tinyvit", "repvit"}:
-        raise ValueError("student_family must be one of: auto, tinyvit, repvit")
-    student_family = infer_student_family(checkpoint, student_model_name)
-    if requested_family != "auto" and requested_family != student_family:
-        raise ValueError(
-            f"student_family={requested_family} conflicts with checkpoint family={student_family}"
-        )
-
     requested_adapter_mode = str(
         node.get_parameter("student_adapter_mode").value
     ).strip().lower()
-    if requested_adapter_mode not in {"auto", "projection", "residual_dwconv"}:
-        raise ValueError(
-            "student_adapter_mode must be one of: auto, projection, residual_dwconv"
-        )
-    student_adapter_mode = infer_adapter_mode(checkpoint, state_dict)
-    if (
-        requested_adapter_mode != "auto"
-        and requested_adapter_mode != student_adapter_mode
-    ):
-        raise ValueError(
-            f"student_adapter_mode={requested_adapter_mode} conflicts with "
-            f"checkpoint adapter_mode={student_adapter_mode}"
-        )
+    student_family, student_model_name, student_adapter_mode = resolve_stage1_spec(
+        checkpoint,
+        state_dict,
+        requested_family=requested_family,
+        requested_model_name=requested_model_name,
+        fallback_model_name=fallback_model_name,
+        requested_adapter_mode=requested_adapter_mode,
+    )
 
     requested_backbone_checkpoint = str(
         node.get_parameter("student_backbone_checkpoint").value
@@ -457,14 +437,10 @@ def _patch_stage1_forward_image(
         requested_backbone_checkpoint = str(
             node.get_parameter("tinyvit_checkpoint").value
         )
-    backbone_checkpoint = (
-        resolve_student_checkpoint(
-            student_model_name, Path(requested_backbone_checkpoint)
-        )
-        if requested_backbone_checkpoint
-        else None
+    backbone_checkpoint = resolve_stage1_backbone_checkpoint(
+        student_model_name, requested_backbone_checkpoint
     )
-    student = build_stage1_student(
+    student = build_stage1_student_compat(
         student_family=student_family,
         model_name=student_model_name,
         checkpoint_path=(
