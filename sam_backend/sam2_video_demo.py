@@ -50,6 +50,14 @@ class ModelSpec:
     student_adapter_mode: str = "auto"
 
 
+@dataclass(frozen=True)
+class ModelArtifacts:
+    result: dict[str, Any]
+    mask_dir: Path
+    latencies_ms: list[float]
+    last_overlay: np.ndarray
+
+
 class FFmpegVideoWriter:
     def __init__(
         self,
@@ -69,6 +77,7 @@ class FFmpegVideoWriter:
         self.width = width
         self.height = height
         self.frames = 0
+        self.closed = False
         self.log_path = output_path.with_suffix(output_path.suffix + ".ffmpeg.log")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         command = [
@@ -89,7 +98,16 @@ class FFmpegVideoWriter:
         ]
         if source_path is not None:
             command.extend(["-i", str(source_path), "-map", "0:v:0", "-map", "1:a?"])
-        command.extend(["-c:v", codec, "-preset", preset, "-crf", str(crf)])
+        command.extend(
+            ffmpeg_video_args(
+                codec,
+                preset=preset,
+                crf=crf,
+                width=width,
+                height=height,
+                fps=fps,
+            )
+        )
         if source_path is not None:
             command.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
         else:
@@ -117,13 +135,22 @@ class FFmpegVideoWriter:
             self.frames += 1
 
     def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         if self.process.stdin is not None and not self.process.stdin.closed:
-            self.process.stdin.close()
+            try:
+                self.process.stdin.close()
+            except BrokenPipeError:
+                pass
         return_code = self.process.wait()
         self.log_handle.close()
         if return_code != 0:
+            details = self.log_path.read_text(encoding="utf-8", errors="replace").strip()
+            detail_suffix = f"\nFFmpeg output:\n{details[-4000:]}" if details else ""
             raise RuntimeError(
                 f"ffmpeg failed for {self.output_path}; see {self.log_path}"
+                f"{detail_suffix}"
             )
         self.log_path.unlink(missing_ok=True)
 
@@ -272,8 +299,6 @@ def main() -> None:
     video_path = Path(args.video_path)
     if not video_path.is_file():
         raise FileNotFoundError(f"video does not exist: {video_path}")
-    if shutil.which("ffmpeg") is None:
-        raise RuntimeError("ffmpeg is required for the video demo")
     _require_file(Path(args.sam2_checkpoint), "SAM2.1-L checkpoint")
     _require_file(Path(args.tinyvit_stage1_checkpoint), "TinyViT Stage1 checkpoint")
     _require_file(Path(args.tinyvit_backbone_checkpoint), "TinyViT backbone checkpoint")
@@ -337,31 +362,57 @@ def main() -> None:
                 frame_count=frame_count,
             )
             summary["video"] = asdict(video_info)
+        artifacts: list[ModelArtifacts] = []
         for model_spec in model_specs:
-            result = run_model(
+            model_artifacts = run_model(
                 model_spec,
                 video_path=video_path,
                 video_info=video_info,
                 frame_dir=frame_dir,
                 inference_size=inference_size,
                 prompts=prompts,
-                output_dir=output_dir,
-                timing_mode=args.timing_mode,
+                mask_dir=Path(work_dir) / "masks" / model_spec.model_id,
                 external_repo=args.external_repo,
                 sam2_distill_root=args.sam2_distill_root,
                 model_config=args.model_config,
                 device=args.device,
                 display_max_width=args.display_max_width,
                 display_max_height=args.display_max_height,
-                codec=args.codec,
-                preset=args.preset,
-                crf=args.crf,
             )
-            summary["models"].append(result)
+            artifacts.append(model_artifacts)
+            summary["models"].append(model_artifacts.result)
             (output_dir / "summary.json").write_text(
                 json.dumps(summary, indent=2) + "\n",
                 encoding="utf-8",
             )
+        save_videos = confirm_video_save(
+            [artifact.last_overlay for artifact in artifacts],
+            args.display_max_width,
+            args.display_max_height,
+        )
+        summary["video_save_requested"] = save_videos
+        summary["videos_saved"] = False
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if save_videos:
+            for artifact in artifacts:
+                artifact.result["output_paths"] = save_model_outputs(
+                    artifact,
+                    video_path=video_path,
+                    video_info=video_info,
+                    output_dir=output_dir,
+                    timing_mode=args.timing_mode,
+                    codec=args.codec,
+                    preset=args.preset,
+                    crf=args.crf,
+                )
+            summary["videos_saved"] = True
+        (output_dir / "summary.json").write_text(
+            json.dumps(summary, indent=2) + "\n",
+            encoding="utf-8",
+        )
     cv2.destroyAllWindows()
     print(f"Demo complete: {output_dir}")
 
@@ -440,18 +491,14 @@ def run_model(
     frame_dir: Path,
     inference_size: tuple[int, int],
     prompts: list[dict[str, Any]],
-    output_dir: Path,
-    timing_mode: str,
+    mask_dir: Path,
     external_repo: str,
     sam2_distill_root: str,
     model_config: str,
     device: str,
     display_max_width: int,
     display_max_height: int,
-    codec: str,
-    preset: str,
-    crf: int,
-) -> dict[str, Any]:
+) -> ModelArtifacts:
     print(f"Loading {model_spec.model_id}")
     predictor, torch_module, load_summary = build_predictor(
         model_spec,
@@ -461,11 +508,12 @@ def run_model(
         device=device,
     )
     inference_state: dict[str, Any] | None = None
-    writers: dict[str, FFmpegVideoWriter] = {}
     source_capture = cv2.VideoCapture(str(video_path))
     if not source_capture.isOpened():
         raise RuntimeError(f"failed to reopen video: {video_path}")
-    output_paths: dict[str, str] = {}
+    mask_dir.mkdir(parents=True, exist_ok=True)
+    latencies_ms: list[float] = []
+    last_overlay: np.ndarray | None = None
     try:
         inference_state = _init_state(predictor, frame_dir)
         scaled_prompts = scale_prompts(
@@ -479,35 +527,6 @@ def run_model(
             _add_prompt(predictor, inference_state, object_id, prompt)
         _sync(torch_module)
         prompt_ms = (perf_counter() - prompt_start) * 1000.0
-
-        if timing_mode in {"both", "source_fps"}:
-            path = output_dir / f"{model_spec.model_id}_source_fps.mp4"
-            writers["source_fps"] = FFmpegVideoWriter(
-                path,
-                width=video_info.width,
-                height=video_info.height,
-                fps=video_info.fps,
-                source_path=video_path,
-                codec=codec,
-                preset=preset,
-                crf=crf,
-            )
-            output_paths["source_fps"] = str(path)
-        if timing_mode in {"both", "realtime"}:
-            path = output_dir / f"{model_spec.model_id}_realtime.mp4"
-            writers["realtime"] = FFmpegVideoWriter(
-                path,
-                width=video_info.width,
-                height=video_info.height,
-                fps=video_info.fps,
-                source_path=None,
-                codec=codec,
-                preset=preset,
-                crf=crf,
-            )
-            output_paths["realtime"] = str(path)
-
-        latencies_ms: list[float] = []
         source_frame_index = -1
         source_frame: np.ndarray | None = None
         iterator = predictor.propagate_in_video(
@@ -539,22 +558,24 @@ def run_model(
                 mask_logits,
                 target_size=(video_info.width, video_info.height),
             )
+            object_id_values = [int(object_id) for object_id in object_ids]
+            label_map = masks_to_label_map(masks, object_id_values)
+            mask_path = mask_dir / f"{frame_index:06d}.png"
+            if not cv2.imwrite(
+                str(mask_path),
+                label_map,
+                [cv2.IMWRITE_PNG_COMPRESSION, 3],
+            ):
+                raise RuntimeError(f"failed to write temporary mask: {mask_path}")
             overlay = overlay_masks(
                 source_frame,
                 masks,
-                [int(object_id) for object_id in object_ids],
+                object_id_values,
                 model_id=model_spec.model_id,
                 frame_index=frame_index,
                 latency_ms=latency_ms,
             )
-            if "source_fps" in writers:
-                writers["source_fps"].write(overlay)
-            if "realtime" in writers:
-                effective_latency_ms = latency_ms + (prompt_ms if frame_index == 0 else 0.0)
-                writers["realtime"].write(
-                    overlay,
-                    realtime_repeat_count(effective_latency_ms, video_info.fps),
-                )
+            last_overlay = overlay
             latencies_ms.append(latency_ms)
             _show_tracking_frame(
                 overlay,
@@ -568,8 +589,6 @@ def run_model(
                 )
     finally:
         source_capture.release()
-        for writer in writers.values():
-            writer.close()
         if inference_state is not None:
             try:
                 predictor.reset_state(inference_state)
@@ -581,6 +600,8 @@ def run_model(
         if torch_module.cuda.is_available():
             torch_module.cuda.empty_cache()
 
+    if not latencies_ms or last_overlay is None:
+        raise RuntimeError(f"{model_spec.model_id} produced no tracking frames")
     latency_array = np.asarray(latencies_ms, dtype=np.float64)
     result = {
         "model_id": model_spec.model_id,
@@ -590,7 +611,7 @@ def run_model(
         "mean_latency_ms": float(latency_array.mean()),
         "p50_latency_ms": float(np.percentile(latency_array, 50)),
         "p95_latency_ms": float(np.percentile(latency_array, 95)),
-        "output_paths": output_paths,
+        "output_paths": {},
         **load_summary,
     }
     print(
@@ -598,7 +619,182 @@ def run_model(
         f"{result['mean_latency_ms']:.1f} ms over {result['frames']} frames"
     )
     print(json.dumps(result, indent=2))
-    return result
+    return ModelArtifacts(
+        result=result,
+        mask_dir=mask_dir,
+        latencies_ms=latencies_ms,
+        last_overlay=last_overlay,
+    )
+
+
+def masks_to_label_map(masks: np.ndarray, object_ids: list[int]) -> np.ndarray:
+    if masks.ndim != 3:
+        raise ValueError(f"masks must have shape [objects, height, width], got {masks.shape}")
+    label_map = np.zeros(masks.shape[1:], dtype=np.uint8)
+    for mask, object_id in zip(masks, object_ids, strict=False):
+        if not 0 < object_id < 256:
+            raise ValueError(f"object ID must fit uint8 label map: {object_id}")
+        label_map[mask] = object_id
+    return label_map
+
+
+def confirm_video_save(
+    previews: list[np.ndarray],
+    display_max_width: int,
+    display_max_height: int,
+) -> bool:
+    if not previews:
+        return False
+    preview_width = max(1, display_max_width // len(previews))
+    displays: list[np.ndarray] = []
+    for preview in previews:
+        scale = display_scale(
+            preview.shape[:2],
+            preview_width,
+            display_max_height,
+        )
+        if scale < 1.0:
+            preview = cv2.resize(
+                preview,
+                (
+                    max(1, int(round(preview.shape[1] * scale))),
+                    max(1, int(round(preview.shape[0] * scale))),
+                ),
+                interpolation=cv2.INTER_AREA,
+            )
+        displays.append(preview)
+    min_height = min(display.shape[0] for display in displays)
+    displays = [
+        cv2.resize(
+            display,
+            (
+                max(1, int(round(display.shape[1] * min_height / display.shape[0]))),
+                min_height,
+            ),
+            interpolation=cv2.INTER_AREA,
+        )
+        if display.shape[0] != min_height
+        else display
+        for display in displays
+    ]
+    combined = np.hstack(displays)
+    window_name = "SAM2 video demo complete"
+    print("Tracking complete. Enter/Space/S: save videos  N/Q/Esc: discard videos")
+    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+    try:
+        while True:
+            cv2.imshow(window_name, combined)
+            key = cv2.waitKey(20) & 0xFF
+            if key in {10, 13, 32, ord("s"), ord("y")}:
+                return True
+            if key in {27, ord("n"), ord("q")}:
+                return False
+            if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                return False
+    finally:
+        cv2.destroyWindow(window_name)
+
+
+def save_model_outputs(
+    artifacts: ModelArtifacts,
+    *,
+    video_path: Path,
+    video_info: VideoInfo,
+    output_dir: Path,
+    timing_mode: str,
+    codec: str,
+    preset: str,
+    crf: int,
+) -> dict[str, str]:
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError("ffmpeg is required to save the overlay videos")
+    codec = resolve_ffmpeg_codec(codec)
+    modes = (
+        ("source_fps",) if timing_mode == "source_fps"
+        else ("realtime",) if timing_mode == "realtime"
+        else ("source_fps", "realtime")
+    )
+    output_paths: dict[str, str] = {}
+    for mode in modes:
+        output_path = output_dir / f"{artifacts.result['model_id']}_{mode}.mp4"
+        _encode_model_output(
+            artifacts,
+            video_path=video_path,
+            video_info=video_info,
+            output_path=output_path,
+            mode=mode,
+            codec=codec,
+            preset=preset,
+            crf=crf,
+        )
+        output_paths[mode] = str(output_path)
+    return output_paths
+
+
+def _encode_model_output(
+    artifacts: ModelArtifacts,
+    *,
+    video_path: Path,
+    video_info: VideoInfo,
+    output_path: Path,
+    mode: str,
+    codec: str,
+    preset: str,
+    crf: int,
+) -> None:
+    writer = FFmpegVideoWriter(
+        output_path,
+        width=video_info.width,
+        height=video_info.height,
+        fps=video_info.fps,
+        source_path=video_path if mode == "source_fps" else None,
+        codec=codec,
+        preset=preset,
+        crf=crf,
+    )
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        writer.close()
+        raise RuntimeError(f"failed to reopen video for encoding: {video_path}")
+    print(f"Encoding {output_path}")
+    try:
+        for frame_index, latency_ms in enumerate(artifacts.latencies_ms):
+            ok, frame = capture.read()
+            if not ok:
+                raise RuntimeError(f"source video ended before frame {frame_index}")
+            label_map = cv2.imread(
+                str(artifacts.mask_dir / f"{frame_index:06d}.png"),
+                cv2.IMREAD_GRAYSCALE,
+            )
+            if label_map is None:
+                raise RuntimeError(f"missing temporary mask for frame {frame_index}")
+            masks = np.stack(
+                [label_map == object_id for object_id in range(1, OBJECT_COUNT + 1)],
+                axis=0,
+            )
+            overlay = overlay_masks(
+                frame,
+                masks,
+                list(range(1, OBJECT_COUNT + 1)),
+                model_id=str(artifacts.result["model_id"]),
+                frame_index=frame_index,
+                latency_ms=latency_ms,
+            )
+            repeat_count = 1
+            if mode == "realtime":
+                effective_latency_ms = latency_ms
+                if frame_index == 0:
+                    effective_latency_ms += float(artifacts.result["prompt_ms"])
+                repeat_count = realtime_repeat_count(
+                    effective_latency_ms,
+                    video_info.fps,
+                )
+            writer.write(overlay, repeat_count)
+            if (frame_index + 1) % 100 == 0:
+                print(f"Encoded {frame_index + 1}/{len(artifacts.latencies_ms)} frames")
+    finally:
+        capture.release()
+        writer.close()
 
 
 def build_predictor(
@@ -748,6 +944,54 @@ def realtime_repeat_count(latency_ms: float, fps: float) -> int:
     if fps <= 0.0:
         raise ValueError("fps must be positive")
     return max(1, int(math.ceil(max(0.0, latency_ms) * fps / 1000.0)))
+
+
+def ffmpeg_video_args(
+    codec: str,
+    *,
+    preset: str,
+    crf: int,
+    width: int,
+    height: int,
+    fps: float,
+) -> list[str]:
+    if codec in {"libx264", "libx265"}:
+        return ["-c:v", codec, "-preset", preset, "-crf", str(crf)]
+    if codec == "mpeg4":
+        return ["-c:v", codec, "-q:v", "2"]
+    bitrate_mbps = max(12, int(math.ceil(width * height * fps * 0.16 / 1_000_000.0)))
+    return ["-c:v", codec, "-b:v", f"{bitrate_mbps}M"]
+
+
+def resolve_ffmpeg_codec(requested_codec: str) -> str:
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    encoder_text = result.stdout + result.stderr
+    available = {
+        line.split()[1]
+        for line in encoder_text.splitlines()
+        if len(line.split()) >= 2 and line.lstrip().startswith("V")
+    }
+    if requested_codec in available:
+        return requested_codec
+    if requested_codec != "libx264":
+        raise RuntimeError(
+            f"requested FFmpeg encoder is unavailable: {requested_codec}"
+        )
+    for candidate in ("h264_nvmpi", "h264_v4l2m2m", "h264_nvenc", "mpeg4"):
+        if candidate in available:
+            print(
+                f"FFmpeg encoder libx264 is unavailable; using {candidate} instead"
+            )
+            return candidate
+    raise RuntimeError(
+        "no supported FFmpeg video encoder is available; checked libx264, "
+        "h264_nvmpi, h264_v4l2m2m, h264_nvenc, and mpeg4"
+    )
 
 
 def _init_state(predictor: Any, frame_dir: Path) -> dict[str, Any]:

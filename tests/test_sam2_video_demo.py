@@ -6,6 +6,8 @@ import numpy as np
 
 from sam_backend.sam2_video_demo import (
     display_scale,
+    ffmpeg_video_args,
+    masks_to_label_map,
     overlay_masks,
     realtime_repeat_count,
     resize_masks,
@@ -69,9 +71,47 @@ class Sam2VideoDemoTest(unittest.TestCase):
         self.assertEqual(overlay.shape, frame.shape)
         self.assertGreater(int(overlay.sum()), 0)
 
+    def test_compacts_three_masks_into_object_id_label_map(self) -> None:
+        masks = np.zeros((3, 4, 5), dtype=bool)
+        masks[0, 0:2, 0:2] = True
+        masks[1, 2:4, 2:4] = True
+        masks[2, 1:3, 4] = True
+
+        label_map = masks_to_label_map(masks, [1, 2, 3])
+
+        self.assertEqual(label_map.dtype, np.uint8)
+        self.assertEqual(set(np.unique(label_map)), {0, 1, 2, 3})
+        self.assertEqual(int(label_map[0, 0]), 1)
+        self.assertEqual(int(label_map[3, 3]), 2)
+        self.assertEqual(int(label_map[2, 4]), 3)
+
     def test_display_scale_bounds_portrait_video(self) -> None:
         self.assertAlmostEqual(display_scale((3840, 2160), 1600, 900), 900 / 3840)
         self.assertEqual(display_scale((480, 640), 1600, 900), 1.0)
+
+    def test_ffmpeg_software_and_hardware_codec_arguments_differ(self) -> None:
+        self.assertEqual(
+            ffmpeg_video_args(
+                "libx264",
+                preset="medium",
+                crf=18,
+                width=1920,
+                height=1080,
+                fps=30.0,
+            ),
+            ["-c:v", "libx264", "-preset", "medium", "-crf", "18"],
+        )
+        self.assertEqual(
+            ffmpeg_video_args(
+                "h264_v4l2m2m",
+                preset="medium",
+                crf=18,
+                width=3840,
+                height=2160,
+                fps=60.0,
+            ),
+            ["-c:v", "h264_v4l2m2m", "-b:v", "80M"],
+        )
 
 
 if __name__ == "__main__":

@@ -456,6 +456,9 @@ The first frame opens before either model runs. A click adds a point-prompt
 object and a left-button drag adds a box-prompt object. Select exactly three
 objects, then press Enter or Space. `u` removes the last object, `r` clears all
 objects, and `q` or Escape cancels. Both models reuse the same saved prompts.
+Both tracking passes finish and display their results before any MP4 encoding
+starts. The final comparison window accepts Enter, Space, or `s` to save the
+requested videos; `n`, `q`, or Escape discards the videos.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -474,7 +477,7 @@ python -m sam_backend.sam2_video_demo \
   --output-dir overlays/thor/video_demo/iphone16pro_three_objects
 ```
 
-Verify the system encoder once before the run:
+Verify the system encoder before choosing to save:
 
 ```bash
 ffmpeg -version
@@ -482,6 +485,10 @@ ffmpeg -version
 
 If that command is missing on Thor, install the Ubuntu package once with
 `sudo apt-get update && sudo apt-get install -y ffmpeg`.
+The saver prefers `libx264`. If that encoder is absent from the Thor FFmpeg
+build, it automatically checks `h264_nvmpi`, `h264_v4l2m2m`, `h264_nvenc`, and
+finally high-quality `mpeg4`; hardware encoders use a resolution/FPS-scaled
+bitrate instead of unsupported x264 CRF flags.
 
 `--timing-mode` accepts:
 
@@ -499,22 +506,23 @@ at CRF 18 by default. Overlay rendering requires re-encoding and OpenCV uses an
 8-bit BGR path, so iPhone HDR/Dolby Vision bit depth and codec metadata are not
 bit-for-bit preserved.
 
-The output directory contains:
+The output directory always contains `prompts.json` and `summary.json`. When
+the final save choice is accepted it also contains:
 
 ```text
-prompts.json
 sam2p1_l_source_fps.mp4
 sam2p1_l_realtime.mp4
 tv5m_projection_source_fps.mp4
 tv5m_projection_realtime.mp4
-summary.json
 ```
 
 Each model's `summary.json` record includes `frames`, `prompt_ms`,
 `mean_latency_ms`, `p50_latency_ms`, and `p95_latency_ms`. Tracking latency is
 measured around each native `propagate_in_video` step with CUDA synchronization.
 The separate `prompt_ms` covers initialization of all three objects and is not
-included in `mean_latency_ms`.
+included in `mean_latency_ms`. `videos_saved` records the final save/discard
+choice. During inference, compact one-channel object-ID masks are held in a
+temporary directory; they are removed after deferred encoding or discard.
 
 For **RepViT-M0.9 Stage1 encoder + SAM2.1-L online memory tracking**, place
 the full distilled Stage1 `best.pt` and optional ImageNet initialization at the
