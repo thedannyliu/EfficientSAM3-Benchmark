@@ -8,6 +8,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+from collections import deque
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from fractions import Fraction
@@ -58,6 +59,17 @@ class ModelArtifacts:
     last_overlay: np.ndarray
 
 
+@dataclass
+class SaveControl:
+    armed: bool = False
+
+
+@dataclass(frozen=True)
+class SaveDecision:
+    timing_mode: str | None
+    speed: float
+
+
 class FFmpegVideoWriter:
     def __init__(
         self,
@@ -70,6 +82,7 @@ class FFmpegVideoWriter:
         codec: str,
         preset: str,
         crf: int,
+        audio_speed: float = 1.0,
     ) -> None:
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg is required for the video demo")
@@ -96,7 +109,8 @@ class FFmpegVideoWriter:
             "-i",
             "pipe:0",
         ]
-        if source_path is not None:
+        source_has_audio = source_path is not None and _ffprobe_has_audio(source_path)
+        if source_has_audio:
             command.extend(["-i", str(source_path), "-map", "0:v:0", "-map", "1:a?"])
         command.extend(
             ffmpeg_video_args(
@@ -108,7 +122,9 @@ class FFmpegVideoWriter:
                 fps=fps,
             )
         )
-        if source_path is not None:
+        if source_has_audio:
+            if audio_speed != 1.0:
+                command.extend(["-filter:a", atempo_filter(audio_speed)])
             command.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
         else:
             command.append("-an")
@@ -291,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--codec", default="libx264")
     parser.add_argument("--preset", default="medium")
     parser.add_argument("--crf", type=int, default=18)
+    parser.add_argument("--save-speed", type=float, default=1.0)
     return parser
 
 
@@ -299,6 +316,8 @@ def main() -> None:
     video_path = Path(args.video_path)
     if not video_path.is_file():
         raise FileNotFoundError(f"video does not exist: {video_path}")
+    if args.save_speed <= 0.0:
+        raise ValueError("save-speed must be positive")
     _require_file(Path(args.sam2_checkpoint), "SAM2.1-L checkpoint")
     _require_file(Path(args.tinyvit_stage1_checkpoint), "TinyViT Stage1 checkpoint")
     _require_file(Path(args.tinyvit_backbone_checkpoint), "TinyViT backbone checkpoint")
@@ -363,6 +382,7 @@ def main() -> None:
             )
             summary["video"] = asdict(video_info)
         artifacts: list[ModelArtifacts] = []
+        save_control = SaveControl()
         for model_spec in model_specs:
             model_artifacts = run_model(
                 model_spec,
@@ -378,6 +398,7 @@ def main() -> None:
                 device=args.device,
                 display_max_width=args.display_max_width,
                 display_max_height=args.display_max_height,
+                save_control=save_control,
             )
             artifacts.append(model_artifacts)
             summary["models"].append(model_artifacts.result)
@@ -385,25 +406,42 @@ def main() -> None:
                 json.dumps(summary, indent=2) + "\n",
                 encoding="utf-8",
             )
-        save_videos = confirm_video_save(
-            [artifact.last_overlay for artifact in artifacts],
-            args.display_max_width,
-            args.display_max_height,
-        )
-        summary["video_save_requested"] = save_videos
+        if save_control.armed:
+            decision = SaveDecision(args.timing_mode, args.save_speed)
+            print(
+                "Automatic save was armed during tracking: "
+                f"mode={decision.timing_mode} speed={decision.speed:g}x"
+            )
+        else:
+            decision = choose_video_save(
+                [artifact.last_overlay for artifact in artifacts],
+                args.display_max_width,
+                args.display_max_height,
+                default_timing_mode=args.timing_mode,
+                default_speed=args.save_speed,
+            )
+        summary["video_save_requested"] = decision.timing_mode is not None
         summary["videos_saved"] = False
+        summary["save_timing_mode"] = decision.timing_mode
+        summary["save_speed"] = decision.speed
+        summary["save_output_fps"] = (
+            video_info.fps * decision.speed
+            if decision.timing_mode is not None
+            else None
+        )
         (output_dir / "summary.json").write_text(
             json.dumps(summary, indent=2) + "\n",
             encoding="utf-8",
         )
-        if save_videos:
+        if decision.timing_mode is not None:
             for artifact in artifacts:
                 artifact.result["output_paths"] = save_model_outputs(
                     artifact,
                     video_path=video_path,
                     video_info=video_info,
                     output_dir=output_dir,
-                    timing_mode=args.timing_mode,
+                    timing_mode=decision.timing_mode,
+                    speed=decision.speed,
                     codec=args.codec,
                     preset=args.preset,
                     crf=args.crf,
@@ -498,6 +536,7 @@ def run_model(
     device: str,
     display_max_width: int,
     display_max_height: int,
+    save_control: SaveControl,
 ) -> ModelArtifacts:
     print(f"Loading {model_spec.model_id}")
     predictor, torch_module, load_summary = build_predictor(
@@ -513,6 +552,9 @@ def run_model(
         raise RuntimeError(f"failed to reopen video: {video_path}")
     mask_dir.mkdir(parents=True, exist_ok=True)
     latencies_ms: list[float] = []
+    completion_times: deque[float] = deque(maxlen=60)
+    first_completion_time: float | None = None
+    last_completion_time: float | None = None
     last_overlay: np.ndarray | None = None
     try:
         inference_state = _init_state(predictor, frame_dir)
@@ -567,6 +609,11 @@ def run_model(
                 [cv2.IMWRITE_PNG_COMPRESSION, 3],
             ):
                 raise RuntimeError(f"failed to write temporary mask: {mask_path}")
+            completed_at = perf_counter()
+            completion_times.append(completed_at)
+            if first_completion_time is None:
+                first_completion_time = completed_at
+            last_completion_time = completed_at
             overlay = overlay_masks(
                 source_frame,
                 masks,
@@ -574,6 +621,7 @@ def run_model(
                 model_id=model_spec.model_id,
                 frame_index=frame_index,
                 latency_ms=latency_ms,
+                display_fps=rolling_fps(completion_times),
             )
             last_overlay = overlay
             latencies_ms.append(latency_ms)
@@ -581,6 +629,7 @@ def run_model(
                 overlay,
                 display_max_width,
                 display_max_height,
+                save_control,
             )
             if frame_index % 30 == 0 or frame_index + 1 == video_info.frame_count:
                 print(
@@ -603,6 +652,16 @@ def run_model(
     if not latencies_ms or last_overlay is None:
         raise RuntimeError(f"{model_spec.model_id} produced no tracking frames")
     latency_array = np.asarray(latencies_ms, dtype=np.float64)
+    mean_display_fps = None
+    if (
+        len(latencies_ms) > 1
+        and first_completion_time is not None
+        and last_completion_time is not None
+        and last_completion_time > first_completion_time
+    ):
+        mean_display_fps = (
+            (len(latencies_ms) - 1) / (last_completion_time - first_completion_time)
+        )
     result = {
         "model_id": model_spec.model_id,
         "model_kind": model_spec.model_kind,
@@ -611,6 +670,7 @@ def run_model(
         "mean_latency_ms": float(latency_array.mean()),
         "p50_latency_ms": float(np.percentile(latency_array, 50)),
         "p95_latency_ms": float(np.percentile(latency_array, 95)),
+        "mean_display_fps": mean_display_fps,
         "output_paths": {},
         **load_summary,
     }
@@ -618,6 +678,11 @@ def run_model(
         f"{model_spec.model_id}: average tracking latency "
         f"{result['mean_latency_ms']:.1f} ms over {result['frames']} frames"
     )
+    if mean_display_fps is not None:
+        print(
+            f"{model_spec.model_id}: average interactive display rate "
+            f"{mean_display_fps:.1f} FPS"
+        )
     print(json.dumps(result, indent=2))
     return ModelArtifacts(
         result=result,
@@ -638,13 +703,16 @@ def masks_to_label_map(masks: np.ndarray, object_ids: list[int]) -> np.ndarray:
     return label_map
 
 
-def confirm_video_save(
+def choose_video_save(
     previews: list[np.ndarray],
     display_max_width: int,
     display_max_height: int,
-) -> bool:
+    *,
+    default_timing_mode: str,
+    default_speed: float,
+) -> SaveDecision:
     if not previews:
-        return False
+        return SaveDecision(None, default_speed)
     preview_width = max(1, display_max_width // len(previews))
     displays: list[np.ndarray] = []
     for preview in previews:
@@ -679,18 +747,37 @@ def confirm_video_save(
     ]
     combined = np.hstack(displays)
     window_name = "SAM2 video demo complete"
-    print("Tracking complete. Enter/Space/S: save videos  N/Q/Esc: discard videos")
+    speed = default_speed
+    print("Tracking complete. F: without latency  L: with latency  B: both")
+    print("Set speed with 1/2/4/8. Enter/Space/S uses command defaults. N/Q/Esc: discard")
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     try:
         while True:
-            cv2.imshow(window_name, combined)
+            display = combined.copy()
+            _draw_label(
+                display,
+                f"Default {default_timing_mode} | Save speed {speed:g}x",
+                (18, max(60, display.shape[0] - 24)),
+                (40, 220, 255),
+            )
+            cv2.imshow(window_name, display)
             key = cv2.waitKey(20) & 0xFF
-            if key in {10, 13, 32, ord("s"), ord("y")}:
-                return True
-            if key in {27, ord("n"), ord("q")}:
-                return False
+            if key in {ord("1"), ord("2"), ord("4"), ord("8")}:
+                speed = float(chr(key))
+                print(f"Save speed set to {speed:g}x")
+                continue
+            if key in {ord("f"), ord("F")}:
+                return SaveDecision("source_fps", speed)
+            if key in {ord("l"), ord("L")}:
+                return SaveDecision("realtime", speed)
+            if key in {ord("b"), ord("B")}:
+                return SaveDecision("both", speed)
+            if key in {10, 13, 32, ord("s"), ord("S"), ord("y"), ord("Y")}:
+                return SaveDecision(default_timing_mode, speed)
+            if key in {27, ord("n"), ord("N"), ord("q"), ord("Q")}:
+                return SaveDecision(None, speed)
             if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-                return False
+                return SaveDecision(None, speed)
     finally:
         cv2.destroyWindow(window_name)
 
@@ -702,12 +789,15 @@ def save_model_outputs(
     video_info: VideoInfo,
     output_dir: Path,
     timing_mode: str,
+    speed: float,
     codec: str,
     preset: str,
     crf: int,
 ) -> dict[str, str]:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is required to save the overlay videos")
+    if speed <= 0.0:
+        raise ValueError("save speed must be positive")
     codec = resolve_ffmpeg_codec(codec)
     modes = (
         ("source_fps",) if timing_mode == "source_fps"
@@ -716,13 +806,17 @@ def save_model_outputs(
     )
     output_paths: dict[str, str] = {}
     for mode in modes:
-        output_path = output_dir / f"{artifacts.result['model_id']}_{mode}.mp4"
+        speed_suffix = "" if speed == 1.0 else f"_{_format_speed(speed)}x"
+        output_path = output_dir / (
+            f"{artifacts.result['model_id']}_{mode}{speed_suffix}.mp4"
+        )
         _encode_model_output(
             artifacts,
             video_path=video_path,
             video_info=video_info,
             output_path=output_path,
             mode=mode,
+            speed=speed,
             codec=codec,
             preset=preset,
             crf=crf,
@@ -738,6 +832,7 @@ def _encode_model_output(
     video_info: VideoInfo,
     output_path: Path,
     mode: str,
+    speed: float,
     codec: str,
     preset: str,
     crf: int,
@@ -746,11 +841,12 @@ def _encode_model_output(
         output_path,
         width=video_info.width,
         height=video_info.height,
-        fps=video_info.fps,
+        fps=video_info.fps * speed,
         source_path=video_path if mode == "source_fps" else None,
         codec=codec,
         preset=preset,
         crf=crf,
+        audio_speed=speed,
     )
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
@@ -911,6 +1007,7 @@ def overlay_masks(
     model_id: str,
     frame_index: int,
     latency_ms: float,
+    display_fps: float | None = None,
 ) -> np.ndarray:
     overlay = frame_bgr.copy()
     for mask, object_id in zip(masks, object_ids, strict=False):
@@ -933,10 +1030,13 @@ def overlay_masks(
                 (int(xs.min()), max(24, int(ys.min()) - 8)),
                 color,
             )
-    _draw_status(
-        overlay,
-        f"{model_id}  frame {frame_index}  objects {len(object_ids)}  {latency_ms:.1f} ms",
+    status = (
+        f"{model_id}  frame {frame_index}  objects {len(object_ids)}  "
+        f"{latency_ms:.1f} ms"
     )
+    if display_fps is not None:
+        status += f"  display {display_fps:.1f} FPS"
+    _draw_status(overlay, status)
     return overlay
 
 
@@ -944,6 +1044,15 @@ def realtime_repeat_count(latency_ms: float, fps: float) -> int:
     if fps <= 0.0:
         raise ValueError("fps must be positive")
     return max(1, int(math.ceil(max(0.0, latency_ms) * fps / 1000.0)))
+
+
+def rolling_fps(completion_times: deque[float]) -> float | None:
+    if len(completion_times) < 2:
+        return None
+    duration = completion_times[-1] - completion_times[0]
+    if duration <= 0.0:
+        return None
+    return (len(completion_times) - 1) / duration
 
 
 def ffmpeg_video_args(
@@ -994,6 +1103,24 @@ def resolve_ffmpeg_codec(requested_codec: str) -> str:
     )
 
 
+def atempo_filter(speed: float) -> str:
+    if speed <= 0.0:
+        raise ValueError("audio speed must be positive")
+    factors: list[float] = []
+    remaining = speed
+    while remaining > 2.0:
+        factors.append(2.0)
+        remaining /= 2.0
+    while remaining < 0.5:
+        factors.append(0.5)
+        remaining /= 0.5
+    if not math.isclose(remaining, 1.0):
+        factors.append(remaining)
+    if not factors:
+        factors.append(1.0)
+    return ",".join(f"atempo={factor:g}" for factor in factors)
+
+
 def _init_state(predictor: Any, frame_dir: Path) -> dict[str, Any]:
     parameters = inspect.signature(predictor.init_state).parameters
     kwargs: dict[str, Any] = {"video_path": str(frame_dir)}
@@ -1038,26 +1165,40 @@ def _show_tracking_frame(
     frame_bgr: np.ndarray,
     display_max_width: int,
     display_max_height: int,
+    save_control: SaveControl,
 ) -> None:
+    display_frame = frame_bgr.copy()
+    if save_control.armed:
+        _draw_label(
+            display_frame,
+            "SAVE ARMED",
+            (18, max(60, display_frame.shape[0] - 24)),
+            (40, 220, 255),
+        )
     scale = display_scale(
-        frame_bgr.shape[:2],
+        display_frame.shape[:2],
         display_max_width,
         display_max_height,
     )
     if scale < 1.0:
         display = cv2.resize(
-            frame_bgr,
+            display_frame,
             (
-                max(1, int(round(frame_bgr.shape[1] * scale))),
-                max(1, int(round(frame_bgr.shape[0] * scale))),
+                max(1, int(round(display_frame.shape[1] * scale))),
+                max(1, int(round(display_frame.shape[0] * scale))),
             ),
             interpolation=cv2.INTER_AREA,
         )
     else:
-        display = frame_bgr
+        display = display_frame
     cv2.imshow("SAM2 video demo tracking", display)
-    if cv2.waitKey(1) & 0xFF in {27, ord("q")}:
+    key = cv2.waitKey(1) & 0xFF
+    if key in {27, ord("q"), ord("Q")}:
         raise KeyboardInterrupt
+    if key in {ord("s"), ord("S")}:
+        save_control.armed = not save_control.armed
+        state = "armed" if save_control.armed else "disarmed"
+        print(f"Automatic video save {state}")
 
 
 def display_scale(
@@ -1150,8 +1291,35 @@ def _ffprobe_fps(video_path: Path) -> float:
         return 0.0
 
 
+def _ffprobe_has_audio(video_path: Path) -> bool:
+    if shutil.which("ffprobe") is None:
+        return False
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a:0",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+            str(video_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
 def _format_fps(fps: float) -> str:
     return f"{fps:.8f}".rstrip("0").rstrip(".")
+
+
+def _format_speed(speed: float) -> str:
+    return f"{speed:g}".replace(".", "p")
 
 
 def _resolve_output_dir(raw_output_dir: str, video_path: Path) -> Path:

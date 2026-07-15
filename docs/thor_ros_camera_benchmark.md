@@ -458,7 +458,18 @@ objects, then press Enter or Space. `u` removes the last object, `r` clears all
 objects, and `q` or Escape cancels. Both models reuse the same saved prompts.
 Both tracking passes finish and display their results before any MP4 encoding
 starts. The final comparison window accepts Enter, Space, or `s` to save the
-requested videos; `n`, `q`, or Escape discards the videos.
+command defaults. Press `f` to save only the latency-removed source-FPS video,
+`l` to save only the measured-latency video, `b` to save both, or `n`, `q`, or
+Escape to discard videos. Before choosing a mode, `1`, `2`, `4`, and `8` set
+the saved playback-speed multiplier.
+
+During either model's tracking pass, press `s` once to arm automatic saving;
+press it again to disarm. An armed run skips the final menu and saves with the
+command's `--timing-mode` and `--save-speed` values. `SAVE ARMED` appears in
+the live window but is not burned into the output video. The live status also
+shows a rolling display FPS calculated from the latest completed frames; this
+can be lower than `1000 / latency_ms` because it includes mask storage,
+overlay rendering, and display work.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -474,6 +485,7 @@ python -m sam_backend.sam2_video_demo \
   --tinyvit-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
   --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
   --device cuda \
+  --save-speed 1 \
   --output-dir overlays/thor/video_demo/iphone16pro_three_objects
 ```
 
@@ -498,6 +510,12 @@ bitrate instead of unsupported x264 CRF flags.
 | `realtime` | writes at the same nominal source FPS but repeats each overlay according to synchronized per-frame inference latency; this exposes tracking delay and omits audio because the duration changes |
 | `both` | produces both outputs for both models |
 
+`--save-speed` accepts any positive multiplier. `2` keeps every overlay frame
+but doubles the encoded FPS, producing half the duration; `4` produces one
+quarter of the duration. Source audio is accelerated by the same factor using
+an FFmpeg `atempo` chain. A non-1x filename includes the multiplier, for
+example `sam2p1_l_source_fps_2x.mp4`.
+
 The runner preserves the decoded source width, height, frame count, and average
 source FPS. SAM2 inference frames are downscaled to at most 1024 pixels on the
 long side because SAM2 internally evaluates at 1024, while masks are resized
@@ -517,12 +535,16 @@ tv5m_projection_realtime.mp4
 ```
 
 Each model's `summary.json` record includes `frames`, `prompt_ms`,
-`mean_latency_ms`, `p50_latency_ms`, and `p95_latency_ms`. Tracking latency is
-measured around each native `propagate_in_video` step with CUDA synchronization.
+`mean_latency_ms`, `p50_latency_ms`, `p95_latency_ms`, and
+`mean_display_fps`. Tracking latency is measured around each native
+`propagate_in_video` step with CUDA synchronization; display FPS covers the
+complete result-to-result wall-clock pipeline.
 The separate `prompt_ms` covers initialization of all three objects and is not
 included in `mean_latency_ms`. `videos_saved` records the final save/discard
-choice. During inference, compact one-channel object-ID masks are held in a
-temporary directory; they are removed after deferred encoding or discard.
+choice; `save_timing_mode`, `save_speed`, and `save_output_fps` record the
+selected output mode, multiplier, and encoded nominal FPS. During inference,
+compact one-channel object-ID masks are held in a temporary directory; they
+are removed after deferred encoding or discard.
 
 For **RepViT-M0.9 Stage1 encoder + SAM2.1-L online memory tracking**, place
 the full distilled Stage1 `best.pt` and optional ImageNet initialization at the

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from collections import deque
 
 import numpy as np
 
 from sam_backend.sam2_video_demo import (
+    atempo_filter,
     display_scale,
     ffmpeg_video_args,
     masks_to_label_map,
     overlay_masks,
     realtime_repeat_count,
     resize_masks,
+    rolling_fps,
     scale_prompts,
 )
 
@@ -112,6 +115,17 @@ class Sam2VideoDemoTest(unittest.TestCase):
             ),
             ["-c:v", "h264_v4l2m2m", "-b:v", "80M"],
         )
+
+    def test_audio_speed_filter_chains_supported_atempo_ranges(self) -> None:
+        self.assertEqual(atempo_filter(1.0), "atempo=1")
+        self.assertEqual(atempo_filter(2.0), "atempo=2")
+        self.assertEqual(atempo_filter(4.0), "atempo=2,atempo=2")
+        self.assertEqual(atempo_filter(8.0), "atempo=2,atempo=2,atempo=2")
+        self.assertEqual(atempo_filter(0.25), "atempo=0.5,atempo=0.5")
+
+    def test_rolling_display_fps_uses_recent_completion_times(self) -> None:
+        self.assertIsNone(rolling_fps(deque([1.0])))
+        self.assertEqual(rolling_fps(deque([1.0, 1.5, 2.0])), 2.0)
 
 
 if __name__ == "__main__":
