@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import traceback
 from collections import OrderedDict, deque
-from time import perf_counter
+from threading import Lock, Thread
+from time import perf_counter, sleep
 from typing import Any
 
 import cv2
@@ -11,6 +12,7 @@ import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from PIL import Image as PILImage
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -104,6 +106,9 @@ class Sam2OnlineTrackingNode(Node):
         self.original_frames: dict[int, np.ndarray] = {}
         self.headers: dict[int, Any] = {}
         self.result_times: deque[float] = deque(maxlen=60)
+        self.model_lock = Lock()
+        self.pending_prompts: deque[dict[str, Any]] = deque()
+        self.reset_requested = False
 
         self.predictor, self.torch_module, self.load_summary = _build_predictor_from_params(self)
         self.params = parameter_counts(self.predictor)
@@ -118,18 +123,30 @@ class Sam2OnlineTrackingNode(Node):
         mask_topic = str(self.get_parameter("mask_topic").value)
         segmented_image_topic = str(self.get_parameter("segmented_image_topic").value)
         overlay_topic = str(self.get_parameter("overlay_topic").value)
-        display_fps = float(self.get_parameter("display_fps").value)
+        self.display_fps = max(1.0, float(self.get_parameter("display_fps").value))
 
         self.result_publisher = self.create_publisher(String, result_topic, 10)
         self.mask_publisher = self.create_publisher(Image, mask_topic, 10)
         self.segmented_image_publisher = self.create_publisher(Image, segmented_image_topic, 10)
         self.overlay_publisher = self.create_publisher(Image, overlay_topic, 10) if overlay_topic else None
-        self.subscription = self.create_subscription(Image, image_topic, self.on_image, image_qos)
-        self.timer = self.create_timer(1.0 / display_fps, self.display) if self.enable_display else None
+        self.subscription = self.create_subscription(
+            Image,
+            image_topic,
+            self.on_image,
+            image_qos,
+        )
 
         if self.enable_display:
             cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
             cv2.setMouseCallback(self.window_name, self.on_mouse)
+            waiting_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            self.latest_display = _scale_display(
+                _status_overlay(waiting_frame, f"Waiting for {image_topic}"),
+                self.display_scale,
+                self.display_max_width,
+            )[0]
+            cv2.imshow(self.window_name, self.latest_display)
+            cv2.waitKey(1)
         self.get_logger().info(
             f"listening on {image_topic}; click for point or drag for box; "
             f"input_queue_size={self.input_queue_size} "
@@ -153,7 +170,7 @@ class Sam2OnlineTrackingNode(Node):
         )
 
     def on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
-        if self.latest_frame is None or self.state == "processing":
+        if self.latest_frame is None:
             return
         scale = self.current_display_scale if self.current_display_scale > 0 else 1.0
         point = left_panel_click_to_image_point(x / scale, y / scale, self.latest_frame.shape[:2])
@@ -173,21 +190,24 @@ class Sam2OnlineTrackingNode(Node):
         self.drag_start = None
         box = left_panel_drag_to_image_box(start, point, self.latest_frame.shape[:2], min_size=self.box_drag_min_pixels)
         if box is None:
-            obj_id = self._add_object({"prompt_mode": "point", "point": point, "label": 1})
-            if obj_id is not None:
-                self.get_logger().info(f"added object {obj_id} from point x={point[0]:.1f} y={point[1]:.1f}")
+            prompt = {"prompt_mode": "point", "point": point, "label": 1}
         else:
-            obj_id = self._add_object({"prompt_mode": "box", "box": box})
-            if obj_id is not None:
-                self.get_logger().info(
-                    f"added object {obj_id} from box x1={box[0]:.1f} y1={box[1]:.1f} "
-                    f"x2={box[2]:.1f} y2={box[3]:.1f}"
-                )
+            prompt = {"prompt_mode": "box", "box": box}
+        obj_id = self._add_object(prompt, queue_if_busy=True)
+        if obj_id is not None:
+            self._log_added_object(obj_id, prompt)
 
     def on_image(self, msg: Image) -> None:
         frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
         self.latest_frame = frame
         self.latest_header = msg.header
+
+        if self.reset_requested and self.model_lock.acquire(blocking=False):
+            try:
+                self._clear_state()
+                self.get_logger().info("reset native SAM2 online tracking state")
+            finally:
+                self.model_lock.release()
 
         if self.auto_start and self.state == "waiting_for_prompt":
             self.auto_start = False
@@ -208,7 +228,18 @@ class Sam2OnlineTrackingNode(Node):
 
         self._track_frame(frame, msg.header)
 
-    def _add_object(self, prompt: dict[str, Any]) -> int | None:
+    def _add_object(self, prompt: dict[str, Any], *, queue_if_busy: bool = False) -> int | None:
+        if not self.model_lock.acquire(blocking=False):
+            if queue_if_busy:
+                self.pending_prompts.append(prompt)
+                self.get_logger().info(f"queued {prompt['prompt_mode']} prompt until the current frame finishes")
+            return None
+        try:
+            return self._add_object_locked(prompt)
+        finally:
+            self.model_lock.release()
+
+    def _add_object_locked(self, prompt: dict[str, Any]) -> int | None:
         obj_id = self.next_object_id
         if self.inference_state is None or self.state == "waiting_for_prompt":
             return obj_id if self._reset_and_start(prompt, obj_id) else None
@@ -333,6 +364,22 @@ class Sam2OnlineTrackingNode(Node):
         return obj_ids, video_res_masks
 
     def _track_frame(self, frame: np.ndarray, header: Any) -> None:
+        if not self.model_lock.acquire(blocking=False):
+            return
+        try:
+            self._track_frame_locked(frame, header)
+            if self.reset_requested:
+                self._clear_state()
+                self.get_logger().info("reset native SAM2 online tracking state")
+            elif self.state == "tracking" and self.pending_prompts:
+                prompt = self.pending_prompts.popleft()
+                obj_id = self._add_object_locked(prompt)
+                if obj_id is not None:
+                    self._log_added_object(obj_id, prompt)
+        finally:
+            self.model_lock.release()
+
+    def _track_frame_locked(self, frame: np.ndarray, header: Any) -> None:
         if self.inference_state is None or self.prompt is None:
             self.state = "waiting_for_prompt"
             return
@@ -571,8 +618,15 @@ class Sam2OnlineTrackingNode(Node):
         if key in {27, ord("q")}:
             raise SystemExit
         if key == ord("r"):
-            self._clear_state()
-            self.get_logger().info("reset native SAM2 online tracking state")
+            if self.model_lock.acquire(blocking=False):
+                try:
+                    self._clear_state()
+                    self.get_logger().info("reset native SAM2 online tracking state")
+                finally:
+                    self.model_lock.release()
+            else:
+                self.reset_requested = True
+                self.get_logger().info("queued reset until the current SAM2 frame finishes")
 
     def _clear_state(self) -> None:
         self.state = "waiting_for_prompt"
@@ -588,7 +642,25 @@ class Sam2OnlineTrackingNode(Node):
         self.inference_state = None
         self.original_frames = {}
         self.headers = {}
-        self.latest_display = None
+        self.pending_prompts.clear()
+        self.reset_requested = False
+        if self.latest_frame is not None:
+            self.latest_display = _scale_display(
+                _status_overlay(self.latest_frame, "Click point or drag box"),
+                self.display_scale,
+                self.display_max_width,
+            )[0]
+
+    def _log_added_object(self, obj_id: int, prompt: dict[str, Any]) -> None:
+        if prompt["prompt_mode"] == "point":
+            point = prompt["point"]
+            self.get_logger().info(f"added object {obj_id} from point x={point[0]:.1f} y={point[1]:.1f}")
+            return
+        box = prompt["box"]
+        self.get_logger().info(
+            f"added object {obj_id} from box x1={box[0]:.1f} y1={box[1]:.1f} "
+            f"x2={box[2]:.1f} y2={box[3]:.1f}"
+        )
 
     def _tensor(self, values: list[float]) -> Any:
         return self.torch_module.tensor(values, dtype=self.torch_module.float32, device=self.predictor.device)
@@ -692,10 +764,35 @@ def _overlay_multi_object(
 def main() -> None:
     rclpy.init()
     node = Sam2OnlineTrackingNode()
+    executor = SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_errors: list[BaseException] = []
+
+    def spin_executor() -> None:
+        try:
+            executor.spin()
+        except BaseException as exc:
+            spin_errors.append(exc)
+
+    spin_thread = Thread(target=spin_executor, name="sam2-ros-executor", daemon=True)
+    spin_thread.start()
     try:
-        rclpy.spin(node)
+        display_period = 1.0 / node.display_fps
+        while rclpy.ok() and spin_thread.is_alive():
+            if spin_errors:
+                raise spin_errors[0]
+            if node.enable_display:
+                node.display()
+                sleep(display_period)
+            else:
+                sleep(0.1)
+        if spin_errors:
+            raise spin_errors[0]
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
+        executor.shutdown()
+        spin_thread.join(timeout=5.0)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()

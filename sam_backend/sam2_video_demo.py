@@ -23,11 +23,14 @@ from .backends import _import_required, _prepend_repo_path
 from .sam2_stage1 import patch_stage1_forward_image
 
 
-OBJECT_COUNT = 3
+MAX_OBJECT_COUNT = 255
 OBJECT_COLORS = (
     (30, 220, 80),
     (255, 80, 30),
     (40, 150, 255),
+    (230, 210, 40),
+    (210, 70, 230),
+    (50, 220, 220),
 )
 
 
@@ -200,10 +203,10 @@ class PromptSelector:
             display_max_width,
             display_max_height,
         )
-        self.window_name = "SAM2 video demo: select 3 objects"
+        self.window_name = "SAM2 video demo: select objects"
 
     def run(self) -> list[dict[str, Any]]:
-        print("Select 3 objects: click for a point or drag for a box.")
+        print("Select one or more objects: click for a point or drag for a box.")
         print("Enter/Space: start  U: undo  R: reset  Q/Esc: cancel")
         cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(self.window_name, self._on_mouse)
@@ -221,15 +224,15 @@ class PromptSelector:
                     self.prompts.clear()
                     print("Cleared selected objects")
                 elif key in {10, 13, 32}:
-                    if len(self.prompts) == OBJECT_COUNT:
+                    if self.prompts:
                         return [dict(prompt) for prompt in self.prompts]
-                    print(f"Select {OBJECT_COUNT - len(self.prompts)} more object(s)")
+                    print("Select at least one object")
         finally:
             cv2.destroyWindow(self.window_name)
 
     def _on_mouse(self, event: int, x: int, y: int, flags: int, param: object) -> None:
         del flags, param
-        if len(self.prompts) >= OBJECT_COUNT:
+        if len(self.prompts) >= MAX_OBJECT_COUNT:
             self.drag_start = None
             return
         point = self._image_point(x, y)
@@ -258,7 +261,7 @@ class PromptSelector:
     def _render(self) -> np.ndarray:
         overlay = self.frame_bgr.copy()
         for object_index, prompt in enumerate(self.prompts):
-            color = OBJECT_COLORS[object_index]
+            color = OBJECT_COLORS[object_index % len(OBJECT_COLORS)]
             if prompt["prompt_mode"] == "box":
                 x1, y1, x2, y2 = [int(round(value)) for value in prompt["box"]]
                 cv2.rectangle(overlay, (x1, y1), (x2, y2), color, 4, cv2.LINE_AA)
@@ -269,7 +272,7 @@ class PromptSelector:
                 cv2.circle(overlay, (x, y), 7, color, -1, cv2.LINE_AA)
                 label_point = (x + 14, max(24, y - 10))
             _draw_label(overlay, f"ID {object_index + 1}", label_point, color)
-        _draw_status(overlay, f"Objects {len(self.prompts)}/{OBJECT_COUNT}")
+        _draw_status(overlay, f"Objects {len(self.prompts)} | Enter/Space: start")
         if self.display_scale == 1.0:
             return overlay
         size = (
@@ -281,7 +284,7 @@ class PromptSelector:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Track three first-frame objects with SAM2.1-L and TinyViT-5M."
+        description="Track selected first-frame objects with SAM2.1-L and TinyViT-5M."
     )
     parser.add_argument("--video-path", required=True)
     parser.add_argument("--output-dir", default="")
@@ -377,6 +380,7 @@ def main() -> None:
         "video_path": str(video_path),
         "video": asdict(video_info),
         "prompts": prompts,
+        "object_count": len(prompts),
         "timing_mode": args.timing_mode,
         "models": [],
     }
@@ -680,6 +684,7 @@ def run_model(
         "model_id": model_spec.model_id,
         "model_kind": model_spec.model_kind,
         "frames": int(latency_array.size),
+        "object_count": len(prompts),
         "prompt_ms": prompt_ms,
         "mean_latency_ms": float(latency_array.mean()),
         "p50_latency_ms": float(np.percentile(latency_array, 50)),
@@ -715,6 +720,19 @@ def masks_to_label_map(masks: np.ndarray, object_ids: list[int]) -> np.ndarray:
             raise ValueError(f"object ID must fit uint8 label map: {object_id}")
         label_map[mask] = object_id
     return label_map
+
+
+def masks_from_label_map(label_map: np.ndarray, object_count: int) -> np.ndarray:
+    if label_map.ndim != 2:
+        raise ValueError(f"label map must have shape [height, width], got {label_map.shape}")
+    if not 1 <= object_count <= MAX_OBJECT_COUNT:
+        raise ValueError(
+            f"object count must be between 1 and {MAX_OBJECT_COUNT}, got {object_count}"
+        )
+    return np.stack(
+        [label_map == object_id for object_id in range(1, object_count + 1)],
+        axis=0,
+    )
 
 
 def choose_video_save(
@@ -866,6 +884,7 @@ def _encode_model_output(
     if not capture.isOpened():
         writer.close()
         raise RuntimeError(f"failed to reopen video for encoding: {video_path}")
+    object_count = int(artifacts.result["object_count"])
     print(f"Encoding {output_path}")
     try:
         for frame_index, latency_ms in enumerate(artifacts.latencies_ms):
@@ -878,14 +897,11 @@ def _encode_model_output(
             )
             if label_map is None:
                 raise RuntimeError(f"missing temporary mask for frame {frame_index}")
-            masks = np.stack(
-                [label_map == object_id for object_id in range(1, OBJECT_COUNT + 1)],
-                axis=0,
-            )
+            masks = masks_from_label_map(label_map, object_count)
             overlay = overlay_masks(
                 frame,
                 masks,
-                list(range(1, OBJECT_COUNT + 1)),
+                list(range(1, object_count + 1)),
                 model_id=str(artifacts.result["model_id"]),
                 frame_index=frame_index,
                 latency_ms=latency_ms,

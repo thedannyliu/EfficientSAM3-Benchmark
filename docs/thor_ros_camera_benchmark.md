@@ -107,6 +107,7 @@ Keep the camera files aligned with the offline benchmark layout:
         tv11m_mse_cos.pt
         tv5m_mse.pt
         tv5m_mse_cos.pt
+        tv5_proj_sam21l_msehr_cos025_best.pt
         repvit_m09_proj_sam21l_msehr_cos025_l1010_best.pt
       tinyvit/
         tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors
@@ -309,8 +310,7 @@ Use the RealSense RGB camera as the ROS image stream:
 ```bash
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true \
-  enable_depth:=false \
-  rgb_camera.color_profile:=1280x720x30
+  enable_depth:=false
 ```
 
 Then use this image topic for the camera commands:
@@ -324,6 +324,103 @@ If your wrapper uses a different namespace, find it with:
 ```bash
 ros2 topic list | grep color
 ```
+
+#### Adjust RealSense Resolution And Frame Rate
+
+The `rgb_camera.color_profile` value has the form `WIDTHxHEIGHTxFPS`, but the
+available combinations depend on the exact RealSense sensor and USB link. Do
+not assume that common values such as `1280x720x30` or `640x480x60` are
+supported. First start the driver without overriding the profile:
+
+```bash
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=false
+```
+
+While that fallback/default camera node is running, inspect the exact values
+accepted by this driver and the profile it selected:
+
+```bash
+ros2 param describe /camera/camera rgb_camera.color_profile
+ros2 param get /camera/camera rgb_camera.color_profile
+rs-enumerate-devices -s
+```
+
+Stop the camera node with `Ctrl-C`, choose one exact profile from the
+`ros2 param describe` output, and relaunch. For example, use the following only
+when `640x480x30` appears in that camera's supported list:
+
+```bash
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=false \
+  rgb_camera.color_profile:=640x480x30
+```
+
+An error such as the following means the requested combination is unsupported;
+the final value is the profile selected by the driver, not the requested FPS:
+
+```text
+Given value, 1280x720x30 is invalid ... Setting ROS param back to: 640x480x15
+```
+
+In that example, use `640x480x15` immediately or select another value shown by
+`ros2 param describe`. Do not continue reporting the run as 30 FPS after the
+driver falls back to 15 FPS.
+
+Also verify that the camera negotiated a USB 3 link. A `480M` entry is USB 2
+and can remove higher-bandwidth profiles; `5000M` or higher is USB 3:
+
+```bash
+lsusb -t
+```
+
+If the RealSense row shows `480M`, reconnect it directly to a Thor USB 3 port
+with a USB 3 data cable, avoid a USB 2 hub, restart the camera node, and query
+the supported profiles again.
+
+After launching the camera, verify the negotiated dimensions and actual ROS
+publish rate instead of relying only on the requested profile:
+
+```bash
+ros2 topic echo --once /camera/camera/color/camera_info | grep -E 'width:|height:'
+ros2 topic hz /camera/camera/color/image_raw
+```
+
+For fast cup motion, prioritize the highest supported FPS profile and strong
+lighting over maximum resolution. Shorter exposure reduces motion blur, but
+requires more light. Inspect the exact exposure, gain, and white-balance
+parameter names and accepted ranges exposed by the installed RealSense wrapper:
+
+```bash
+ros2 param list /camera/camera | grep -E 'exposure|gain|white_balance'
+ros2 param describe /camera/camera rgb_camera.exposure
+ros2 param get /camera/camera rgb_camera.enable_auto_exposure
+```
+
+To use manual exposure, first disable auto exposure and then choose a value
+inside the range reported by `ros2 param describe`:
+
+```bash
+ros2 param set /camera/camera rgb_camera.enable_auto_exposure false
+EXPOSURE_VALUE=100  # Example only; replace with a supported value for this camera.
+ros2 param set /camera/camera rgb_camera.exposure "${EXPOSURE_VALUE}"
+```
+
+The raw ROS image topic has no JPEG quality setting. Spatial image quality is
+controlled by the camera profile, focus/lighting/exposure, and sensor itself.
+For SAM2-family nodes, `display_scale` and `display_max_width` change only the
+OpenCV window size; they do not change the camera image or model input. SAM2
+internally resizes its image input to the predictor image size, normally 1024,
+so very large camera profiles primarily increase ROS transport, overlay, and
+display cost after that point.
+
+Camera FPS and tracking FPS are different. Even if the camera supports 60 FPS,
+a model with 450 ms latency can process only about 2.2 tracking updates per
+second. Keep `input_queue_size:=1` for live use so the online tracker receives
+the newest available camera frame instead of building a stale queue. Read the
+actual tracking FPS and latency from the model window's metrics panel.
 
 ### Terminal B: Choose The Demo Model
 
@@ -398,64 +495,233 @@ not make the saved MP4 play 4x faster.
 Point and box markers disappear after `prompt_display_seconds` (default 0.5)
 while the mask and tracking state remain visible.
 
-For **SAM2.1 online multi-object point/box memory tracking**, use the source
-topic from Terminal A. Each click adds a new point-prompt object and each
-left-button drag/release adds a new box-prompt object. Existing objects keep
-tracking when another object is added. Press `r` to clear every object and
-start a new session:
+### SAM2 Family Online Camera Memory Tracking
+
+The following commands are the Thor RealSense quick start for official
+SAM2.1-L, SAM2.1-L with the distilled TinyViT-21M or TinyViT-5M image encoder,
+and official EdgeTAM. They all use `sam2_online_tracking_node`, process incoming
+camera frames immediately, and run the native SAM2/EdgeTAM memory encoder on
+every tracked frame. They are not independent per-frame image segmentation.
+
+After pulling a version that changes the ROS node, rebuild and re-source the
+workspace before testing. Otherwise `ros2 run` can continue executing the old
+installed node:
 
 ```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+cd ros_ws
+colcon build --symlink-install --packages-select sam_benchmark_ros
+cd ..
+source scripts/source_thor_ros_env.sh
+```
+
+Start the camera in Terminal A:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 launch realsense2_camera rs_launch.py \
+  enable_color:=true \
+  enable_depth:=false
+```
+
+Before starting a model, verify the stream and required files in another
+terminal:
+
+```bash
+set -e
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 topic hz /camera/camera/color/image_raw
+
+test -f checkpoints/sam2/sam2.1_hiera_large.pt
+test -f checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt
+test -f checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt
+test -f checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors
+test -f checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors
+test -f checkpoints/edgetam/edgetam.pt
+test -d external/sam2
+test -d external/EdgeTAM
+test -d external/SAM2-Distillation-Pipeline
+echo "camera model files found"
+```
+
+Run exactly one of the following model commands in Terminal B. Each command
+uses the RealSense `best_effort` image QoS and opens its own interactive OpenCV
+window, so do not start `live_viewer_node` for these runs.
+
+#### Official SAM2.1-L
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
-  -p image_topic:=/image \
+  -p image_topic:=/camera/camera/color/image_raw \
   -p external_repo:=external/sam2 \
+  -p model_kind:=sam2 \
   -p checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
   -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
   -p device:=cuda \
-  -p input_queue_size:=3 \
+  -p input_queue_size:=1 \
   -p image_qos_reliability:=best_effort \
   -p memory_history_size:=32 \
+  -p enable_display:=true \
+  -p display_scale:=1.0 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p window_name:="SAM2.1-L Online Memory"
 ```
 
-For **Stage1 TinyViT encoder + SAM2 online memory tracking**, load a full SAM2
-checkpoint for the prompt/mask/memory modules and patch only the image encoder:
+#### SAM2.1-L With TinyViT-21M
+
+This command uses the `tv21m_mse_cos` Stage1 student. The TinyViT image encoder
+is replaced, while the prompt encoder, mask decoder, object pointers, memory
+attention, and memory encoder remain from SAM2.1-L.
 
 ```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
-  -p image_topic:=/image \
+  -p image_topic:=/camera/camera/color/image_raw \
   -p external_repo:=external/sam2 \
   -p sam2_distill_root:=external/SAM2-Distillation-Pipeline \
   -p model_kind:=stage1-student \
   -p checkpoint_path:=checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt \
   -p sam2_checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
-  -p tinyvit_checkpoint:=checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
-  -p tinyvit_model_name:=tiny_vit_21m_512.dist_in22k_ft_in1k \
+  -p student_family:=tinyvit \
+  -p student_model_name:=tiny_vit_21m_512.dist_in22k_ft_in1k \
+  -p student_backbone_checkpoint:=checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
+  -p student_adapter_mode:=auto \
   -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
   -p device:=cuda \
-  -p input_queue_size:=3 \
+  -p input_queue_size:=1 \
   -p image_qos_reliability:=best_effort \
   -p memory_history_size:=32 \
+  -p enable_display:=true \
+  -p display_scale:=1.0 \
   -p result_topic:=/sam/result_json \
   -p mask_topic:=/segmentation_mask \
   -p segmented_image_topic:=/segmented_image \
-  -p overlay_topic:=/sam/overlay
+  -p overlay_topic:=/sam/overlay \
+  -p window_name:="SAM2.1-L TinyViT-21M Online Memory"
 ```
 
-## Interactive Three-Object Video Demo
+#### SAM2.1-L With TinyViT-5M Projection
+
+This command uses the TinyViT-5M projection-only Stage1 checkpoint currently
+used by the Thor camera and multi-object video demos.
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p external_repo:=external/sam2 \
+  -p sam2_distill_root:=external/SAM2-Distillation-Pipeline \
+  -p model_kind:=stage1-student \
+  -p checkpoint_path:=checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt \
+  -p sam2_checkpoint_path:=checkpoints/sam2/sam2.1_hiera_large.pt \
+  -p student_family:=tinyvit \
+  -p student_model_name:=tiny_vit_5m_224.dist_in22k_ft_in1k \
+  -p student_backbone_checkpoint:=checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
+  -p student_adapter_mode:=projection \
+  -p model_config:=configs/sam2.1/sam2.1_hiera_l.yaml \
+  -p device:=cuda \
+  -p input_queue_size:=1 \
+  -p image_qos_reliability:=best_effort \
+  -p memory_history_size:=32 \
+  -p enable_display:=true \
+  -p display_scale:=1.0 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay \
+  -p window_name:="SAM2.1-L TinyViT-5M Projection Online Memory"
+```
+
+#### Official EdgeTAM
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
+  -p image_topic:=/camera/camera/color/image_raw \
+  -p external_repo:=external/EdgeTAM \
+  -p model_kind:=sam2 \
+  -p checkpoint_path:=checkpoints/edgetam/edgetam.pt \
+  -p model_config:=configs/edgetam.yaml \
+  -p device:=cuda \
+  -p input_queue_size:=1 \
+  -p image_qos_reliability:=best_effort \
+  -p memory_history_size:=32 \
+  -p enable_display:=true \
+  -p display_scale:=1.0 \
+  -p result_topic:=/sam/result_json \
+  -p mask_topic:=/segmentation_mask \
+  -p segmented_image_topic:=/segmented_image \
+  -p overlay_topic:=/sam/overlay \
+  -p window_name:="EdgeTAM Online Memory"
+```
+
+Interactive controls are identical for all four models:
+
+```text
+left click                          add one point-prompt object
+left-button drag, then release     add one box-prompt object
+r                                   clear every object and memory state
+q or Esc                            exit
+```
+
+Every click or drag creates a new object ID. The point or box marker disappears
+after 0.5 seconds, while its mask, ID label, and memory tracking remain active.
+When a slow model is already processing a frame, a new point, box, or reset is
+queued and applied as soon as that inference finishes instead of being dropped.
+The right-side metrics panel reports tracking FPS and per-frame latency. The
+node drops queued camera frames when inference is slower than the camera; using
+`input_queue_size:=1` therefore measures the latest available frame instead of
+building an increasingly stale frame backlog.
+
+Official SAM2.1-L and both TinyViT variants retain existing object memory when
+another object is added. EdgeTAM cannot increase its object batch after
+propagation begins, so adding an EdgeTAM object re-anchors all existing objects
+from their latest masks and restarts its memory history on that camera frame.
+
+If the window is blank or the desktop reports that it is not responding, first
+confirm `ros2 topic hz /camera/camera/color/image_raw` produces a rate, then
+check that Terminal A and Terminal B have the same `ROS_DOMAIN_ID`. Also verify
+that `DISPLAY` is set and keep `image_qos_reliability:=best_effort` for the
+RealSense publisher. Watch the terminal while the selected checkpoint loads.
+After loading, the current node opens a window displaying
+`Waiting for /camera/camera/color/image_raw` when no camera frame has arrived. A
+live image with `Click point or drag box` confirms that the model and RealSense
+stream are connected. The OpenCV event loop remains on the main thread while
+ROS image inference runs in a background executor, so the window remains
+responsive while a slow SAM2.1-L frame is running. If an updated checkout still
+freezes after a prompt, rebuild and re-source the ROS workspace with the command
+above before testing again.
+
+## Interactive Multi-Object Video Demo
 
 Use the bounded video demo when every source frame must be tracked and the
-same three first-frame prompts must be compared between official SAM2.1-L and
+same selected first-frame prompts must be compared between official SAM2.1-L and
 the TinyViT-5M projection student. This runner reads the video file directly;
 do not start `video_stream_node`, `sam2_online_tracking_node`, or the ROS
 overlay recorder for this workflow.
 
 The first frame opens before either model runs. A click adds a point-prompt
-object and a left-button drag adds a box-prompt object. Select exactly three
-objects, then press Enter or Space. `u` removes the last object, `r` clears all
-objects, and `q` or Escape cancels. Both models reuse the same saved prompts.
+object and a left-button drag adds a box-prompt object. Select between one and
+255 objects, then press Enter or Space. `u` removes the last object, `r` clears
+all objects, and `q` or Escape cancels. Both models reuse the same saved
+prompts.
 Both tracking passes finish and display their results before any MP4 encoding
 starts. The final comparison window accepts Enter, Space, or `s` to save the
 command defaults. Press `f` to save only the latency-removed source-FPS video,
@@ -486,7 +752,7 @@ python -m sam_backend.sam2_video_demo \
   --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
   --device cuda \
   --save-speed 1 \
-  --output-dir overlays/thor/video_demo/iphone16pro_three_objects
+  --output-dir overlays/thor/video_demo/iphone16pro_multi_object
 ```
 
 Verify the system encoder before choosing to save:
@@ -542,12 +808,13 @@ Each model's `summary.json` record includes `frames`, `prompt_ms`,
 `mean_display_fps`. Tracking latency is measured around each native
 `propagate_in_video` step with CUDA synchronization; display FPS covers the
 complete result-to-result wall-clock pipeline.
-The separate `prompt_ms` covers initialization of all three objects and is not
-included in `mean_latency_ms`. `videos_saved` records the final save/discard
+The separate `prompt_ms` covers initialization of all selected objects and is
+not included in `mean_latency_ms`. Both the top-level summary and each model
+record include `object_count`. `videos_saved` records the final save/discard
 choice; `save_timing_mode`, `save_speed`, and `save_output_fps` record the
 selected output mode, multiplier, and encoded nominal FPS. During inference,
-compact one-channel object-ID masks are held in a temporary directory; they
-are removed after deferred encoding or discard.
+compact one-channel object-ID masks are held in a temporary directory; they are
+removed after deferred encoding or discard.
 
 For **RepViT-M0.9 Stage1 encoder + SAM2.1-L online memory tracking**, place
 the full distilled Stage1 `best.pt` and optional ImageNet initialization at the
@@ -602,37 +869,10 @@ Use `auto_start:=true` when you want a non-interactive smoke run from the first
 incoming frame. With `auto_start`, `initial_point_x/y` can be normalized
 coordinates such as `0.5,0.5`.
 
-For **EdgeTAM online point/box memory tracking**, use the same online node with
-the EdgeTAM repo, checkpoint, and config:
-
-```bash
-ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
-  -p image_topic:=/camera/camera/color/image_raw \
-  -p external_repo:=external/EdgeTAM \
-  -p model_kind:=sam2 \
-  -p checkpoint_path:=checkpoints/edgetam/edgetam.pt \
-  -p model_config:=configs/edgetam.yaml \
-  -p device:=cuda \
-  -p input_queue_size:=3 \
-  -p image_qos_reliability:=best_effort \
-  -p memory_history_size:=32 \
-  -p result_topic:=/sam/result_json \
-  -p mask_topic:=/segmentation_mask \
-  -p segmented_image_topic:=/segmented_image \
-  -p overlay_topic:=/sam/overlay
-```
-
-The same multi-object controls apply to official SAM2.1, every distilled
-TinyViT or RepViT SAM2 encoder, and EdgeTAM. Overlays use a different color and
-an `ID` label for each object. `/sam/result_json` and recorder CSV rows include
-`object_count`, `object_ids`, and `prompt_object_id`.
-
-Official SAM2.1 and the TinyViT/RepViT Stage1 variants add a new object while
-retaining the existing memory history. EdgeTAM's predictor does not permit
-increasing the object batch after propagation starts, so the online node
-re-anchors all existing objects from their latest masks on the current frame
-when a new object is added. This keeps all objects active, but EdgeTAM memory
-history restarts at that frame.
+The same multi-object behavior documented in the SAM2 family online camera
+quick start applies to the RepViT Stage1 command above. Overlays use a different
+color and an `ID` label for each object. `/sam/result_json` and recorder CSV
+rows include `object_count`, `object_ids`, and `prompt_object_id`.
 
 For **SAM2.1 native point/box bounded clip memory tracking**, use the source
 topic from Terminal A. Click the OpenCV window for a point prompt, or
@@ -1313,12 +1553,13 @@ source scripts/source_thor_ros_env.sh
 
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true \
-  enable_depth:=false \
-  rgb_camera.color_profile:=1280x720x30
+  enable_depth:=false
 ```
 
 Verify the RGB topic. If your wrapper uses a different namespace, use the topic
-reported by `ros2 topic list | grep color`.
+reported by `ros2 topic list | grep color`. Use the supported-profile procedure
+in `Adjust RealSense Resolution And Frame Rate` before adding a
+`rgb_camera.color_profile` override; do not assume `1280x720x30` is available.
 
 ```bash
 ros2 topic list | grep color

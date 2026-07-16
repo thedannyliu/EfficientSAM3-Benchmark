@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import unittest
 from collections import deque
+from unittest.mock import patch
 
+import cv2
 import numpy as np
 
 from sam_backend.sam2_video_demo import (
+    PromptSelector,
     atempo_filter,
     display_scale,
     ffmpeg_video_args,
+    masks_from_label_map,
     masks_to_label_map,
     overlay_masks,
     realtime_repeat_count,
@@ -20,6 +24,34 @@ from sam_backend.sam2_video_demo import (
 
 
 class Sam2VideoDemoTest(unittest.TestCase):
+    def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
+        selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
+
+        with patch("builtins.print"):
+            for x in (10, 20, 30, 40):
+                selector._on_mouse(cv2.EVENT_LBUTTONDOWN, x, 10, 0, None)
+                selector._on_mouse(cv2.EVENT_LBUTTONUP, x, 10, 0, None)
+
+        self.assertEqual(len(selector.prompts), 4)
+
+    def test_prompt_selector_starts_with_one_object(self) -> None:
+        selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
+        selector.prompts.append(
+            {"prompt_mode": "point", "point": [10.0, 10.0], "label": 1}
+        )
+
+        with (
+            patch("sam_backend.sam2_video_demo.cv2.namedWindow"),
+            patch("sam_backend.sam2_video_demo.cv2.setMouseCallback"),
+            patch("sam_backend.sam2_video_demo.cv2.imshow"),
+            patch("sam_backend.sam2_video_demo.cv2.waitKey", return_value=13),
+            patch("sam_backend.sam2_video_demo.cv2.destroyWindow"),
+            patch("builtins.print"),
+        ):
+            prompts = selector.run()
+
+        self.assertEqual(len(prompts), 1)
+
     def test_scales_point_and_box_prompts_to_inference_frames(self) -> None:
         prompts = [
             {"prompt_mode": "point", "point": [960.0, 540.0], "label": 1},
@@ -88,6 +120,22 @@ class Sam2VideoDemoTest(unittest.TestCase):
         self.assertEqual(int(label_map[0, 0]), 1)
         self.assertEqual(int(label_map[3, 3]), 2)
         self.assertEqual(int(label_map[2, 4]), 3)
+
+    def test_restores_the_selected_number_of_masks_from_label_map(self) -> None:
+        label_map = np.zeros((4, 5), dtype=np.uint8)
+        label_map[0:2, 0:2] = 1
+        label_map[2:4, 3:5] = 4
+
+        masks = masks_from_label_map(label_map, 4)
+
+        self.assertEqual(masks.shape, (4, 4, 5))
+        self.assertEqual(int(masks[0].sum()), 4)
+        self.assertEqual(int(masks[1].sum()), 0)
+        self.assertEqual(int(masks[3].sum()), 4)
+
+    def test_rejects_zero_objects_when_restoring_masks(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 1 and 255"):
+            masks_from_label_map(np.zeros((2, 2), dtype=np.uint8), 0)
 
     def test_display_scale_bounds_portrait_video(self) -> None:
         self.assertAlmostEqual(display_scale((3840, 2160), 1600, 900), 900 / 3840)
