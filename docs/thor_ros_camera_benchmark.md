@@ -758,6 +758,7 @@ python -m sam_backend.sam2_video_demo \
   --sam2-save-speed 20 \
   --tv21-save-speed 10 \
   --tv5-save-speed 5 \
+  --save-masks \
   --output-dir overlays/thor/video_demo/iphone16pro_multi_object
 ```
 
@@ -855,6 +856,56 @@ Each model's `summary.json` record includes `frames`, `prompt_ms`,
 complete result-to-result wall-clock pipeline.
 The top-level `model_save_speeds` object records the effective realtime
 acceleration used for every selected model.
+
+### Saved Masks And Clean Postprocessing
+
+Add `--save-masks` to the tracking command when later postprocessing is
+required. Without this flag, per-frame masks remain temporary and are deleted
+when the command exits. With it, each selected model produces:
+
+```text
+OUTPUT_DIR/
+  masks/
+    sam2p1_l/
+      000000.png
+      000001.png
+      ...
+      manifest.json
+    tv21m_mse_cos/
+      ...
+    tv5m_projection/
+      ...
+```
+
+Each PNG is an original-video-resolution `uint8` label map. Pixel value `0` is
+background and values `1..N` are the selected object IDs. These PNGs can take
+substantial disk space for a long high-resolution video, so persistence is
+opt-in.
+
+The standalone postprocessor needs only the source video and one mask
+directory. It does not draw latency, FPS, object IDs, or model names. This
+example displays the mask from 0.1 seconds in the future on the current video
+frame at 20% opacity:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+VIDEO="$HOME/EfficientSAM3-Benchmark/videos/LBJ-dunk.mp4"
+RUN="overlays/thor/video_demo/three_models_with_masks"
+
+python -m sam_backend.sam2_mask_postprocess \
+  --video-path="${VIDEO}" \
+  --mask-dir="${RUN}/masks/tv5m_projection" \
+  --output-path="${RUN}/tv5m_prediction_lead_0p1s.mp4" \
+  --lead-seconds=0.1 \
+  --alpha=0.20
+```
+
+Use `--lead-frames=2` or `--lead-frames=3` instead of `--lead-seconds` for an
+exact frame offset. The output keeps the source width, height, nominal FPS, and
+audio. Near the end of the video, frames with no corresponding future mask are
+written without an overlay.
 The separate `prompt_ms` covers initialization of all selected objects and is
 not included in `mean_latency_ms`. Both the top-level summary and each model
 record include `object_count`. `videos_saved` records the final save/discard

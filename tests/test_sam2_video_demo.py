@@ -26,6 +26,7 @@ from sam_backend.sam2_video_demo import (
     realtime_repeat_count,
     resize_masks,
     resolve_model_save_speeds,
+    resolve_model_mask_dir,
     rolling_fps,
     save_model_outputs,
     select_audio_stream_index,
@@ -155,6 +156,26 @@ class Sam2VideoDemoTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "between 1 and 255"):
                 load_prompts(path)
+
+    def test_persistent_mask_directory_is_opt_in(self) -> None:
+        output_dir = Path("output")
+        work_dir = Path("work")
+
+        temporary = resolve_model_mask_dir(
+            save_masks=False,
+            output_dir=output_dir,
+            work_dir=work_dir,
+            model_id="tv5m_projection",
+        )
+        persistent = resolve_model_mask_dir(
+            save_masks=True,
+            output_dir=output_dir,
+            work_dir=work_dir,
+            model_id="tv5m_projection",
+        )
+
+        self.assertEqual(temporary, Path("work/masks/tv5m_projection"))
+        self.assertEqual(persistent, Path("output/masks/tv5m_projection"))
 
     def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
         selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)

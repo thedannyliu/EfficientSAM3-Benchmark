@@ -303,6 +303,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--video-path", required=True)
     parser.add_argument("--prompts-json", default="")
+    parser.add_argument("--save-masks", action="store_true")
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
         "--timing-mode",
@@ -469,6 +470,17 @@ def load_prompts(path: Path) -> list[dict[str, Any]]:
     return prompts
 
 
+def resolve_model_mask_dir(
+    *,
+    save_masks: bool,
+    output_dir: Path,
+    work_dir: Path,
+    model_id: str,
+) -> Path:
+    root = output_dir / "masks" if save_masks else work_dir / "masks"
+    return root / model_id
+
+
 def main() -> None:
     args = build_parser().parse_args()
     video_path = Path(args.video_path)
@@ -530,6 +542,7 @@ def main() -> None:
         "prompts": prompts,
         "object_count": len(prompts),
         "timing_mode": args.timing_mode,
+        "masks_saved": args.save_masks,
         "models": [],
     }
     with tempfile.TemporaryDirectory(prefix="sam2_video_demo_", dir=output_dir) as work_dir:
@@ -557,7 +570,12 @@ def main() -> None:
                 frame_dir=frame_dir,
                 inference_size=inference_size,
                 prompts=prompts,
-                mask_dir=Path(work_dir) / "masks" / model_spec.model_id,
+                mask_dir=resolve_model_mask_dir(
+                    save_masks=args.save_masks,
+                    output_dir=output_dir,
+                    work_dir=Path(work_dir),
+                    model_id=model_spec.model_id,
+                ),
                 external_repo=args.external_repo,
                 sam2_distill_root=args.sam2_distill_root,
                 model_config=args.model_config,
@@ -567,6 +585,21 @@ def main() -> None:
                 save_control=save_control,
             )
             artifacts.append(model_artifacts)
+            if args.save_masks:
+                mask_manifest = {
+                    "model_id": model_spec.model_id,
+                    "format": "uint8 object-id label map PNG",
+                    "frame_count": model_artifacts.result["frames"],
+                    "width": video_info.width,
+                    "height": video_info.height,
+                    "fps": video_info.fps,
+                    "object_count": len(prompts),
+                }
+                (model_artifacts.mask_dir / "manifest.json").write_text(
+                    json.dumps(mask_manifest, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                model_artifacts.result["mask_dir"] = str(model_artifacts.mask_dir)
             summary["models"].append(model_artifacts.result)
             (output_dir / "summary.json").write_text(
                 json.dumps(summary, indent=2) + "\n",
