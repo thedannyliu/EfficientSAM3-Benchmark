@@ -4,7 +4,12 @@ import unittest
 
 import numpy as np
 
-from sam_backend.sam2_mask_postprocess import overlay_label_mask, resolve_lead_frames
+from sam_backend.sam2_mask_postprocess import (
+    overlay_label_mask,
+    prediction_layer_alpha,
+    resolve_lead_frame_offsets,
+    resolve_lead_frames,
+)
 
 
 class Sam2MaskPostprocessTest(unittest.TestCase):
@@ -23,6 +28,26 @@ class Sam2MaskPostprocessTest(unittest.TestCase):
             resolve_lead_frames(30.0, lead_seconds=None, lead_frames=2),
             2,
         )
+
+    def test_resolves_prediction_stack_to_frame_offsets(self) -> None:
+        offsets = resolve_lead_frame_offsets(
+            30.0,
+            lead_seconds=None,
+            lead_frames=None,
+            lead_seconds_list=[0.05, 0.1, 0.15, 0.2, 0.25],
+        )
+
+        self.assertEqual(offsets, [2, 3, 5, 6, 8])
+
+    def test_prediction_stack_fades_with_horizon(self) -> None:
+        alphas = [prediction_layer_alpha(index, 5, 0.2) for index in range(5)]
+
+        for actual, expected in zip(
+            alphas,
+            [0.2, 0.16, 0.12, 0.08, 0.04],
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual, expected)
 
     def test_transparent_mask_changes_only_masked_pixels(self) -> None:
         frame = np.full((2, 3, 3), 100, dtype=np.uint8)

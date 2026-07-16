@@ -906,6 +906,23 @@ Use `--lead-frames=2` or `--lead-frames=3` instead of `--lead-seconds` for an
 exact frame offset. The output keeps the source width, height, nominal FPS, and
 audio. Near the end of the video, frames with no corresponding future mask are
 written without an overlay.
+
+To stack multiple future masks on each source frame as a motion-prediction
+trail:
+
+```bash
+python -m sam_backend.sam2_mask_postprocess \
+  --video-path="${VIDEO}" \
+  --mask-dir="${OUT}/masks/sam2p1_l" \
+  --output-path="${OUT}/soccer_motion_prediction.mp4" \
+  --lead-seconds-list 0.05 0.10 0.15 0.20 0.25 \
+  --alpha=0.20
+```
+
+The farthest prediction is drawn first and faintest. With five masks and
+`--alpha=0.20`, opacity increases from `0.04` at 0.25 seconds to `0.20` at 0.05
+seconds. The resulting video still contains only the source frames, source
+audio, and transparent masks; no latency or model metadata is drawn.
 The separate `prompt_ms` covers initialization of all selected objects and is
 not included in `mean_latency_ms`. Both the top-level summary and each model
 record include `object_count`. `videos_saved` records the final save/discard

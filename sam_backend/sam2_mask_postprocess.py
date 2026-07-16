@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     lead_group = parser.add_mutually_exclusive_group()
     lead_group.add_argument("--lead-seconds", type=float)
     lead_group.add_argument("--lead-frames", type=int)
+    lead_group.add_argument("--lead-seconds-list", type=float, nargs="+")
     parser.add_argument("--alpha", type=float, default=0.22)
     parser.add_argument("--codec", default="libx264")
     parser.add_argument("--preset", default="medium")
@@ -38,16 +39,55 @@ def resolve_lead_frames(
     lead_seconds: float | None,
     lead_frames: int | None,
 ) -> int:
+    return resolve_lead_frame_offsets(
+        fps,
+        lead_seconds=lead_seconds,
+        lead_frames=lead_frames,
+        lead_seconds_list=None,
+    )[0]
+
+
+def resolve_lead_frame_offsets(
+    fps: float,
+    *,
+    lead_seconds: float | None,
+    lead_frames: int | None,
+    lead_seconds_list: list[float] | None,
+) -> list[int]:
     if fps <= 0.0:
         raise ValueError("fps must be positive")
     if lead_frames is not None:
         if lead_frames < 0:
             raise ValueError("lead-frames must not be negative")
-        return lead_frames
-    seconds = 0.1 if lead_seconds is None else lead_seconds
-    if seconds < 0.0 or not math.isfinite(seconds):
-        raise ValueError("lead-seconds must be finite and not negative")
-    return max(0, int(round(seconds * fps)))
+        return [lead_frames]
+    seconds_values = (
+        lead_seconds_list
+        if lead_seconds_list is not None
+        else [0.1 if lead_seconds is None else lead_seconds]
+    )
+    if not seconds_values:
+        raise ValueError("lead-seconds-list must not be empty")
+    if any(seconds < 0.0 or not math.isfinite(seconds) for seconds in seconds_values):
+        raise ValueError("lead seconds must be finite and not negative")
+    offsets = sorted(
+        {
+            max(0, int(math.floor(seconds * fps + 0.5)))
+            for seconds in seconds_values
+        }
+    )
+    return offsets
+
+
+def prediction_layer_alpha(
+    layer_index: int,
+    layer_count: int,
+    max_alpha: float,
+) -> float:
+    if layer_count < 1 or not 0 <= layer_index < layer_count:
+        raise ValueError("prediction layer index is out of range")
+    if not 0.0 <= max_alpha <= 1.0:
+        raise ValueError("alpha must be between 0 and 1")
+    return max_alpha * (layer_count - layer_index) / layer_count
 
 
 def overlay_label_mask(
@@ -99,10 +139,11 @@ def main() -> None:
         raise ValueError("alpha must be between 0 and 1")
 
     video_info, _ = probe_video(video_path)
-    lead_frames = resolve_lead_frames(
+    lead_frame_offsets = resolve_lead_frame_offsets(
         video_info.fps,
         lead_seconds=args.lead_seconds,
         lead_frames=args.lead_frames,
+        lead_seconds_list=args.lead_seconds_list,
     )
     mask_paths = load_mask_paths(Path(args.mask_dir))
     output_path = Path(args.output_path)
@@ -128,12 +169,23 @@ def main() -> None:
             ok, frame = capture.read()
             if not ok:
                 break
-            mask_path = mask_paths.get(frame_index + lead_frames)
-            if mask_path is not None:
+            for layer_index in reversed(range(len(lead_frame_offsets))):
+                lead_frames = lead_frame_offsets[layer_index]
+                mask_path = mask_paths.get(frame_index + lead_frames)
+                if mask_path is None:
+                    continue
                 label_map = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
                 if label_map is None:
                     raise RuntimeError(f"failed to decode mask: {mask_path}")
-                frame = overlay_label_mask(frame, label_map, alpha=args.alpha)
+                frame = overlay_label_mask(
+                    frame,
+                    label_map,
+                    alpha=prediction_layer_alpha(
+                        layer_index,
+                        len(lead_frame_offsets),
+                        args.alpha,
+                    ),
+                )
             writer.write(frame)
             frame_index += 1
             if frame_index % 100 == 0:
@@ -142,8 +194,8 @@ def main() -> None:
         capture.release()
         writer.close()
     print(
-        f"Wrote {output_path} at {video_info.fps:g} FPS with masks led by "
-        f"{lead_frames} frames"
+        f"Wrote {output_path} at {video_info.fps:g} FPS with mask leads "
+        f"{lead_frame_offsets} frames"
     )
 
 
