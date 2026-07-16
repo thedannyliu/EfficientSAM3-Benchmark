@@ -140,7 +140,9 @@ class FFmpegVideoWriter:
             )
         )
         if source_has_audio:
-            command.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
+            command.extend(
+                ["-af", "apad", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+            )
         else:
             command.append("-an")
         command.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output_path)])
@@ -162,8 +164,20 @@ class FFmpegVideoWriter:
             raise RuntimeError("ffmpeg stdin is unavailable")
         payload = np.ascontiguousarray(frame_bgr).tobytes()
         for _ in range(max(0, repeat_count)):
-            self.process.stdin.write(payload)
+            try:
+                self.process.stdin.write(payload)
+            except BrokenPipeError as exc:
+                raise RuntimeError(
+                    f"ffmpeg stopped accepting frames for {self.output_path} "
+                    f"after {self.frames} frames; see {self.log_path}"
+                    f"{self._failure_details()}"
+                ) from exc
             self.frames += 1
+
+    def _failure_details(self) -> str:
+        self.log_handle.flush()
+        details = self.log_path.read_text(encoding="utf-8", errors="replace").strip()
+        return f"\nFFmpeg output:\n{details[-4000:]}" if details else ""
 
     def close(self) -> None:
         if self.closed:
@@ -288,6 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument("--video-path", required=True)
+    parser.add_argument("--prompts-json", default="")
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
         "--timing-mode",
@@ -412,6 +427,48 @@ def resolve_model_save_speeds(
     }
 
 
+def load_prompts(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"prompts JSON does not exist: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list) or not 1 <= len(payload) <= MAX_OBJECT_COUNT:
+        raise ValueError(
+            f"prompts JSON must contain between 1 and {MAX_OBJECT_COUNT} prompts"
+        )
+    prompts: list[dict[str, Any]] = []
+    for object_index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"prompt {object_index} must be an object")
+        prompt_mode = item.get("prompt_mode")
+        coordinate_key = "box" if prompt_mode == "box" else "point"
+        expected_coordinates = 4 if prompt_mode == "box" else 2
+        if prompt_mode not in {"point", "box"}:
+            raise ValueError(f"prompt {object_index} has invalid prompt_mode")
+        coordinates = item.get(coordinate_key)
+        if not isinstance(coordinates, list) or len(coordinates) != expected_coordinates:
+            raise ValueError(
+                f"prompt {object_index} must contain {expected_coordinates} "
+                f"{coordinate_key} coordinates"
+            )
+        normalized_coordinates = [float(value) for value in coordinates]
+        if not all(math.isfinite(value) for value in normalized_coordinates):
+            raise ValueError(f"prompt {object_index} coordinates must be finite")
+        if prompt_mode == "box":
+            x1, y1, x2, y2 = normalized_coordinates
+            if x2 <= x1 or y2 <= y1:
+                raise ValueError(f"prompt {object_index} box must have positive area")
+            prompts.append({"prompt_mode": "box", "box": normalized_coordinates})
+        else:
+            prompts.append(
+                {
+                    "prompt_mode": "point",
+                    "point": normalized_coordinates,
+                    "label": int(item.get("label", 1)),
+                }
+            )
+    return prompts
+
+
 def main() -> None:
     args = build_parser().parse_args()
     video_path = Path(args.video_path)
@@ -453,11 +510,15 @@ def main() -> None:
     video_info, first_frame = probe_video(video_path)
     output_dir = _resolve_output_dir(args.output_dir, video_path)
     output_dir.mkdir(parents=True, exist_ok=True)
-    prompts = PromptSelector(
-        first_frame,
-        args.display_max_width,
-        args.display_max_height,
-    ).run()
+    if args.prompts_json:
+        prompts = load_prompts(Path(args.prompts_json))
+        print(f"Loaded {len(prompts)} prompts from {args.prompts_json}")
+    else:
+        prompts = PromptSelector(
+            first_frame,
+            args.display_max_width,
+            args.display_max_height,
+        ).run()
     (output_dir / "prompts.json").write_text(
         json.dumps(prompts, indent=2) + "\n",
         encoding="utf-8",

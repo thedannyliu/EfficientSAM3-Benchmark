@@ -785,6 +785,8 @@ python -m sam_backend.sam2_video_demo \
 
 `--models` accepts `sam2p1_l`, `tv21m_mse_cos`, and `tv5m_projection`. Omit it
 to run all three models in that order.
+Use `--prompts-json PATH` to reuse a previous run's `prompts.json` and skip the
+selection window. The coordinates must come from the same source video.
 
 Verify the system encoder before choosing to save:
 
@@ -801,6 +803,9 @@ bitrate instead of unsupported x264 CRF flags.
 For iPhone MOV inputs, the saver probes every audio stream but maps only the
 first stream with a real decoder such as AAC. Auxiliary streams whose reported
 codec is `none` or `unknown` are excluded instead of causing FFmpeg to exit.
+If the selected audio stream ends slightly before the video, FFmpeg pads it
+with silence so `-shortest` cannot close the raw-video pipe before the final
+overlay frame is written.
 
 `--timing-mode` accepts:
 

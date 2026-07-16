@@ -4,18 +4,20 @@ import unittest
 from collections import deque
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
 
 from sam_backend.sam2_video_demo import (
+    FFmpegVideoWriter,
     ModelArtifacts,
     PromptSelector,
     VideoInfo,
     build_parser,
     display_scale,
     ffmpeg_video_args,
+    load_prompts,
     masks_from_label_map,
     masks_to_label_map,
     model_save_speed_overrides,
@@ -73,6 +75,25 @@ class Sam2VideoDemoTest(unittest.TestCase):
 
         self.assertEqual([spec.model_id for spec in specs], ["tv5m_projection"])
 
+    def test_selects_tv21_and_tv5_models_for_backfill(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--video-path",
+                "demo.mov",
+                "--models",
+                "tv21m_mse_cos",
+                "tv5m_projection",
+                "--prompts-json",
+                "previous/prompts.json",
+            ]
+        )
+
+        self.assertEqual(
+            [spec.model_id for spec in model_specs_from_args(args)],
+            ["tv21m_mse_cos", "tv5m_projection"],
+        )
+        self.assertEqual(args.prompts_json, "previous/prompts.json")
+
     def test_resolves_per_model_save_speeds(self) -> None:
         args = build_parser().parse_args(
             [
@@ -112,6 +133,28 @@ class Sam2VideoDemoTest(unittest.TestCase):
         )
 
         self.assertEqual(set(speeds.values()), {1.0})
+
+    def test_loads_saved_point_and_box_prompts(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "prompts.json"
+            path.write_text(
+                '[{"prompt_mode":"point","point":[10,20],"label":1},'
+                '{"prompt_mode":"box","box":[1,2,30,40]}]',
+                encoding="utf-8",
+            )
+
+            prompts = load_prompts(path)
+
+        self.assertEqual(prompts[0]["point"], [10.0, 20.0])
+        self.assertEqual(prompts[1]["box"], [1.0, 2.0, 30.0, 40.0])
+
+    def test_rejects_empty_saved_prompts(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "prompts.json"
+            path.write_text("[]", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "between 1 and 255"):
+                load_prompts(path)
 
     def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
         selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
@@ -301,6 +344,38 @@ class Sam2VideoDemoTest(unittest.TestCase):
             ),
             ["-c:v", "h264_v4l2m2m", "-b:v", "80M"],
         )
+
+    def test_ffmpeg_pads_short_audio_before_using_shortest(self) -> None:
+        with (
+            TemporaryDirectory() as directory,
+            patch("sam_backend.sam2_video_demo.shutil.which", return_value="ffmpeg"),
+            patch(
+                "sam_backend.sam2_video_demo._ffprobe_audio_stream_index",
+                return_value=1,
+            ),
+            patch(
+                "sam_backend.sam2_video_demo.subprocess.Popen",
+                return_value=Mock(),
+            ) as popen,
+        ):
+            writer = FFmpegVideoWriter(
+                Path(directory) / "output.mp4",
+                width=64,
+                height=48,
+                fps=30.0,
+                source_path=Path("source.mov"),
+                codec="libx264",
+                preset="medium",
+                crf=18,
+            )
+            command = popen.call_args.args[0]
+            writer.log_handle.close()
+
+        self.assertEqual(
+            command[command.index("-af") : command.index("-af") + 2],
+            ["-af", "apad"],
+        )
+        self.assertIn("-shortest", command)
 
     def test_rolling_display_fps_uses_recent_completion_times(self) -> None:
         self.assertIsNone(rolling_fps(deque([1.0])))
