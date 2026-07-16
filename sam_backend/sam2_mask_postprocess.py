@@ -99,8 +99,10 @@ def overlay_label_mask(
     if not 0.0 <= alpha <= 1.0:
         raise ValueError("alpha must be between 0 and 1")
     if label_map.shape != frame_bgr.shape[:2]:
-        raise ValueError(
-            f"mask shape {label_map.shape} does not match frame {frame_bgr.shape[:2]}"
+        label_map = cv2.resize(
+            label_map,
+            (frame_bgr.shape[1], frame_bgr.shape[0]),
+            interpolation=cv2.INTER_NEAREST,
         )
     output = frame_bgr.copy()
     for object_id in sorted(int(value) for value in np.unique(label_map) if value > 0):

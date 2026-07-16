@@ -60,13 +60,17 @@ class Sam2MaskPostprocessTest(unittest.TestCase):
         self.assertFalse(np.array_equal(output[0, 1], frame[0, 1]))
         self.assertTrue(np.array_equal(output[1, 2], frame[1, 2]))
 
-    def test_rejects_mask_with_wrong_dimensions(self) -> None:
-        with self.assertRaisesRegex(ValueError, "does not match"):
-            overlay_label_mask(
-                np.zeros((4, 5, 3), dtype=np.uint8),
-                np.zeros((2, 3), dtype=np.uint8),
-                alpha=0.2,
-            )
+    def test_resizes_mask_with_nearest_neighbor(self) -> None:
+        frame = np.full((4, 6, 3), 100, dtype=np.uint8)
+        label_map = np.zeros((2, 3), dtype=np.uint8)
+        label_map[0, 1] = 1
+
+        output = overlay_label_mask(frame, label_map, alpha=0.25)
+
+        self.assertTrue(np.array_equal(output[0, 0], frame[0, 0]))
+        self.assertFalse(np.array_equal(output[0, 2], frame[0, 2]))
+        self.assertFalse(np.array_equal(output[1, 3], frame[1, 3]))
+        self.assertTrue(np.array_equal(output[2, 2], frame[2, 2]))
 
 
 if __name__ == "__main__":
