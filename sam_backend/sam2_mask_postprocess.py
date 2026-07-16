@@ -87,7 +87,7 @@ def prediction_layer_alpha(
         raise ValueError("prediction layer index is out of range")
     if not 0.0 <= max_alpha <= 1.0:
         raise ValueError("alpha must be between 0 and 1")
-    return max_alpha * (layer_count - layer_index) / layer_count
+    return max_alpha * (layer_index + 1) / layer_count
 
 
 def overlay_label_mask(
@@ -169,8 +169,7 @@ def main() -> None:
             ok, frame = capture.read()
             if not ok:
                 break
-            for layer_index in reversed(range(len(lead_frame_offsets))):
-                lead_frames = lead_frame_offsets[layer_index]
+            for layer_index, lead_frames in enumerate(lead_frame_offsets):
                 mask_path = mask_paths.get(frame_index + lead_frames)
                 if mask_path is None:
                     continue

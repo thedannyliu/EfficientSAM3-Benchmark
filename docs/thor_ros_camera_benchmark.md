@@ -919,10 +919,11 @@ python -m sam_backend.sam2_mask_postprocess \
   --alpha=0.20
 ```
 
-The farthest prediction is drawn first and faintest. With five masks and
-`--alpha=0.20`, opacity increases from `0.04` at 0.25 seconds to `0.20` at 0.05
-seconds. The resulting video still contains only the source frames, source
-audio, and transparent masks; no latency or model metadata is drawn.
+The nearest prediction is drawn first and faintest. With five masks and
+`--alpha=0.20`, opacity increases from `0.04` at 0.05 seconds to `0.20` at 0.25
+seconds. The farthest prediction is drawn last so it remains dominant where
+masks overlap. The resulting video still contains only the source frames,
+source audio, and transparent masks; no latency or model metadata is drawn.
 The separate `prompt_ms` covers initialization of all selected objects and is
 not included in `mean_latency_ms`. Both the top-level summary and each model
 record include `object_count`. `videos_saved` records the final save/discard

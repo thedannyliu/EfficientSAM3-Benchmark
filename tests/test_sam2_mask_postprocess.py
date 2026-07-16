@@ -39,12 +39,12 @@ class Sam2MaskPostprocessTest(unittest.TestCase):
 
         self.assertEqual(offsets, [2, 3, 5, 6, 8])
 
-    def test_prediction_stack_fades_with_horizon(self) -> None:
+    def test_prediction_stack_strengthens_with_horizon(self) -> None:
         alphas = [prediction_layer_alpha(index, 5, 0.2) for index in range(5)]
 
         for actual, expected in zip(
             alphas,
-            [0.2, 0.16, 0.12, 0.08, 0.04],
+            [0.04, 0.08, 0.12, 0.16, 0.2],
             strict=True,
         ):
             self.assertAlmostEqual(actual, expected)
