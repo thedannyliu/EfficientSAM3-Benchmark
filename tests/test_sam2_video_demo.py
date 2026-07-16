@@ -62,6 +62,15 @@ class Sam2VideoDemoTest(unittest.TestCase):
         self.assertEqual(args.tv5_stage1_checkpoint, "legacy-stage1.pt")
         self.assertEqual(args.tv5_backbone_checkpoint, "legacy-backbone.safetensors")
 
+    def test_selects_only_tv5_model(self) -> None:
+        args = build_parser().parse_args(
+            ["--video-path", "demo.mov", "--models", "tv5m_projection"]
+        )
+
+        specs = model_specs_from_args(args)
+
+        self.assertEqual([spec.model_id for spec in specs], ["tv5m_projection"])
+
     def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
         selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
 

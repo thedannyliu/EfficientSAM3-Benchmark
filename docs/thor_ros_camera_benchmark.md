@@ -762,6 +762,27 @@ python -m sam_backend.sam2_video_demo \
 This example saves the latency-expanded output at 2x when `realtime` or `both`
 is selected. The `source_fps` output remains at the original 1x speed.
 
+To preview only the TinyViT-5M projection student before running the full
+three-model comparison:
+
+```bash
+cd ~/EfficientSAM3-Benchmark
+source scripts/source_thor_ros_env.sh
+
+VIDEO="$HOME/EfficientSAM3-Benchmark/videos/cup-1.MOV"
+OUT="overlays/thor/video_demo/tv5m_$(date +%Y%m%d-%H%M%S)"
+
+python -m sam_backend.sam2_video_demo \
+  --video-path "${VIDEO}" \
+  --models tv5m_projection \
+  --timing-mode both \
+  --save-speed 2 \
+  --output-dir "${OUT}"
+```
+
+`--models` accepts `sam2p1_l`, `tv21m_mse_cos`, and `tv5m_projection`. Omit it
+to run all three models in that order.
+
 Verify the system encoder before choosing to save:
 
 ```bash

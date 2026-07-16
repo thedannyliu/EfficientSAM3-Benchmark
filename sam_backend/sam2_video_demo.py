@@ -334,6 +334,13 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=("sam2p1_l", "tv21m_mse_cos", "tv5m_projection"),
+        default=("sam2p1_l", "tv21m_mse_cos", "tv5m_projection"),
+        help="models to run in the requested order",
+    )
     parser.add_argument("--display-max-width", type=int, default=1600)
     parser.add_argument("--display-max-height", type=int, default=900)
     parser.add_argument("--inference-max-side", type=int, default=1024)
@@ -345,13 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
-    return (
-        ModelSpec(
+    specs = {
+        "sam2p1_l": ModelSpec(
             model_id="sam2p1_l",
             model_kind="sam2",
             checkpoint_path=args.sam2_checkpoint,
         ),
-        ModelSpec(
+        "tv21m_mse_cos": ModelSpec(
             model_id="tv21m_mse_cos",
             model_kind="stage1-student",
             checkpoint_path=args.tv21_stage1_checkpoint,
@@ -361,7 +368,7 @@ def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
             student_backbone_checkpoint=args.tv21_backbone_checkpoint,
             student_adapter_mode="auto",
         ),
-        ModelSpec(
+        "tv5m_projection": ModelSpec(
             model_id="tv5m_projection",
             model_kind="stage1-student",
             checkpoint_path=args.tv5_stage1_checkpoint,
@@ -371,7 +378,8 @@ def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
             student_backbone_checkpoint=args.tv5_backbone_checkpoint,
             student_adapter_mode="projection",
         ),
-    )
+    }
+    return tuple(specs[model_id] for model_id in args.models)
 
 
 def main() -> None:
@@ -381,14 +389,29 @@ def main() -> None:
         raise FileNotFoundError(f"video does not exist: {video_path}")
     if args.save_speed <= 0.0:
         raise ValueError("save-speed must be positive")
-    _require_file(Path(args.sam2_checkpoint), "SAM2.1-L checkpoint")
-    _require_file(Path(args.tv21_stage1_checkpoint), "TinyViT-21M Stage1 checkpoint")
-    _require_file(Path(args.tv21_backbone_checkpoint), "TinyViT-21M backbone checkpoint")
-    _require_file(Path(args.tv5_stage1_checkpoint), "TinyViT-5M Stage1 checkpoint")
-    _require_file(Path(args.tv5_backbone_checkpoint), "TinyViT-5M backbone checkpoint")
+    model_specs = model_specs_from_args(args)
+    for model_spec in model_specs:
+        if model_spec.model_kind == "sam2":
+            _require_file(Path(model_spec.checkpoint_path), "SAM2.1-L checkpoint")
+            continue
+        _require_file(
+            Path(model_spec.sam2_checkpoint_path),
+            f"{model_spec.model_id} SAM2.1-L base checkpoint",
+        )
+        _require_file(
+            Path(model_spec.checkpoint_path),
+            f"{model_spec.model_id} Stage1 checkpoint",
+        )
+        _require_file(
+            Path(model_spec.student_backbone_checkpoint),
+            f"{model_spec.model_id} backbone checkpoint",
+        )
     if not Path(args.external_repo).is_dir():
         raise FileNotFoundError(f"SAM2 source does not exist: {args.external_repo}")
-    if not Path(args.sam2_distill_root).is_dir():
+    if (
+        any(model_spec.model_kind == "stage1-student" for model_spec in model_specs)
+        and not Path(args.sam2_distill_root).is_dir()
+    ):
         raise FileNotFoundError(
             f"SAM2-Distillation-Pipeline does not exist: {args.sam2_distill_root}"
         )
@@ -405,8 +428,6 @@ def main() -> None:
         json.dumps(prompts, indent=2) + "\n",
         encoding="utf-8",
     )
-
-    model_specs = model_specs_from_args(args)
 
     summary: dict[str, Any] = {
         "video_path": str(video_path),
