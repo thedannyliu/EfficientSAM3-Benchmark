@@ -713,17 +713,17 @@ above before testing again.
 
 Use the bounded video demo when every source frame must be tracked and the
 same selected first-frame prompts must be compared among official SAM2.1-L, the
-TinyViT-21M MSE+cos student, and the TinyViT-5M projection student. This runner
-reads the video file directly;
+TinyViT-21M MSE+cos student, the TinyViT-5M projection student, and official
+EdgeTAM. This runner reads the video file directly;
 do not start `video_stream_node`, `sam2_online_tracking_node`, or the ROS
 overlay recorder for this workflow.
 
 The first frame opens before any model runs. A click adds a point-prompt
 object and a left-button drag adds a box-prompt object. Select between one and
 255 objects, then press Enter or Space. `u` removes the last object, `r` clears
-all objects, and `q` or Escape cancels. All three models reuse the same saved
+all objects, and `q` or Escape cancels. All four models reuse the same saved
 prompts.
-All three tracking passes finish and display their results before any MP4 encoding
+All four tracking passes finish and display their results before any MP4 encoding
 starts. The final comparison window accepts Enter, Space, or `s` to save the
 command defaults. Press `f` to save only the latency-removed source-FPS video,
 `l` to save only the measured-latency video, `b` to save both, or `n`, `q`, or
@@ -753,21 +753,25 @@ python -m sam_backend.sam2_video_demo \
   --tv21-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
   --tv5-stage1-checkpoint checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt \
   --tv5-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
+  --edgetam-external-repo external/EdgeTAM \
+  --edgetam-checkpoint checkpoints/edgetam/edgetam.pt \
+  --edgetam-model-config configs/edgetam.yaml \
   --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
   --device cuda \
   --sam2-save-speed 20 \
   --tv21-save-speed 10 \
   --tv5-save-speed 5 \
+  --edgetam-save-speed 2 \
   --save-masks \
   --output-dir overlays/thor/video_demo/iphone16pro_multi_object
 ```
 
-This example saves the latency-expanded SAM2.1-L, TinyViT-21M, and TinyViT-5M
-outputs at 20x, 10x, and 5x respectively when `realtime` or `both` is selected.
-Every `source_fps` output remains at the original 1x speed.
+This example saves the latency-expanded SAM2.1-L, TinyViT-21M, TinyViT-5M,
+and EdgeTAM outputs at 20x, 10x, 5x, and 2x respectively when `realtime` or
+`both` is selected. Every `source_fps` output remains at the original 1x speed.
 
 To preview only the TinyViT-5M projection student before running the full
-three-model comparison:
+four-model comparison:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
@@ -784,8 +788,9 @@ python -m sam_backend.sam2_video_demo \
   --output-dir "${OUT}"
 ```
 
-`--models` accepts `sam2p1_l`, `tv21m_mse_cos`, and `tv5m_projection`. Omit it
-to run all three models in that order.
+`--models` accepts `sam2p1_l`, `tv21m_mse_cos`, `tv5m_projection`, and
+`official_edgetam`. Omit it to run all four models in that order. EdgeTAM uses
+the same one-or-more first-frame point/box prompts and native memory propagation.
 Use `--prompts-json PATH` to reuse a previous run's `prompts.json` and skip the
 selection window. The coordinates must come from the same source video.
 
@@ -814,7 +819,7 @@ overlay frame is written.
 | --- | --- |
 | `source_fps` | writes every tracked source frame exactly once at the source video's detected FPS; inference waiting is removed and source audio is retained when present |
 | `realtime` | writes at the original nominal FPS, expands duration from synchronized per-frame inference latency, and applies the selected acceleration; smooth transition frames replace duplicate-frame holds, and audio is omitted because the duration changes |
-| `both` | produces both outputs for all three models |
+| `both` | produces both outputs for all selected models |
 
 `--save-speed` accepts any positive multiplier and applies only to `realtime`.
 `2` halves the latency-expanded duration and `4` produces one quarter of that
@@ -825,9 +830,10 @@ are visual transition frames, not additional model predictions. The
 latency-removed `source_fps` output always remains at 1x with original audio.
 A non-1x latency filename includes the multiplier, for example
 `sam2p1_l_realtime_2x.mp4`.
-Use `--sam2-save-speed`, `--tv21-save-speed`, and `--tv5-save-speed` to override
-the fallback separately. When any per-model override is present, the final
-save window locks the configured speed values instead of accepting `1/2/4/8`.
+Use `--sam2-save-speed`, `--tv21-save-speed`, `--tv5-save-speed`, and
+`--edgetam-save-speed` to override the fallback separately. When any per-model
+override is present, the final save window locks the configured speed values
+instead of accepting `1/2/4/8`.
 
 The runner preserves the decoded source width, height, frame count, and average
 source FPS. SAM2 inference frames are downscaled to at most 1024 pixels on the
@@ -838,7 +844,7 @@ at CRF 18 by default. Overlay rendering requires re-encoding and OpenCV uses an
 bit-for-bit preserved.
 
 The output directory always contains `prompts.json` and `summary.json`. For the
-three-model command above, accepting the final `both` save choice also creates:
+four-model command above, accepting the final `both` save choice also creates:
 
 ```text
 sam2p1_l_source_fps.mp4
@@ -847,6 +853,8 @@ tv21m_mse_cos_source_fps.mp4
 tv21m_mse_cos_realtime_10x.mp4
 tv5m_projection_source_fps.mp4
 tv5m_projection_realtime_5x.mp4
+official_edgetam_source_fps.mp4
+official_edgetam_realtime_2x.mp4
 ```
 
 Each model's `summary.json` record includes `frames`, `prompt_ms`,
@@ -875,12 +883,16 @@ OUTPUT_DIR/
       ...
     tv5m_projection/
       ...
+    official_edgetam/
+      ...
 ```
 
 Each PNG is an original-video-resolution `uint8` label map. Pixel value `0` is
 background and values `1..N` are the selected object IDs. These PNGs can take
 substantial disk space for a long high-resolution video, so persistence is
-opt-in.
+opt-in. The postprocessor also accepts masks saved by older demo revisions at
+the inference resolution; it resizes those label maps to the decoded source
+frame with nearest-neighbor interpolation before compositing.
 
 The standalone postprocessor needs only the source video and one mask
 directory. It does not draw latency, FPS, object IDs, or model names. This
@@ -892,7 +904,7 @@ cd ~/EfficientSAM3-Benchmark
 source scripts/source_thor_ros_env.sh
 
 VIDEO="$HOME/EfficientSAM3-Benchmark/videos/LBJ-dunk.mp4"
-RUN="overlays/thor/video_demo/three_models_with_masks"
+RUN="overlays/thor/video_demo/four_models_with_masks"
 
 python -m sam_backend.sam2_mask_postprocess \
   --video-path="${VIDEO}" \

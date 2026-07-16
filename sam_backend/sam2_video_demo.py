@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import gc
+import importlib
 import inspect
 import json
 import math
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections import deque
 from collections.abc import Iterator
@@ -20,7 +22,7 @@ from typing import Any
 import cv2
 import numpy as np
 
-from .backends import _import_required, _prepend_repo_path
+from .backends import _import_required
 from .sam2_stage1 import patch_stage1_forward_image
 
 
@@ -53,6 +55,8 @@ class ModelSpec:
     student_model_name: str = ""
     student_backbone_checkpoint: str = ""
     student_adapter_mode: str = "auto"
+    external_repo: str = ""
+    model_config: str = ""
 
 
 @dataclass(frozen=True)
@@ -298,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Track selected first-frame objects with SAM2.1-L, TinyViT-21M, "
-            "and TinyViT-5M."
+            "TinyViT-5M, and EdgeTAM."
         )
     )
     parser.add_argument("--video-path", required=True)
@@ -349,12 +353,28 @@ def build_parser() -> argparse.ArgumentParser:
             "tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors"
         ),
     )
+    parser.add_argument("--edgetam-external-repo", default="external/EdgeTAM")
+    parser.add_argument(
+        "--edgetam-checkpoint",
+        default="checkpoints/edgetam/edgetam.pt",
+    )
+    parser.add_argument("--edgetam-model-config", default="configs/edgetam.yaml")
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=("sam2p1_l", "tv21m_mse_cos", "tv5m_projection"),
-        default=("sam2p1_l", "tv21m_mse_cos", "tv5m_projection"),
+        choices=(
+            "sam2p1_l",
+            "tv21m_mse_cos",
+            "tv5m_projection",
+            "official_edgetam",
+        ),
+        default=(
+            "sam2p1_l",
+            "tv21m_mse_cos",
+            "tv5m_projection",
+            "official_edgetam",
+        ),
         help="models to run in the requested order",
     )
     parser.add_argument("--display-max-width", type=int, default=1600)
@@ -367,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sam2-save-speed", type=float)
     parser.add_argument("--tv21-save-speed", type=float)
     parser.add_argument("--tv5-save-speed", type=float)
+    parser.add_argument("--edgetam-save-speed", type=float)
     return parser
 
 
@@ -397,6 +418,13 @@ def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
             student_backbone_checkpoint=args.tv5_backbone_checkpoint,
             student_adapter_mode="projection",
         ),
+        "official_edgetam": ModelSpec(
+            model_id="official_edgetam",
+            model_kind="edgetam",
+            checkpoint_path=args.edgetam_checkpoint,
+            external_repo=args.edgetam_external_repo,
+            model_config=args.edgetam_model_config,
+        ),
     }
     return tuple(specs[model_id] for model_id in args.models)
 
@@ -408,6 +436,7 @@ def model_save_speed_overrides(args: argparse.Namespace) -> dict[str, float]:
             ("sam2p1_l", args.sam2_save_speed),
             ("tv21m_mse_cos", args.tv21_save_speed),
             ("tv5m_projection", args.tv5_save_speed),
+            ("official_edgetam", args.edgetam_save_speed),
         )
         if speed is not None
     }
@@ -494,8 +523,20 @@ def main() -> None:
         if speed <= 0.0:
             raise ValueError(f"save speed for {model_id} must be positive")
     for model_spec in model_specs:
-        if model_spec.model_kind == "sam2":
-            _require_file(Path(model_spec.checkpoint_path), "SAM2.1-L checkpoint")
+        if model_spec.model_kind in {"sam2", "edgetam"}:
+            checkpoint_label = (
+                "EdgeTAM checkpoint"
+                if model_spec.model_kind == "edgetam"
+                else "SAM2.1-L checkpoint"
+            )
+            _require_file(Path(model_spec.checkpoint_path), checkpoint_label)
+            if model_spec.model_kind == "edgetam":
+                edge_config_path = Path(model_spec.model_config)
+                if not edge_config_path.is_absolute():
+                    edge_config_path = (
+                        Path(model_spec.external_repo) / "sam2" / edge_config_path
+                    )
+                _require_file(edge_config_path, "EdgeTAM model config")
             continue
         _require_file(
             Path(model_spec.sam2_checkpoint_path),
@@ -509,8 +550,12 @@ def main() -> None:
             Path(model_spec.student_backbone_checkpoint),
             f"{model_spec.model_id} backbone checkpoint",
         )
-    if not Path(args.external_repo).is_dir():
-        raise FileNotFoundError(f"SAM2 source does not exist: {args.external_repo}")
+    selected_repos = {
+        model_spec.external_repo or args.external_repo for model_spec in model_specs
+    }
+    for selected_repo in selected_repos:
+        if not Path(selected_repo).is_dir():
+            raise FileNotFoundError(f"SAM2-family source does not exist: {selected_repo}")
     if (
         any(model_spec.model_kind == "stage1-student" for model_spec in model_specs)
         and not Path(args.sam2_distill_root).is_dir()
@@ -1168,16 +1213,20 @@ def build_predictor(
     model_config: str,
     device: str,
 ) -> tuple[Any, Any, dict[str, Any]]:
-    _prepend_repo_path(external_repo)
+    effective_external_repo = model_spec.external_repo or external_repo
+    effective_model_config = model_spec.model_config or model_config
+    _activate_sam2_repo(effective_external_repo)
     torch_module = _import_required("torch")
     builder = _import_required("sam2.build_sam")
+    if model_spec.model_kind == "edgetam":
+        _patch_edgetam_multi_object_perceiver()
     full_checkpoint = (
         model_spec.sam2_checkpoint_path
         if model_spec.model_kind == "stage1-student"
         else model_spec.checkpoint_path
     )
     predictor = builder.build_sam2_video_predictor(
-        config_file=model_config,
+        config_file=effective_model_config,
         ckpt_path=full_checkpoint,
         device=device,
         apply_postprocessing=False,
@@ -1189,7 +1238,8 @@ def build_predictor(
     load_summary: dict[str, Any] = {
         "checkpoint_path": model_spec.checkpoint_path,
         "sam2_checkpoint_path": full_checkpoint,
-        "model_config": model_config,
+        "model_config": effective_model_config,
+        "external_repo": effective_external_repo,
     }
     if model_spec.model_kind == "stage1-student":
         load_summary.update(
@@ -1209,6 +1259,66 @@ def build_predictor(
             )
         )
     return predictor, torch_module, load_summary
+
+
+def _activate_sam2_repo(external_repo: str) -> None:
+    root = Path(external_repo).resolve()
+    root_text = str(root)
+    if root_text in sys.path:
+        sys.path.remove(root_text)
+    sys.path.insert(0, root_text)
+
+    loaded_sam2 = sys.modules.get("sam2")
+    loaded_file = getattr(loaded_sam2, "__file__", "") if loaded_sam2 else ""
+    if loaded_file:
+        try:
+            already_active = Path(loaded_file).resolve().is_relative_to(root)
+        except (OSError, ValueError):
+            already_active = False
+        if already_active:
+            return
+    for module_name in tuple(sys.modules):
+        if module_name == "sam2" or module_name.startswith("sam2."):
+            del sys.modules[module_name]
+    importlib.invalidate_caches()
+
+
+def _patch_edgetam_multi_object_perceiver() -> None:
+    perceiver_module = _import_required("sam2.modeling.perceiver")
+    perceiver_class = perceiver_module.PerceiverResampler
+    if getattr(perceiver_class, "_video_demo_multi_object_patch", False):
+        return
+
+    def forward_2d(self: Any, x: Any) -> tuple[Any, Any]:
+        batch, channels, height, width = x.shape
+        latents_2d = (
+            self.latents_2d.unsqueeze(0)
+            .expand(batch, -1, -1)
+            .reshape(-1, 1, channels)
+        )
+        num_window = int(math.sqrt(self.num_latents_2d))
+        window_size = height // num_window
+        x_windows = x.permute(0, 2, 3, 1)
+        x_windows = perceiver_module.window_partition(
+            x_windows,
+            window_size,
+        ).flatten(1, 2)
+        for layer in self.layers:
+            latents_2d = layer(latents_2d, x_windows)
+        latents_2d = latents_2d.reshape(
+            batch,
+            num_window,
+            num_window,
+            channels,
+        ).permute(0, 3, 1, 2)
+        pos_2d = self.position_encoding(latents_2d)
+        pos_2d = pos_2d.permute(0, 2, 3, 1).flatten(1, 2)
+        latents_2d = latents_2d.permute(0, 2, 3, 1).flatten(1, 2)
+        latents_2d = self.norm(latents_2d)
+        return latents_2d, pos_2d
+
+    perceiver_class.forward_2d = forward_2d
+    perceiver_class._video_demo_multi_object_patch = True
 
 
 def scale_prompts(

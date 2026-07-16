@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 from collections import deque
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import cv2
@@ -14,6 +16,8 @@ from sam_backend.sam2_video_demo import (
     ModelArtifacts,
     PromptSelector,
     VideoInfo,
+    _activate_sam2_repo,
+    _patch_edgetam_multi_object_perceiver,
     build_parser,
     display_scale,
     ffmpeg_video_args,
@@ -36,14 +40,19 @@ from sam_backend.sam2_video_demo import (
 
 
 class Sam2VideoDemoTest(unittest.TestCase):
-    def test_builds_three_model_comparison_matrix(self) -> None:
+    def test_builds_four_model_comparison_matrix(self) -> None:
         args = build_parser().parse_args(["--video-path", "demo.mov"])
 
         specs = model_specs_from_args(args)
 
         self.assertEqual(
             [spec.model_id for spec in specs],
-            ["sam2p1_l", "tv21m_mse_cos", "tv5m_projection"],
+            [
+                "sam2p1_l",
+                "tv21m_mse_cos",
+                "tv5m_projection",
+                "official_edgetam",
+            ],
         )
         self.assertEqual(
             specs[1].student_model_name,
@@ -51,6 +60,8 @@ class Sam2VideoDemoTest(unittest.TestCase):
         )
         self.assertEqual(specs[1].student_adapter_mode, "auto")
         self.assertEqual(specs[2].student_adapter_mode, "projection")
+        self.assertEqual(specs[3].external_repo, "external/EdgeTAM")
+        self.assertEqual(specs[3].model_config, "configs/edgetam.yaml")
 
     def test_legacy_tinyvit_arguments_still_target_tv5(self) -> None:
         args = build_parser().parse_args(
@@ -106,6 +117,8 @@ class Sam2VideoDemoTest(unittest.TestCase):
                 "10",
                 "--tv5-save-speed",
                 "5",
+                "--edgetam-save-speed",
+                "2",
             ]
         )
         specs = model_specs_from_args(args)
@@ -120,8 +133,59 @@ class Sam2VideoDemoTest(unittest.TestCase):
 
         self.assertEqual(
             speeds,
-            {"sam2p1_l": 20.0, "tv21m_mse_cos": 10.0, "tv5m_projection": 5.0},
+            {
+                "sam2p1_l": 20.0,
+                "tv21m_mse_cos": 10.0,
+                "tv5m_projection": 5.0,
+                "official_edgetam": 2.0,
+            },
         )
+
+    def test_selects_only_official_edgetam(self) -> None:
+        args = build_parser().parse_args(
+            ["--video-path", "demo.mov", "--models", "official_edgetam"]
+        )
+
+        specs = model_specs_from_args(args)
+
+        self.assertEqual(len(specs), 1)
+        self.assertEqual(specs[0].checkpoint_path, "checkpoints/edgetam/edgetam.pt")
+        self.assertEqual(specs[0].model_kind, "edgetam")
+
+    def test_switching_sam2_repo_removes_modules_from_previous_repo(self) -> None:
+        old_sam2 = ModuleType("sam2")
+        old_sam2.__file__ = "/old/repo/sam2/__init__.py"
+        old_submodule = ModuleType("sam2.build_sam")
+        with TemporaryDirectory() as directory:
+            root = str(Path(directory).resolve())
+            with patch.dict(
+                sys.modules,
+                {"sam2": old_sam2, "sam2.build_sam": old_submodule},
+            ):
+                _activate_sam2_repo(root)
+
+                self.assertNotIn("sam2", sys.modules)
+                self.assertNotIn("sam2.build_sam", sys.modules)
+            sys.path.remove(root)
+
+    def test_installs_edgetam_multi_object_perceiver_patch(self) -> None:
+        class FakePerceiver:
+            def forward_2d(self, value: object) -> object:
+                return value
+
+        original_forward = FakePerceiver.forward_2d
+        fake_module = SimpleNamespace(
+            PerceiverResampler=FakePerceiver,
+            window_partition=object(),
+        )
+        with patch(
+            "sam_backend.sam2_video_demo._import_required",
+            return_value=fake_module,
+        ):
+            _patch_edgetam_multi_object_perceiver()
+
+        self.assertIsNot(FakePerceiver.forward_2d, original_forward)
+        self.assertTrue(FakePerceiver._video_demo_multi_object_patch)
 
     def test_source_fps_ignores_per_model_save_speeds(self) -> None:
         args = build_parser().parse_args(["--video-path", "demo.mov"])
