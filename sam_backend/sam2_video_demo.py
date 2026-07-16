@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from fractions import Fraction
@@ -85,7 +86,6 @@ class FFmpegVideoWriter:
         codec: str,
         preset: str,
         crf: int,
-        audio_speed: float = 1.0,
     ) -> None:
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg is required for the video demo")
@@ -140,8 +140,6 @@ class FFmpegVideoWriter:
             )
         )
         if source_has_audio:
-            if audio_speed != 1.0:
-                command.extend(["-filter:a", atempo_filter(audio_speed)])
             command.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
         else:
             command.append("-an")
@@ -284,7 +282,10 @@ class PromptSelector:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Track selected first-frame objects with SAM2.1-L and TinyViT-5M."
+        description=(
+            "Track selected first-frame objects with SAM2.1-L, TinyViT-21M, "
+            "and TinyViT-5M."
+        )
     )
     parser.add_argument("--video-path", required=True)
     parser.add_argument("--output-dir", default="")
@@ -307,11 +308,26 @@ def build_parser() -> argparse.ArgumentParser:
         default="external/SAM2-Distillation-Pipeline",
     )
     parser.add_argument(
+        "--tv21-stage1-checkpoint",
+        default="checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt",
+    )
+    parser.add_argument(
+        "--tv21-backbone-checkpoint",
+        default=(
+            "checkpoints/sam2_distill/tinyvit/"
+            "tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors"
+        ),
+    )
+    parser.add_argument(
+        "--tv5-stage1-checkpoint",
         "--tinyvit-stage1-checkpoint",
+        dest="tv5_stage1_checkpoint",
         default="checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt",
     )
     parser.add_argument(
+        "--tv5-backbone-checkpoint",
         "--tinyvit-backbone-checkpoint",
+        dest="tv5_backbone_checkpoint",
         default=(
             "checkpoints/sam2_distill/tinyvit/"
             "tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors"
@@ -328,6 +344,36 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
+    return (
+        ModelSpec(
+            model_id="sam2p1_l",
+            model_kind="sam2",
+            checkpoint_path=args.sam2_checkpoint,
+        ),
+        ModelSpec(
+            model_id="tv21m_mse_cos",
+            model_kind="stage1-student",
+            checkpoint_path=args.tv21_stage1_checkpoint,
+            sam2_checkpoint_path=args.sam2_checkpoint,
+            student_family="tinyvit",
+            student_model_name="tiny_vit_21m_512.dist_in22k_ft_in1k",
+            student_backbone_checkpoint=args.tv21_backbone_checkpoint,
+            student_adapter_mode="auto",
+        ),
+        ModelSpec(
+            model_id="tv5m_projection",
+            model_kind="stage1-student",
+            checkpoint_path=args.tv5_stage1_checkpoint,
+            sam2_checkpoint_path=args.sam2_checkpoint,
+            student_family="tinyvit",
+            student_model_name="tiny_vit_5m_224.dist_in22k_ft_in1k",
+            student_backbone_checkpoint=args.tv5_backbone_checkpoint,
+            student_adapter_mode="projection",
+        ),
+    )
+
+
 def main() -> None:
     args = build_parser().parse_args()
     video_path = Path(args.video_path)
@@ -336,8 +382,10 @@ def main() -> None:
     if args.save_speed <= 0.0:
         raise ValueError("save-speed must be positive")
     _require_file(Path(args.sam2_checkpoint), "SAM2.1-L checkpoint")
-    _require_file(Path(args.tinyvit_stage1_checkpoint), "TinyViT Stage1 checkpoint")
-    _require_file(Path(args.tinyvit_backbone_checkpoint), "TinyViT backbone checkpoint")
+    _require_file(Path(args.tv21_stage1_checkpoint), "TinyViT-21M Stage1 checkpoint")
+    _require_file(Path(args.tv21_backbone_checkpoint), "TinyViT-21M backbone checkpoint")
+    _require_file(Path(args.tv5_stage1_checkpoint), "TinyViT-5M Stage1 checkpoint")
+    _require_file(Path(args.tv5_backbone_checkpoint), "TinyViT-5M backbone checkpoint")
     if not Path(args.external_repo).is_dir():
         raise FileNotFoundError(f"SAM2 source does not exist: {args.external_repo}")
     if not Path(args.sam2_distill_root).is_dir():
@@ -358,23 +406,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    model_specs = (
-        ModelSpec(
-            model_id="sam2p1_l",
-            model_kind="sam2",
-            checkpoint_path=args.sam2_checkpoint,
-        ),
-        ModelSpec(
-            model_id="tv5m_projection",
-            model_kind="stage1-student",
-            checkpoint_path=args.tinyvit_stage1_checkpoint,
-            sam2_checkpoint_path=args.sam2_checkpoint,
-            student_family="tinyvit",
-            student_model_name="tiny_vit_5m_224.dist_in22k_ft_in1k",
-            student_backbone_checkpoint=args.tinyvit_backbone_checkpoint,
-            student_adapter_mode="projection",
-        ),
-    )
+    model_specs = model_specs_from_args(args)
 
     summary: dict[str, Any] = {
         "video_path": str(video_path),
@@ -438,12 +470,14 @@ def main() -> None:
                 default_timing_mode=args.timing_mode,
                 default_speed=args.save_speed,
             )
+        if decision.timing_mode == "source_fps":
+            decision = SaveDecision("source_fps", 1.0)
         summary["video_save_requested"] = decision.timing_mode is not None
         summary["videos_saved"] = False
         summary["save_timing_mode"] = decision.timing_mode
         summary["save_speed"] = decision.speed
         summary["save_output_fps"] = (
-            video_info.fps * decision.speed
+            video_info.fps
             if decision.timing_mode is not None
             else None
         )
@@ -781,14 +815,17 @@ def choose_video_save(
     window_name = "SAM2 video demo complete"
     speed = default_speed
     print("Tracking complete. F: without latency  L: with latency  B: both")
-    print("Set speed with 1/2/4/8. Enter/Space/S uses command defaults. N/Q/Esc: discard")
+    print(
+        "Set latency-video speed with 1/2/4/8. "
+        "Enter/Space/S uses command defaults. N/Q/Esc: discard"
+    )
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     try:
         while True:
             display = combined.copy()
             _draw_label(
                 display,
-                f"Default {default_timing_mode} | Save speed {speed:g}x",
+                f"Default {default_timing_mode} | Latency-video speed {speed:g}x",
                 (18, max(60, display.shape[0] - 24)),
                 (40, 220, 255),
             )
@@ -796,10 +833,10 @@ def choose_video_save(
             key = cv2.waitKey(20) & 0xFF
             if key in {ord("1"), ord("2"), ord("4"), ord("8")}:
                 speed = float(chr(key))
-                print(f"Save speed set to {speed:g}x")
+                print(f"Latency-video speed set to {speed:g}x")
                 continue
             if key in {ord("f"), ord("F")}:
-                return SaveDecision("source_fps", speed)
+                return SaveDecision("source_fps", 1.0)
             if key in {ord("l"), ord("L")}:
                 return SaveDecision("realtime", speed)
             if key in {ord("b"), ord("B")}:
@@ -838,7 +875,12 @@ def save_model_outputs(
     )
     output_paths: dict[str, str] = {}
     for mode in modes:
-        speed_suffix = "" if speed == 1.0 else f"_{_format_speed(speed)}x"
+        mode_speed = speed if mode == "realtime" else 1.0
+        speed_suffix = (
+            ""
+            if mode_speed == 1.0
+            else f"_{_format_speed(mode_speed)}x"
+        )
         output_path = output_dir / (
             f"{artifacts.result['model_id']}_{mode}{speed_suffix}.mp4"
         )
@@ -848,7 +890,7 @@ def save_model_outputs(
             video_info=video_info,
             output_path=output_path,
             mode=mode,
-            speed=speed,
+            speed=mode_speed,
             codec=codec,
             preset=preset,
             crf=crf,
@@ -873,18 +915,18 @@ def _encode_model_output(
         output_path,
         width=video_info.width,
         height=video_info.height,
-        fps=video_info.fps * speed,
+        fps=video_info.fps,
         source_path=video_path if mode == "source_fps" else None,
         codec=codec,
         preset=preset,
         crf=crf,
-        audio_speed=speed,
     )
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
         writer.close()
         raise RuntimeError(f"failed to reopen video for encoding: {video_path}")
     object_count = int(artifacts.result["object_count"])
+    previous_overlay: np.ndarray | None = None
     print(f"Encoding {output_path}")
     try:
         for frame_index, latency_ms in enumerate(artifacts.latencies_ms):
@@ -914,8 +956,17 @@ def _encode_model_output(
                 repeat_count = realtime_repeat_count(
                     effective_latency_ms,
                     video_info.fps,
+                    speed,
                 )
-            writer.write(overlay, repeat_count)
+                for output_frame in smooth_transition_frames(
+                    previous_overlay,
+                    overlay,
+                    repeat_count,
+                ):
+                    writer.write(output_frame)
+            else:
+                writer.write(overlay)
+            previous_overlay = overlay
             if (frame_index + 1) % 100 == 0:
                 print(f"Encoded {frame_index + 1}/{len(artifacts.latencies_ms)} frames")
     finally:
@@ -1070,10 +1121,46 @@ def overlay_masks(
     return overlay
 
 
-def realtime_repeat_count(latency_ms: float, fps: float) -> int:
+def realtime_repeat_count(
+    latency_ms: float,
+    fps: float,
+    speed: float = 1.0,
+) -> int:
     if fps <= 0.0:
         raise ValueError("fps must be positive")
-    return max(1, int(math.ceil(max(0.0, latency_ms) * fps / 1000.0)))
+    if speed <= 0.0:
+        raise ValueError("speed must be positive")
+    return max(
+        1,
+        int(math.ceil(max(0.0, latency_ms) * fps / (1000.0 * speed))),
+    )
+
+
+def smooth_transition_frames(
+    previous_frame: np.ndarray | None,
+    current_frame: np.ndarray,
+    frame_count: int,
+) -> Iterator[np.ndarray]:
+    if frame_count < 1:
+        raise ValueError("frame count must be positive")
+    if previous_frame is None:
+        for _ in range(frame_count):
+            yield current_frame
+        return
+    if previous_frame.shape != current_frame.shape:
+        raise ValueError("transition frames must have matching shapes")
+    if frame_count == 1:
+        yield current_frame
+        return
+    for step in range(1, frame_count):
+        yield cv2.addWeighted(
+            previous_frame,
+            1.0 - step / frame_count,
+            current_frame,
+            step / frame_count,
+            0.0,
+        )
+    yield current_frame
 
 
 def rolling_fps(completion_times: deque[float]) -> float | None:
@@ -1131,24 +1218,6 @@ def resolve_ffmpeg_codec(requested_codec: str) -> str:
         "no supported FFmpeg video encoder is available; checked libx264, "
         "h264_nvmpi, h264_v4l2m2m, h264_nvenc, and mpeg4"
     )
-
-
-def atempo_filter(speed: float) -> str:
-    if speed <= 0.0:
-        raise ValueError("audio speed must be positive")
-    factors: list[float] = []
-    remaining = speed
-    while remaining > 2.0:
-        factors.append(2.0)
-        remaining /= 2.0
-    while remaining < 0.5:
-        factors.append(0.5)
-        remaining /= 0.5
-    if not math.isclose(remaining, 1.0):
-        factors.append(remaining)
-    if not factors:
-        factors.append(1.0)
-    return ",".join(f"atempo={factor:g}" for factor in factors)
 
 
 def _init_state(predictor: Any, frame_dir: Path) -> dict[str, Any]:

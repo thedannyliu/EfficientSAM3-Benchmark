@@ -712,24 +712,26 @@ above before testing again.
 ## Interactive Multi-Object Video Demo
 
 Use the bounded video demo when every source frame must be tracked and the
-same selected first-frame prompts must be compared between official SAM2.1-L and
-the TinyViT-5M projection student. This runner reads the video file directly;
+same selected first-frame prompts must be compared among official SAM2.1-L, the
+TinyViT-21M MSE+cos student, and the TinyViT-5M projection student. This runner
+reads the video file directly;
 do not start `video_stream_node`, `sam2_online_tracking_node`, or the ROS
 overlay recorder for this workflow.
 
-The first frame opens before either model runs. A click adds a point-prompt
+The first frame opens before any model runs. A click adds a point-prompt
 object and a left-button drag adds a box-prompt object. Select between one and
 255 objects, then press Enter or Space. `u` removes the last object, `r` clears
-all objects, and `q` or Escape cancels. Both models reuse the same saved
+all objects, and `q` or Escape cancels. All three models reuse the same saved
 prompts.
-Both tracking passes finish and display their results before any MP4 encoding
+All three tracking passes finish and display their results before any MP4 encoding
 starts. The final comparison window accepts Enter, Space, or `s` to save the
 command defaults. Press `f` to save only the latency-removed source-FPS video,
 `l` to save only the measured-latency video, `b` to save both, or `n`, `q`, or
 Escape to discard videos. Before choosing a mode, `1`, `2`, `4`, and `8` set
-the saved playback-speed multiplier.
+the latency video's playback-speed multiplier. The source-FPS output always
+stays at 1x and ignores this multiplier.
 
-During either model's tracking pass, press `s` once to arm automatic saving;
+During any model's tracking pass, press `s` once to arm automatic saving;
 press it again to disarm. An armed run skips the final menu and saves with the
 command's `--timing-mode` and `--save-speed` values. `SAVE ARMED` appears in
 the live window but is not burned into the output video. The live status also
@@ -747,13 +749,18 @@ python -m sam_backend.sam2_video_demo \
   --external-repo external/sam2 \
   --sam2-checkpoint checkpoints/sam2/sam2.1_hiera_large.pt \
   --sam2-distill-root external/SAM2-Distillation-Pipeline \
-  --tinyvit-stage1-checkpoint checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt \
-  --tinyvit-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
+  --tv21-stage1-checkpoint checkpoints/sam2_distill/stage1/tv21m_mse_cos.pt \
+  --tv21-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
+  --tv5-stage1-checkpoint checkpoints/sam2_distill/stage1/tv5_proj_sam21l_msehr_cos025_best.pt \
+  --tv5-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
   --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
   --device cuda \
-  --save-speed 1 \
+  --save-speed 2 \
   --output-dir overlays/thor/video_demo/iphone16pro_multi_object
 ```
+
+This example saves the latency-expanded output at 2x when `realtime` or `both`
+is selected. The `source_fps` output remains at the original 1x speed.
 
 Verify the system encoder before choosing to save:
 
@@ -776,14 +783,18 @@ codec is `none` or `unknown` are excluded instead of causing FFmpeg to exit.
 | Value | Output behavior |
 | --- | --- |
 | `source_fps` | writes every tracked source frame exactly once at the source video's detected FPS; inference waiting is removed and source audio is retained when present |
-| `realtime` | writes at the same nominal source FPS but repeats each overlay according to synchronized per-frame inference latency; this exposes tracking delay and omits audio because the duration changes |
-| `both` | produces both outputs for both models |
+| `realtime` | writes at the original nominal FPS, expands duration from synchronized per-frame inference latency, and applies the selected acceleration; smooth transition frames replace duplicate-frame holds, and audio is omitted because the duration changes |
+| `both` | produces both outputs for all three models |
 
-`--save-speed` accepts any positive multiplier. `2` keeps every overlay frame
-but doubles the encoded FPS, producing half the duration; `4` produces one
-quarter of the duration. Source audio is accelerated by the same factor using
-an FFmpeg `atempo` chain. A non-1x filename includes the multiplier, for
-example `sam2p1_l_source_fps_2x.mp4`.
+`--save-speed` accepts any positive multiplier and applies only to `realtime`.
+`2` halves the latency-expanded duration and `4` produces one quarter of that
+duration while the encoded FPS stays equal to the source FPS. The encoder
+interpolates adjacent tracked overlays across each compressed latency interval
+so accelerated output does not consist of long duplicate-frame holds. These
+are visual transition frames, not additional model predictions. The
+latency-removed `source_fps` output always remains at 1x with original audio.
+A non-1x latency filename includes the multiplier, for example
+`sam2p1_l_realtime_2x.mp4`.
 
 The runner preserves the decoded source width, height, frame count, and average
 source FPS. SAM2 inference frames are downscaled to at most 1024 pixels on the
@@ -799,6 +810,8 @@ the final save choice is accepted it also contains:
 ```text
 sam2p1_l_source_fps.mp4
 sam2p1_l_realtime.mp4
+tv21m_mse_cos_source_fps.mp4
+tv21m_mse_cos_realtime.mp4
 tv5m_projection_source_fps.mp4
 tv5m_projection_realtime.mp4
 ```

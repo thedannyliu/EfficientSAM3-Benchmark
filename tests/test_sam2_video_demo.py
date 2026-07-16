@@ -2,28 +2,66 @@ from __future__ import annotations
 
 import unittest
 from collections import deque
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import cv2
 import numpy as np
 
 from sam_backend.sam2_video_demo import (
+    ModelArtifacts,
     PromptSelector,
-    atempo_filter,
+    VideoInfo,
+    build_parser,
     display_scale,
     ffmpeg_video_args,
     masks_from_label_map,
     masks_to_label_map,
+    model_specs_from_args,
     overlay_masks,
     realtime_repeat_count,
     resize_masks,
     rolling_fps,
+    save_model_outputs,
     select_audio_stream_index,
+    smooth_transition_frames,
     scale_prompts,
 )
 
 
 class Sam2VideoDemoTest(unittest.TestCase):
+    def test_builds_three_model_comparison_matrix(self) -> None:
+        args = build_parser().parse_args(["--video-path", "demo.mov"])
+
+        specs = model_specs_from_args(args)
+
+        self.assertEqual(
+            [spec.model_id for spec in specs],
+            ["sam2p1_l", "tv21m_mse_cos", "tv5m_projection"],
+        )
+        self.assertEqual(
+            specs[1].student_model_name,
+            "tiny_vit_21m_512.dist_in22k_ft_in1k",
+        )
+        self.assertEqual(specs[1].student_adapter_mode, "auto")
+        self.assertEqual(specs[2].student_adapter_mode, "projection")
+
+    def test_legacy_tinyvit_arguments_still_target_tv5(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--video-path",
+                "demo.mov",
+                "--tinyvit-stage1-checkpoint",
+                "legacy-stage1.pt",
+                "--tinyvit-backbone-checkpoint",
+                "legacy-backbone.safetensors",
+            ]
+        )
+
+        self.assertEqual(args.tv5_stage1_checkpoint, "legacy-stage1.pt")
+        self.assertEqual(args.tv5_backbone_checkpoint, "legacy-backbone.safetensors")
+
     def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
         selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
 
@@ -75,6 +113,54 @@ class Sam2VideoDemoTest(unittest.TestCase):
         self.assertEqual(realtime_repeat_count(33.0, 30.0), 1)
         self.assertEqual(realtime_repeat_count(34.0, 30.0), 2)
         self.assertEqual(realtime_repeat_count(100.0, 30.0), 3)
+
+    def test_realtime_speed_reduces_output_frames_without_changing_fps(self) -> None:
+        self.assertEqual(realtime_repeat_count(1000.0, 30.0, 1.0), 30)
+        self.assertEqual(realtime_repeat_count(1000.0, 30.0, 2.0), 15)
+        self.assertEqual(realtime_repeat_count(1000.0, 30.0, 4.0), 8)
+
+    def test_smooth_transition_replaces_repeated_latency_frames(self) -> None:
+        previous = np.zeros((2, 2, 3), dtype=np.uint8)
+        current = np.full((2, 2, 3), 120, dtype=np.uint8)
+
+        frames = smooth_transition_frames(previous, current, 4)
+
+        self.assertEqual([int(frame[0, 0, 0]) for frame in frames], [30, 60, 90, 120])
+
+    def test_save_speed_applies_only_to_realtime_output(self) -> None:
+        artifacts = ModelArtifacts(
+            result={"model_id": "demo", "object_count": 1},
+            mask_dir=Path("masks"),
+            latencies_ms=[100.0],
+            last_overlay=np.zeros((2, 2, 3), dtype=np.uint8),
+        )
+        with (
+            TemporaryDirectory() as output_dir,
+            patch("sam_backend.sam2_video_demo.shutil.which", return_value="ffmpeg"),
+            patch(
+                "sam_backend.sam2_video_demo.resolve_ffmpeg_codec",
+                return_value="libx264",
+            ),
+            patch("sam_backend.sam2_video_demo._encode_model_output") as encode,
+        ):
+            paths = save_model_outputs(
+                artifacts,
+                video_path=Path("source.mov"),
+                video_info=VideoInfo(width=2, height=2, fps=30.0, frame_count=1),
+                output_dir=Path(output_dir),
+                timing_mode="both",
+                speed=2.0,
+                codec="libx264",
+                preset="medium",
+                crf=18,
+            )
+
+        self.assertTrue(paths["source_fps"].endswith("demo_source_fps.mp4"))
+        self.assertTrue(paths["realtime"].endswith("demo_realtime_2x.mp4"))
+        self.assertEqual(
+            [call.kwargs["speed"] for call in encode.call_args_list],
+            [1.0, 2.0],
+        )
 
     def test_resizes_binary_masks_back_to_source_resolution(self) -> None:
         logits = np.full((2, 1, 2, 3), -1.0, dtype=np.float32)
@@ -164,13 +250,6 @@ class Sam2VideoDemoTest(unittest.TestCase):
             ),
             ["-c:v", "h264_v4l2m2m", "-b:v", "80M"],
         )
-
-    def test_audio_speed_filter_chains_supported_atempo_ranges(self) -> None:
-        self.assertEqual(atempo_filter(1.0), "atempo=1")
-        self.assertEqual(atempo_filter(2.0), "atempo=2")
-        self.assertEqual(atempo_filter(4.0), "atempo=2,atempo=2")
-        self.assertEqual(atempo_filter(8.0), "atempo=2,atempo=2,atempo=2")
-        self.assertEqual(atempo_filter(0.25), "atempo=0.5,atempo=0.5")
 
     def test_rolling_display_fps_uses_recent_completion_times(self) -> None:
         self.assertIsNone(rolling_fps(deque([1.0])))
