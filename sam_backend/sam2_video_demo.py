@@ -348,6 +348,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", default="medium")
     parser.add_argument("--crf", type=int, default=18)
     parser.add_argument("--save-speed", type=float, default=1.0)
+    parser.add_argument("--sam2-save-speed", type=float)
+    parser.add_argument("--tv21-save-speed", type=float)
+    parser.add_argument("--tv5-save-speed", type=float)
     return parser
 
 
@@ -382,6 +385,33 @@ def model_specs_from_args(args: argparse.Namespace) -> tuple[ModelSpec, ...]:
     return tuple(specs[model_id] for model_id in args.models)
 
 
+def model_save_speed_overrides(args: argparse.Namespace) -> dict[str, float]:
+    return {
+        model_id: speed
+        for model_id, speed in (
+            ("sam2p1_l", args.sam2_save_speed),
+            ("tv21m_mse_cos", args.tv21_save_speed),
+            ("tv5m_projection", args.tv5_save_speed),
+        )
+        if speed is not None
+    }
+
+
+def resolve_model_save_speeds(
+    model_specs: tuple[ModelSpec, ...],
+    *,
+    timing_mode: str,
+    default_speed: float,
+    overrides: dict[str, float],
+) -> dict[str, float]:
+    if timing_mode == "source_fps":
+        return {model_spec.model_id: 1.0 for model_spec in model_specs}
+    return {
+        model_spec.model_id: overrides.get(model_spec.model_id, default_speed)
+        for model_spec in model_specs
+    }
+
+
 def main() -> None:
     args = build_parser().parse_args()
     video_path = Path(args.video_path)
@@ -390,6 +420,10 @@ def main() -> None:
     if args.save_speed <= 0.0:
         raise ValueError("save-speed must be positive")
     model_specs = model_specs_from_args(args)
+    save_speed_overrides = model_save_speed_overrides(args)
+    for model_id, speed in save_speed_overrides.items():
+        if speed <= 0.0:
+            raise ValueError(f"save speed for {model_id} must be positive")
     for model_spec in model_specs:
         if model_spec.model_kind == "sam2":
             _require_file(Path(model_spec.checkpoint_path), "SAM2.1-L checkpoint")
@@ -479,10 +513,20 @@ def main() -> None:
             )
         if save_control.armed:
             decision = SaveDecision(args.timing_mode, args.save_speed)
-            print(
-                "Automatic save was armed during tracking: "
-                f"mode={decision.timing_mode} speed={decision.speed:g}x"
-            )
+            if save_speed_overrides:
+                configured_speeds = ", ".join(
+                    f"{model_id}={speed:g}x"
+                    for model_id, speed in save_speed_overrides.items()
+                )
+                print(
+                    "Automatic save was armed during tracking: "
+                    f"mode={decision.timing_mode} speeds={configured_speeds}"
+                )
+            else:
+                print(
+                    "Automatic save was armed during tracking: "
+                    f"mode={decision.timing_mode} speed={decision.speed:g}x"
+                )
         else:
             decision = choose_video_save(
                 [artifact.last_overlay for artifact in artifacts],
@@ -490,6 +534,7 @@ def main() -> None:
                 args.display_max_height,
                 default_timing_mode=args.timing_mode,
                 default_speed=args.save_speed,
+                speed_overrides=save_speed_overrides,
             )
         if decision.timing_mode == "source_fps":
             decision = SaveDecision("source_fps", 1.0)
@@ -497,6 +542,17 @@ def main() -> None:
         summary["videos_saved"] = False
         summary["save_timing_mode"] = decision.timing_mode
         summary["save_speed"] = decision.speed
+        model_save_speeds = (
+            resolve_model_save_speeds(
+                model_specs,
+                timing_mode=decision.timing_mode,
+                default_speed=decision.speed,
+                overrides=save_speed_overrides,
+            )
+            if decision.timing_mode is not None
+            else {}
+        )
+        summary["model_save_speeds"] = model_save_speeds
         summary["save_output_fps"] = (
             video_info.fps
             if decision.timing_mode is not None
@@ -514,7 +570,7 @@ def main() -> None:
                     video_info=video_info,
                     output_dir=output_dir,
                     timing_mode=decision.timing_mode,
-                    speed=decision.speed,
+                    speed=model_save_speeds[artifact.result["model_id"]],
                     codec=args.codec,
                     preset=args.preset,
                     crf=args.crf,
@@ -797,6 +853,7 @@ def choose_video_save(
     *,
     default_timing_mode: str,
     default_speed: float,
+    speed_overrides: dict[str, float] | None = None,
 ) -> SaveDecision:
     if not previews:
         return SaveDecision(None, default_speed)
@@ -835,24 +892,38 @@ def choose_video_save(
     combined = np.hstack(displays)
     window_name = "SAM2 video demo complete"
     speed = default_speed
+    speed_overrides = speed_overrides or {}
     print("Tracking complete. F: without latency  L: with latency  B: both")
-    print(
-        "Set latency-video speed with 1/2/4/8. "
-        "Enter/Space/S uses command defaults. N/Q/Esc: discard"
-    )
+    if speed_overrides:
+        configured_speeds = ", ".join(
+            f"{model_id}={model_speed:g}x"
+            for model_id, model_speed in speed_overrides.items()
+        )
+        print(f"Per-model latency speeds: {configured_speeds}")
+        print("Enter/Space/S uses command settings. N/Q/Esc: discard")
+    else:
+        print(
+            "Set latency-video speed with 1/2/4/8. "
+            "Enter/Space/S uses command defaults. N/Q/Esc: discard"
+        )
     cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
     try:
         while True:
             display = combined.copy()
+            speed_label = (
+                "Per-model latency speeds configured"
+                if speed_overrides
+                else f"Default {default_timing_mode} | Latency-video speed {speed:g}x"
+            )
             _draw_label(
                 display,
-                f"Default {default_timing_mode} | Latency-video speed {speed:g}x",
+                speed_label,
                 (18, max(60, display.shape[0] - 24)),
                 (40, 220, 255),
             )
             cv2.imshow(window_name, display)
             key = cv2.waitKey(20) & 0xFF
-            if key in {ord("1"), ord("2"), ord("4"), ord("8")}:
+            if not speed_overrides and key in {ord("1"), ord("2"), ord("4"), ord("8")}:
                 speed = float(chr(key))
                 print(f"Latency-video speed set to {speed:g}x")
                 continue

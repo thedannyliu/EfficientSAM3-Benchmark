@@ -755,12 +755,15 @@ python -m sam_backend.sam2_video_demo \
   --tv5-backbone-checkpoint checkpoints/sam2_distill/tinyvit/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
   --model-config configs/sam2.1/sam2.1_hiera_l.yaml \
   --device cuda \
-  --save-speed 2 \
+  --sam2-save-speed 20 \
+  --tv21-save-speed 10 \
+  --tv5-save-speed 5 \
   --output-dir overlays/thor/video_demo/iphone16pro_multi_object
 ```
 
-This example saves the latency-expanded output at 2x when `realtime` or `both`
-is selected. The `source_fps` output remains at the original 1x speed.
+This example saves the latency-expanded SAM2.1-L, TinyViT-21M, and TinyViT-5M
+outputs at 20x, 10x, and 5x respectively when `realtime` or `both` is selected.
+Every `source_fps` output remains at the original 1x speed.
 
 To preview only the TinyViT-5M projection student before running the full
 three-model comparison:
@@ -816,6 +819,9 @@ are visual transition frames, not additional model predictions. The
 latency-removed `source_fps` output always remains at 1x with original audio.
 A non-1x latency filename includes the multiplier, for example
 `sam2p1_l_realtime_2x.mp4`.
+Use `--sam2-save-speed`, `--tv21-save-speed`, and `--tv5-save-speed` to override
+the fallback separately. When any per-model override is present, the final
+save window locks the configured speed values instead of accepting `1/2/4/8`.
 
 The runner preserves the decoded source width, height, frame count, and average
 source FPS. SAM2 inference frames are downscaled to at most 1024 pixels on the
@@ -825,16 +831,16 @@ at CRF 18 by default. Overlay rendering requires re-encoding and OpenCV uses an
 8-bit BGR path, so iPhone HDR/Dolby Vision bit depth and codec metadata are not
 bit-for-bit preserved.
 
-The output directory always contains `prompts.json` and `summary.json`. When
-the final save choice is accepted it also contains:
+The output directory always contains `prompts.json` and `summary.json`. For the
+three-model command above, accepting the final `both` save choice also creates:
 
 ```text
 sam2p1_l_source_fps.mp4
-sam2p1_l_realtime.mp4
+sam2p1_l_realtime_20x.mp4
 tv21m_mse_cos_source_fps.mp4
-tv21m_mse_cos_realtime.mp4
+tv21m_mse_cos_realtime_10x.mp4
 tv5m_projection_source_fps.mp4
-tv5m_projection_realtime.mp4
+tv5m_projection_realtime_5x.mp4
 ```
 
 Each model's `summary.json` record includes `frames`, `prompt_ms`,
@@ -842,6 +848,8 @@ Each model's `summary.json` record includes `frames`, `prompt_ms`,
 `mean_display_fps`. Tracking latency is measured around each native
 `propagate_in_video` step with CUDA synchronization; display FPS covers the
 complete result-to-result wall-clock pipeline.
+The top-level `model_save_speeds` object records the effective realtime
+acceleration used for every selected model.
 The separate `prompt_ms` covers initialization of all selected objects and is
 not included in `mean_latency_ms`. Both the top-level summary and each model
 record include `object_count`. `videos_saved` records the final save/discard

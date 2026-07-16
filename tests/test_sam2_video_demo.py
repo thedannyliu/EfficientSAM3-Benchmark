@@ -18,10 +18,12 @@ from sam_backend.sam2_video_demo import (
     ffmpeg_video_args,
     masks_from_label_map,
     masks_to_label_map,
+    model_save_speed_overrides,
     model_specs_from_args,
     overlay_masks,
     realtime_repeat_count,
     resize_masks,
+    resolve_model_save_speeds,
     rolling_fps,
     save_model_outputs,
     select_audio_stream_index,
@@ -70,6 +72,46 @@ class Sam2VideoDemoTest(unittest.TestCase):
         specs = model_specs_from_args(args)
 
         self.assertEqual([spec.model_id for spec in specs], ["tv5m_projection"])
+
+    def test_resolves_per_model_save_speeds(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--video-path",
+                "demo.mov",
+                "--sam2-save-speed",
+                "20",
+                "--tv21-save-speed",
+                "10",
+                "--tv5-save-speed",
+                "5",
+            ]
+        )
+        specs = model_specs_from_args(args)
+        overrides = model_save_speed_overrides(args)
+
+        speeds = resolve_model_save_speeds(
+            specs,
+            timing_mode="both",
+            default_speed=args.save_speed,
+            overrides=overrides,
+        )
+
+        self.assertEqual(
+            speeds,
+            {"sam2p1_l": 20.0, "tv21m_mse_cos": 10.0, "tv5m_projection": 5.0},
+        )
+
+    def test_source_fps_ignores_per_model_save_speeds(self) -> None:
+        args = build_parser().parse_args(["--video-path", "demo.mov"])
+
+        speeds = resolve_model_save_speeds(
+            model_specs_from_args(args),
+            timing_mode="source_fps",
+            default_speed=2.0,
+            overrides={"sam2p1_l": 20.0},
+        )
+
+        self.assertEqual(set(speeds.values()), {1.0})
 
     def test_prompt_selector_accepts_more_than_three_objects(self) -> None:
         selector = PromptSelector(np.zeros((40, 60, 3), dtype=np.uint8), 1600, 900)
