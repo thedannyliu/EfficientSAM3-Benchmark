@@ -75,6 +75,42 @@ initializers. It was consistently slower than FP16 and had larger feature error,
 not a preferred candidate. The repair remains in the smoke runner so future BF16 tests
 fail or pass on actual TensorRT behavior rather than an invalid mixed-type graph.
 
+### Layer-wise mixed-precision search
+
+TensorRT 11.1 no longer exposes the legacy `BuilderFlag.FP16` or precision-constraint
+builder flags. The layer search therefore uses a strongly typed ONNX graph rather than
+silently ignored builder hints:
+
+1. Run and export an FP32 oracle.
+2. Rebuild the student before FP16 export so TinyViT attention-bias caches are created in
+   FP16 rather than retaining values cached during the FP32 oracle run.
+3. Restore the original FP32 initializers for selected nodes from the matching FP32 ONNX.
+4. Insert explicit FP16-to-FP32 and FP32-to-FP16 casts around each connected precision
+   island. Adjacent selected nodes share one island where graph topology permits it.
+5. Build a strongly typed TensorRT engine and compare its outputs directly with the FP32
+   PyTorch oracle.
+
+The search profiles are `projection_fp32`, `norm_fp32`, `matmul_fp32`, `conv_fp32`,
+`matmul_projection_fp32`, and `conv_matmul_fp32`, plus the FP16 baseline. The projection
+profile selects the three final convolutions that produce `high_res_s0`, `high_res_s1`,
+and `image_embedding`. The matrix maps seven profiles per model and uses Dynamo for 5M
+and 11M while retaining the compact legacy exporter for 21M.
+
+An initial implementation attempt using weak typing failed immediately because the FP16
+builder flag has been removed in TensorRT 11.1. A subsequent Cast-island smoke exposed
+two implementation issues before the formal sweep: a cached FP32 attention bias in the
+FP16 export model and a missing ONNX save after graph rewriting. Both paths were fixed;
+a synthetic MatMul graph now verifies that an FP16 weight and its original FP32 copy are
+present, the selected MatMul consumes the FP32 copy, and the transformed model passes the
+ONNX checker. Results from jobs before that fix are development diagnostics and must not
+be used as mixed-precision measurements.
+
+Active second-round jobs as of 2026-07-22 are L40S `11371234_[1-4]` and the independent
+H100 graph-build probe `11371356_3`, both pending on `embers` priority. The L40S baseline
+from `11370104_0` completed at 1.2705 ms / 787.1 FPS and measured maximum relative L2
+`0.005046` against the FP32 oracle. H100 is only a compatibility probe; final Pareto
+latencies must come from the same L40S generation and will be rerun on Thor.
+
 ### TinyViT-21M graph fix
 
 The original Dynamo ONNX contained six expanded attention-bias cache initializers, each
@@ -178,6 +214,12 @@ Run the FP32/TF32/FP16/BF16 and Dynamo/legacy optimization matrix with:
 
 ```bash
 sbatch scripts/pace_l40s_tinyvit_trt_optimization_matrix.sbatch
+```
+
+Run the seven-profile layer-wise mixed-precision matrix with:
+
+```bash
+sbatch scripts/pace_l40s_tinyvit_trt_mixed_precision.sbatch
 ```
 
 Run the downstream SAM2-L mask-agreement smoke for one precision tier with:
