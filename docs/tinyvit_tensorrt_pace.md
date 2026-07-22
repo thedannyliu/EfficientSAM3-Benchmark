@@ -8,9 +8,10 @@ ONNX, built as a TensorRT engine, produced the required SAM2 feature shapes, and
 the feature-parity gate.
 
 This is an **encoder compatibility and performance smoke**, not an end-to-end SAM2 mask
-accuracy result. The PACE workspace does not currently contain the SAM2.1-L downstream
-checkpoint, so prompt encoding, mask decoding, memory attention, and final-mask parity
-were not part of this run.
+accuracy result. Prompt encoding, mask decoding, memory attention, and final-mask parity
+were not part of this run. The official SAM2.1-L downstream checkpoint was subsequently
+downloaded to `checkpoints/sam2/sam2.1_hiera_large.pt` for that next gate; its SHA256 is
+`2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318`.
 
 ## Formal run
 
@@ -34,6 +35,58 @@ were not part of this run.
 
 The latency numbers cover only the image encoder. They exclude image capture,
 normalization, host/device transfer, SAM2 prompt/mask/memory stages, and ROS publication.
+
+## Optimization follow-up
+
+The L40S optimization matrix used TensorRT builder optimization level 5 and explicitly
+disabled TF32 in the PyTorch FP32 oracle. The main array was `11367310_[0-13]`; additional
+legacy-export rows were `11368507_[14-17]`, the repaired TinyViT-5M BF16 row was
+`11367935_3`, and the compact TinyViT-21M TF32 row was `11368732_18`.
+
+Three candidate tiers are retained. `Accuracy-first` means FP32 feature parity is nearly
+exact, not that final masks have already passed. `Balanced` permits TensorRT TF32.
+`Speed-first` uses FP16 and must pass the downstream mask gate before deployment.
+
+| Encoder | Accuracy-first FP32 | Balanced TF32 | Speed-first FP16 |
+| --- | --- | --- | --- |
+| TinyViT-5M | dynamo, 4.015 ms, 16.9 MB | dynamo, 3.124 ms, 19.6 MB | **dynamo, 1.274 ms, 785.2 FPS, 10.3 MB** |
+| TinyViT-11M | legacy, 5.054 ms, 25.1 MB | dynamo, 3.705 ms, 30.0 MB | **dynamo, 1.394 ms, 717.2 FPS, 18.0 MB** |
+| TinyViT-21M | legacy, 17.161 ms, 64.7 MB | legacy, 14.919 ms, 64.9 MB | **legacy, 2.855 ms, 350.3 FPS, 34.3 MB** |
+
+Relative to the original FP32 TensorRT smoke, the selected speed-first candidates are:
+
+| Encoder | Original TensorRT | Optimized TensorRT | Latency reduction | Relative throughput |
+| --- | ---: | ---: | ---: | ---: |
+| TinyViT-5M | 3.979 ms | 1.274 ms | 68.0% | 3.12x |
+| TinyViT-11M | 5.061 ms | 1.394 ms | 72.4% | 3.63x |
+| TinyViT-21M | 18.504 ms | 2.855 ms | 84.6% | 6.48x |
+
+FP16 parity against the same-dtype PyTorch encoder remained inside the smoke gate:
+
+| Encoder | Minimum cosine | Maximum relative L2 |
+| --- | ---: | ---: |
+| TinyViT-5M | 0.99998701 | 0.00508929 |
+| TinyViT-11M | 0.99998808 | 0.00488760 |
+| TinyViT-21M | 0.99999058 | 0.00436592 |
+
+BF16 was tested after repairing PyTorch Dynamo's mixed-type Conv+BN-folded ONNX
+initializers. It was consistently slower than FP16 and had larger feature error, so it is
+not a preferred candidate. The repair remains in the smoke runner so future BF16 tests
+fail or pass on actual TensorRT behavior rather than an invalid mixed-type graph.
+
+### TinyViT-21M graph fix
+
+The original Dynamo ONNX contained six expanded attention-bias cache initializers, each
+`[12,1024,1024]` FP32 (about 50.3 MB). Together they accounted for about 302 MB of the
+355.2 MB graph. The legacy tracing exporter preserves compact relative-bias indexing:
+
+| TinyViT-21M graph | ONNX | Engine | FP32 latency | FP16 latency |
+| --- | ---: | ---: | ---: | ---: |
+| Dynamo | 355.2 MB FP32 / 178.3 MB FP16 | 356.0 MB / 181.3 MB | 18.522 ms | 2.859 ms |
+| Legacy | 58.1 MB FP32 / 33.7 MB FP16 | 64.7 MB / 34.3 MB | 17.161 ms | 2.855 ms |
+
+Legacy export is therefore selected for TinyViT-21M. For 5M/11M, legacy export made the
+engines smaller but slowed FP16 by about 8–11%, so Dynamo remains the speed choice.
 
 ## Compatibility and parity
 
@@ -77,6 +130,12 @@ mkdir -p logs
 sbatch scripts/pace_l40s_tinyvit_trt_encoder_smoke.sbatch
 ```
 
+Run the FP32/TF32/FP16/BF16 and Dynamo/legacy optimization matrix with:
+
+```bash
+sbatch scripts/pace_l40s_tinyvit_trt_optimization_matrix.sbatch
+```
+
 The array maps tasks `0/1/2` to `tv5/tv11/tv21`. The job runs:
 
 ```bash
@@ -92,25 +151,23 @@ must not be committed.
 
 ## Interpretation and next work
 
-`tv5.pt` and `tv11.pt` are immediately promising encoder replacements: FP32 TensorRT
-reduced isolated encoder latency by 36–39% on L40S. `tv21.pt` is functionally supported,
-but its exported ONNX is 355.2 MB and its engine is 355.9 MB, compared with 30.7/31.9 MB
-for TinyViT-11M. That disproportionate graph size and its slower TensorRT result suggest
-constant duplication or an inefficient lowering of the 21M model's attention/window
-operations. It should be optimized before promotion.
+`tv5.pt` and `tv11.pt` use Dynamo export for maximum speed. `tv21.pt` uses legacy export
+to remove expanded attention-bias caches. FP16 is the fastest encoder candidate for all
+three, while FP32 remains the accuracy-first fallback.
 
 Next gates, in order:
 
-1. Provide the exact SAM2.1-L downstream checkpoint and connect each TensorRT encoder to
-   the existing prompt/mask/memory graphs.
-2. Compare final masks against the same-checkpoint PyTorch pipeline on fixed images/video;
+1. Connect each TensorRT encoder to the existing SAM2.1-L prompt/mask/memory graphs using
+   the downloaded exact downstream checkpoint.
+2. Compare final masks against the same-checkpoint FP32 PyTorch pipeline on fixed
+   images/video;
    the feature smoke alone is not evidence of no accuracy loss.
-3. Inspect the TinyViT-21M ONNX initializer/constant sizes and exported attention graph,
-   then rerun FP32 before considering it performance-ready.
-4. Evaluate FP16/BF16 only as separate candidates and keep them only if the full mask
-   accuracy gate passes.
-5. Rebuild and benchmark the accepted engines on Jetson Thor; PACE engines are not
+3. Keep FP16 only if that mask gate passes; otherwise promote the corresponding TF32 or
+   FP32 row.
+4. Rebuild and benchmark the accepted engines on Jetson Thor; PACE engines are not
    portable deployment artifacts.
+5. If TinyViT-21M FP32/TF32 latency still matters, implement fused relative-position
+   attention rather than re-expanding its six 32-by-32-window bias matrices.
 
 ## Calibration run
 
