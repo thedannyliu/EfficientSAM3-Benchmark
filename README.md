@@ -20,6 +20,10 @@ Recommended split:
 - Thor: JetPack CUDA/TensorRT validation, ROS 2 Jazzy build, camera pipeline,
   final latency.
 
+PACE FP32 TensorRT compatibility results for the distilled SAM2-L TinyViT
+5M/11M/21M image encoders are recorded in
+[docs/tinyvit_tensorrt_pace.md](docs/tinyvit_tensorrt_pace.md).
+
 Use Python 3.12 for the real environment because ROS 2 Jazzy on Ubuntu 24.04
 and upstream SAM3/EfficientSAM3 are aligned there better than with Python 3.13.
 On Jetson Thor, install the NVIDIA/JetPack PyTorch wheels first, then use
