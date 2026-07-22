@@ -7,10 +7,11 @@ three local distilled TinyViT checkpoints. Each checkpoint loaded exactly, expor
 ONNX, built as a TensorRT engine, produced the required SAM2 feature shapes, and passed
 the feature-parity gate.
 
-This is an **encoder compatibility and performance smoke**, not an end-to-end SAM2 mask
-accuracy result. Prompt encoding, mask decoding, memory attention, and final-mask parity
-were not part of this run. The official SAM2.1-L downstream checkpoint was subsequently
-downloaded to `checkpoints/sam2/sam2.1_hiera_large.pt` for that next gate; its SHA256 is
+This began as an **encoder compatibility and performance smoke**. A subsequent image-mode
+test connected each encoder to the official SAM2.1-L prompt and mask decoder and measured
+PyTorch-versus-TensorRT mask agreement. It is still not a dataset accuracy result because
+the local camera video has no ground-truth masks. The official downstream checkpoint is
+`checkpoints/sam2/sam2.1_hiera_large.pt`; its SHA256 is
 `2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318`.
 
 ## Formal run
@@ -88,6 +89,49 @@ The original Dynamo ONNX contained six expanded attention-bias cache initializer
 Legacy export is therefore selected for TinyViT-21M. For 5M/11M, legacy export made the
 engines smaller but slowed FP16 by about 8–11%, so Dynamo remains the speed choice.
 
+## Downstream mask parity follow-up
+
+The parity runner uses eight evenly spaced frames from `videos/test1.mov`. For every
+frame it runs one center-point prompt and one centered box prompt through the same
+official SAM2.1-L prompt/mask decoder, first with the PyTorch student encoder and then
+with its TensorRT replacement. Thus each row below summarizes 16 final masks per model
+and precision. `Minimum` is deliberately strict and sensitive to single boundary pixels;
+`mean` is the average agreement over all masks.
+
+| Encoder | Precision | Minimum mask IoU | Mean mask IoU | Job |
+| --- | --- | ---: | ---: | --- |
+| TinyViT-5M | FP16 | 0.940239 | 0.979325 | `11368873_0` |
+| TinyViT-5M | TF32 | 0.950000 | 0.987043 | `11368954_0` |
+| TinyViT-5M | FP32 | **0.992063** | **0.997874** | `11368970_0` |
+| TinyViT-11M | FP16 | 0.818182 | 0.972948 | `11368874_1` |
+| TinyViT-11M | TF32 | **0.958619** | **0.994160** | `11368940_1` |
+| TinyViT-11M | FP32 | 0.944444 | 0.993486 | `11368974_1` |
+| TinyViT-21M | FP16 | 0.971706 | 0.989817 | `11368875_2` |
+| TinyViT-21M | TF32 | 0.982353 | 0.995064 | `11368941_2` |
+| TinyViT-21M | FP32 | **0.995930** | **0.998795** | `11368975_2` |
+
+None passed the provisional `minimum IoU >= 0.999` bit-level agreement gate. This does
+not demonstrate a segmentation-accuracy regression: the fixed prompts can produce
+near-empty or threshold-sensitive masks, and even FP32 TensorRT does not execute every
+operator in the same order as PyTorch. The non-monotonic 11M minimum (TF32 above FP32)
+is a concrete example of why the minimum of 16 unlabelled masks is not an accuracy
+metric. It does demonstrate that FP16 is not numerically identical at final-mask level.
+
+Deployment choice is therefore explicit:
+
+- Use FP16 only as the speed-first candidate; it needs a ground-truth SA-V/SA1B
+  no-regression result before claiming preserved accuracy.
+- Use TF32 as the balanced fallback if FP16 misses that dataset gate.
+- Use FP32 as the accuracy-first TensorRT fallback. It has the smallest feature error,
+  although exact binary-mask identity is neither achieved nor required for equal task
+  accuracy.
+
+The first combined array, `11368811_[0-2]`, did not instantiate tasks in the scheduler
+and was canceled while still pending. The listed independent jobs all ran on L40S with
+the `embers` QOS and produced reports under
+`results/pace/tinyvit_trt_mask_parity/<job>/<precision>/<model>/report.json` (the initial
+FP16 reports omit the precision directory).
+
 ## Compatibility and parity
 
 The TensorRT outputs have the exact feature contract consumed by the SAM2.1-L downstream
@@ -136,6 +180,14 @@ Run the FP32/TF32/FP16/BF16 and Dynamo/legacy optimization matrix with:
 sbatch scripts/pace_l40s_tinyvit_trt_optimization_matrix.sbatch
 ```
 
+Run the downstream SAM2-L mask-agreement smoke for one precision tier with:
+
+```bash
+sbatch --export=ALL,TIER=fp16 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
+sbatch --export=ALL,TIER=tf32 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
+sbatch --export=ALL,TIER=fp32 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
+```
+
 The array maps tasks `0/1/2` to `tv5/tv11/tv21`. The job runs:
 
 ```bash
@@ -157,16 +209,14 @@ three, while FP32 remains the accuracy-first fallback.
 
 Next gates, in order:
 
-1. Connect each TensorRT encoder to the existing SAM2.1-L prompt/mask/memory graphs using
-   the downloaded exact downstream checkpoint.
-2. Compare final masks against the same-checkpoint FP32 PyTorch pipeline on fixed
-   images/video;
-   the feature smoke alone is not evidence of no accuracy loss.
-3. Keep FP16 only if that mask gate passes; otherwise promote the corresponding TF32 or
-   FP32 row.
-4. Rebuild and benchmark the accepted engines on Jetson Thor; PACE engines are not
+1. Run PyTorch and all three TensorRT tiers against the same official SA-V/SA1B
+   ground-truth subset. Select the fastest tier whose J&F/mIoU delta is inside the
+   predeclared no-regression tolerance.
+2. Exercise video memory attention/tracking; the completed parity test covers image-mode
+   prompt and mask decoding, not temporal propagation.
+3. Rebuild and benchmark the accepted engines on Jetson Thor; PACE engines are not
    portable deployment artifacts.
-5. If TinyViT-21M FP32/TF32 latency still matters, implement fused relative-position
+4. If TinyViT-21M FP32/TF32 latency still matters, implement fused relative-position
    attention rather than re-expanding its six 32-by-32-window bias matrices.
 
 ## Calibration run
