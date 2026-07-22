@@ -19,7 +19,10 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--distill-root", required=True)
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--precision", choices=("fp32", "fp16"), default="fp32")
+    parser.add_argument("--precision", choices=("fp32", "fp16", "bf16"), default="fp32")
+    parser.add_argument("--exporter", choices=("dynamo", "legacy"), default="dynamo")
+    parser.add_argument("--allow-tf32", action="store_true")
+    parser.add_argument("--builder-optimization-level", type=int, choices=range(0, 6), default=3)
     parser.add_argument("--workspace-gib", type=float, default=8.0)
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--runs", type=int, default=100)
@@ -45,7 +48,13 @@ def _torch_dtype(torch, trt, dtype):
     }[dtype]
 
 
-def _build_engine(onnx_path: Path, engine_path: Path, workspace_gib: float) -> dict[str, object]:
+def _build_engine(
+    onnx_path: Path,
+    engine_path: Path,
+    workspace_gib: float,
+    allow_tf32: bool,
+    optimization_level: int,
+) -> dict[str, object]:
     import tensorrt as trt
 
     logger = trt.Logger(trt.Logger.INFO)
@@ -57,8 +66,9 @@ def _build_engine(onnx_path: Path, engine_path: Path, workspace_gib: float) -> d
         raise RuntimeError(f"TensorRT ONNX parse failed:\n{errors}")
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, int(workspace_gib * 2**30))
-    if hasattr(trt.BuilderFlag, "TF32"):
+    if not allow_tf32 and hasattr(trt.BuilderFlag, "TF32"):
         config.clear_flag(trt.BuilderFlag.TF32)
+    config.builder_optimization_level = optimization_level
     started = time.perf_counter()
     serialized = builder.build_serialized_network(network, config)
     build_seconds = time.perf_counter() - started
@@ -85,6 +95,25 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _convert_float_initializers_to_bfloat16(onnx, model) -> int:
+    """Repair Dynamo's FP32 Conv+BN-folded weights in an otherwise BF16 graph."""
+    import numpy as np
+
+    converted = 0
+    for initializer in model.graph.initializer:
+        if initializer.data_type != onnx.TensorProto.FLOAT:
+            continue
+        values = onnx.numpy_helper.to_array(initializer).astype(np.float32, copy=False)
+        bits = values.view(np.uint32)
+        rounding = np.uint32(0x7FFF) + ((bits >> np.uint32(16)) & np.uint32(1))
+        bfloat16 = ((bits + rounding) >> np.uint32(16)).astype(np.uint16)
+        initializer.ClearField("float_data")
+        initializer.raw_data = bfloat16.tobytes()
+        initializer.data_type = onnx.TensorProto.BFLOAT16
+        converted += 1
+    return converted
 
 
 def _benchmark_pytorch(model, image, warmup: int, runs: int) -> dict[str, float | int]:
@@ -192,6 +221,9 @@ def main() -> int:
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA GPU is required")
+    torch.set_float32_matmul_precision("highest")
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
     checkpoint_path = Path(args.checkpoint).resolve()
     print(f"loading {checkpoint_path}", flush=True)
     payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -219,7 +251,11 @@ def main() -> int:
             outputs = self.student(image)
             return outputs["high_res_s0"], outputs["high_res_s1"], outputs["image_embed"]
 
-    dtype = torch.float32 if args.precision == "fp32" else torch.float16
+    dtype = {
+        "fp32": torch.float32,
+        "fp16": torch.float16,
+        "bf16": torch.bfloat16,
+    }[args.precision]
     model = EncoderOutputs(model).to(device="cuda", dtype=dtype).eval()
     torch.manual_seed(20260722)
     image = torch.randn(1, 3, 1024, 1024, device="cuda", dtype=dtype)
@@ -234,20 +270,32 @@ def main() -> int:
     onnx_path = output_dir / f"encoder.{args.precision}.onnx"
     engine_path = output_dir / f"encoder.{args.precision}.engine"
     print(f"exporting {onnx_path}", flush=True)
-    torch.onnx.export(
-        model,
-        (image,),
-        str(onnx_path),
-        input_names=["image"],
-        output_names=list(OUTPUT_NAMES),
-        opset_version=18,
-        dynamo=True,
-        external_data=False,
-        verify=False,
-    )
-    onnx.checker.check_model(onnx.load(onnx_path, load_external_data=False))
+    export_options = {
+        "input_names": ["image"],
+        "output_names": list(OUTPUT_NAMES),
+        "opset_version": 18,
+        "dynamo": args.exporter == "dynamo",
+        "external_data": False,
+    }
+    if args.exporter == "dynamo":
+        export_options["verify"] = False
+    torch.onnx.export(model, (image,), str(onnx_path), **export_options)
+    onnx_model = onnx.load(onnx_path, load_external_data=False)
+    bfloat16_initializers_converted = 0
+    if args.precision == "bf16":
+        bfloat16_initializers_converted = _convert_float_initializers_to_bfloat16(
+            onnx, onnx_model
+        )
+        onnx.save(onnx_model, onnx_path)
+    onnx.checker.check_model(onnx_model)
     print(f"building {engine_path}", flush=True)
-    build = _build_engine(onnx_path, engine_path, args.workspace_gib)
+    build = _build_engine(
+        onnx_path,
+        engine_path,
+        args.workspace_gib,
+        args.allow_tf32,
+        args.builder_optimization_level,
+    )
     torch.cuda.synchronize()
     actual, timing = _run_engine(engine_path, image, args.warmup, args.runs)
 
@@ -271,8 +319,12 @@ def main() -> int:
             "cosine": cosine,
         }
         passed &= finite and tuple(observed.shape) == tuple(expected.shape)
-        passed &= cosine >= (0.99999 if args.precision == "fp32" else 0.9999)
-        passed &= relative_l2 <= (2.0e-3 if args.precision == "fp32" else 1.0e-2)
+        cosine_limit = {"fp32": 0.99999, "fp16": 0.9999, "bf16": 0.999}[args.precision]
+        relative_l2_limit = {"fp32": 2.0e-3, "fp16": 1.0e-2, "bf16": 5.0e-2}[
+            args.precision
+        ]
+        passed &= cosine >= cosine_limit
+        passed &= relative_l2 <= relative_l2_limit
 
     report = {
         "passed": passed,
@@ -284,6 +336,10 @@ def main() -> int:
         "adapter_mode": adapter_mode,
         "parameters": sum(parameter.numel() for parameter in model.parameters()),
         "precision": args.precision,
+        "exporter": args.exporter,
+        "allow_tf32": args.allow_tf32,
+        "pytorch_oracle_tf32": False,
+        "builder_optimization_level": args.builder_optimization_level,
         "seed": 20260722,
         "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
         "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
@@ -292,6 +348,7 @@ def main() -> int:
         "onnx": onnx.__version__,
         "tensorrt": trt.__version__,
         "onnx_bytes": onnx_path.stat().st_size,
+        "bfloat16_initializers_converted": bfloat16_initializers_converted,
         "build": build,
         "pytorch_timing": pytorch_timing,
         "timing": timing,
