@@ -426,6 +426,136 @@ python scripts/pace_tinyvit_trt_encoder_smoke.py \
 ONNX files and TensorRT engines are generated under ignored `results/` directories and
 must not be committed.
 
+## End-to-end pipeline optimization
+
+The encoder-only result does not predict camera-pipeline speed. Job `11405814` therefore
+ran the original TensorRT path and the selected optimized path sequentially on the same
+L40S. It used 32 consecutive 1080p frames after three decoder warmup frames, five model
+warmups, one center-point and one centered-box mask per frame, and the TinyViT-5M FP16
+zero-aux-stream engine. The timing includes OpenCV FFmpeg software decode, BGR-to-RGB,
+preprocessing, host/device transfer, encoder, prompt encoder, mask decoder, full-resolution
+mask postprocessing, and the requested CPU mask transfer. It excludes ROS transport,
+publication, and overlay rendering.
+
+The accuracy proxy compares every optimized binary mask with the same TinyViT-5M PyTorch
+encoder and FP32 SAM2-L downstream path. The selected path passed the declared mean-IoU
+gate:
+
+| 32-frame result | Original TensorRT path | Optimized TensorRT path |
+| --- | ---: | ---: |
+| Mean mask IoU vs PyTorch | 0.979605 | 0.979536 |
+| Minimum mask IoU | 0.856471 | 0.832941 |
+| `set_image` | 8.227 ms | **2.372 ms** |
+| Point prompt | 4.847 ms | **2.031 ms** |
+| Model pipeline | 13.074 ms | **4.402 ms** |
+| Model-only throughput | 76.5 FPS | **227.1 FPS** |
+| Decode plus one point prompt | 21.553 ms | **12.963 ms** |
+| Decode plus point throughput | 46.4 FPS | **77.1 FPS** |
+
+The optimized model path is `2.97x` faster than the original TensorRT path and `4.31x`
+faster than the PyTorch model path measured in the same optimized run. Including
+steady-state software decode, it is `1.66x` faster than the original TensorRT path and
+`2.12x` faster than PyTorch. The average mask-IoU change relative to the original
+TensorRT path is less than `0.0001`; the strict single-mask minimum remains below 0.95
+because threshold-sensitive, nearly empty masks are still present.
+
+The selected changes are:
+
+1. Upload the RGB `uint8` frame before resize and normalization, then run bilinear
+   antialiased resize and ImageNet normalization on the GPU. This reduced `set_image`
+   from 8.10 to 2.86 ms by itself in screening job `11405215`.
+2. In image-predictor mode only, omit the three feature positional tensors whose values
+   `SAM2ImagePredictor.set_image` discards. Their shapes are retained. This saved about
+   0.42 ms and produced identical masks. Do **not** apply this shortcut to
+   `SAM2VideoPredictor`; temporal memory attention consumes positional values.
+3. Keep TensorRT encoder features in FP16 instead of materializing three FP32 copies,
+   and run the prompt and mask decoder under FP16 autocast.
+4. Compile the prompt and mask decoder with `torch.compile(mode="reduce-overhead",
+   fullgraph=True, dynamic=False)`. Call
+   `torch.compiler.cudagraph_mark_step_begin()` before each prompt so a subsequent
+   point/box invocation does not overwrite a CUDA Graph output still referenced by the
+   previous invocation.
+5. Transfer one full-resolution binary mask rather than FP32 logits, scores, and
+   low-resolution logits when those extra values are not consumed.
+6. Cache normalized GPU prompt tensors while a point or box is unchanged.
+
+These switches are explicit in `pace_tinyvit_trt_mask_parity.py`; the selected experiment
+uses:
+
+```text
+--trt-position-mode shape-only
+--trt-gpu-preprocess
+--mask-transfer binary-only
+--decoder-autocast-fp16
+--trt-native-outputs
+--compile-components reduce-overhead
+--cache-prompts
+```
+
+### Real streaming throughput
+
+The same formal job processed 64 frames with a point prompt through a real capture loop,
+not by adding separately measured stage means:
+
+| Stream execution | Original path | Optimized path |
+| --- | ---: | ---: |
+| Sequential decode and inference | 32.9 FPS | **88.9 FPS** |
+| Producer-thread decode overlapped with inference | 30.1 FPS | **129.1 FPS** |
+
+Overlap is useful only after GPU preprocessing removes CPU contention: it slowed the
+original CPU-resize path but improved the optimized path by `1.45x`. The `129.1 FPS`
+number is a PACE file-stream throughput result, not a Thor ROS camera claim. Thor should
+replace software decode/copy with the JetPack GStreamer/NVDEC and zero-copy camera path,
+then rerun the same stage and stream measurements with ROS publication and overlay
+enabled.
+
+### Screening and rejected variants
+
+The main single-change sweep is `11405215_[0-9]`; refinement jobs are `11405486`,
+`11405685`, and `11405733`. All use `embers`. The useful stage results are:
+
+| Variant | `set_image` | Point prompt | Model pipeline | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Original TensorRT | 8.098 ms | 4.776 ms | 12.874 ms | baseline |
+| Skip unused image PE | 7.674 ms | 4.905 ms | 12.579 ms | keep |
+| Binary-only CPU transfer | 8.107 ms | 4.298 ms | 12.404 ms | keep when logits are unused |
+| GPU preprocess | 2.858 ms | 4.746 ms | 7.604 ms | keep |
+| GPU preprocess + PE skip + binary | 2.410 ms | 4.371 ms | 6.780 ms | keep |
+| Add compiled FP16 downstream | 2.367 ms | 2.174 ms | 4.541 ms | keep |
+| Add cached GPU prompt | 2.365 ms | 2.017 ms | **4.382 ms** | selected |
+
+Eager FP16 downstream execution was rejected: point-prompt latency increased from about
+4.78 to 6.10 ms and it showed large `set_image` outliers. FP16 is useful here only after
+the static prompt/mask graphs are compiled. FP32 compiled downstream reached 5.505 ms
+for the otherwise optimized model pipeline, roughly 1.1 ms slower than compiled FP16.
+`max-autotune` reached 4.507 ms versus 4.541 ms for `reduce-overhead`, which is below
+cross-job noise and incurs much longer startup compilation; it is not selected.
+FP16 resize/normalization reached 4.317 ms in an independent run, only about 1.5% below
+the FP32-preprocess candidate while reducing the 16-frame minimum mask IoU from about
+0.979 to 0.971. Same-GPU confirmation job `11405937` did not start under `embers` and
+was canceled at zero runtime. Because the apparent gain is within cross-node variation
+and its accuracy proxy is worse, FP32 GPU preprocessing remains selected.
+
+The original, unoptimized end-to-end path also completed on A100 (`11401278`) and H200
+(`11401276`). TensorRT model-pipeline speedups over PyTorch were `1.31x` and `1.39x`;
+end-to-end speedups were `1.21x` and `1.20x`. The broader optimized A100/H200 arrays
+`11405290` and `11405291` never received resources under `embers` and were canceled at
+zero runtime after the L40S formal run converged. These are scheduling outcomes, not
+TensorRT compatibility failures.
+
+Reproduce the formal baseline and selected candidate on one L40S with:
+
+```bash
+sbatch \
+  --export=ALL,ENGINE_PATH=results/pace/tinyvit_trt_aux_streams/11374004/tv5/aux-0/encoder.fp16.engine \
+  scripts/pace_l40s_tinyvit_trt_pipeline_pair.sbatch
+```
+
+Reports are written below
+`results/pace/tinyvit_trt_pipeline_sweep/<job>/{baseline,all-compile-cache}/report.json`.
+Those reports and generated compilation/engine artifacts remain ignored and must not be
+committed.
+
 ## Interpretation and next work
 
 `tv5.pt` and `tv11.pt` use Dynamo export for maximum speed. `tv21.pt` uses legacy export
