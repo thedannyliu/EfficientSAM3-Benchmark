@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=tv-trt-role
-#SBATCH --partition=gpu-l40s
-#SBATCH --account=gts-agarg35-ideas_l40s
+#SBATCH --job-name=tv-trt-attn-block
+#SBATCH --partition=gpu-h200
+#SBATCH --account=gts-agarg35
 #SBATCH --qos=embers
-#SBATCH --gres=gpu:l40s:1
-#SBATCH --array=0-4
+#SBATCH --gres=gpu:h200:1
+#SBATCH --array=0-7%4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=96G
 #SBATCH --time=00:45:00
@@ -15,23 +15,18 @@ set -euo pipefail
 module load python/3.12.5 "${CUDA_MODULE:-cuda/12.6.1}"
 source .venv/bin/activate
 
-LABELS=(attn_qkv attn_projection mlp_fc1 mlp_fc2 local_conv)
-SCOPES=(
-  '\.attn\.qkv$'
-  '\.attn\.proj$'
-  '\.mlp\.fc1$'
-  '\.mlp\.fc2$'
-  '\.local_conv\.'
-)
-
+STAGES=(1 1 2 2 2 2 2 2)
+BLOCKS=(0 1 0 1 2 3 4 5)
+STAGE="${STAGES[${SLURM_ARRAY_TASK_ID}]}"
+BLOCK="${BLOCKS[${SLURM_ARRAY_TASK_ID}]}"
+LABEL="stage${STAGE}_block${BLOCK}_attention"
+SCOPE="student\\.backbone\\.body\\.stages_${STAGE}\\.blocks\\.${BLOCK}\\.attn$"
 MODEL="${MODEL:-tv5}"
 EXPORTER=dynamo
 if [[ "${MODEL}" == "tv21" ]]; then
   EXPORTER=legacy
 fi
-LABEL="${LABELS[${SLURM_ARRAY_TASK_ID}]}"
-SCOPE="${SCOPES[${SLURM_ARRAY_TASK_ID}]}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-results/pace/tinyvit_trt_role_sensitivity/${SLURM_ARRAY_JOB_ID}}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-results/pace/tinyvit_trt_attention_block_sensitivity/${SLURM_ARRAY_JOB_ID}}"
 
 python scripts/pace_tinyvit_trt_encoder_smoke.py \
   --checkpoint "checkpoints/distill/${MODEL}.pt" \

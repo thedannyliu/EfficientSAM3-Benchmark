@@ -123,6 +123,10 @@ class _CalibrationReader:
     def rewind(self):
         self.index = 0
 
+    def __iter__(self):
+        for frame in self.frames:
+            yield {"image": frame[None, ...]}
+
 
 def _semantic_scope(node) -> str:
     metadata = {item.key: item.value for item in getattr(node, "metadata_props", [])}
@@ -724,6 +728,21 @@ def main() -> int:
         engine_path = output_dir / f"encoder.{args.quantization_mode}.engine"
         quantized_model = onnx.load(onnx_path, load_external_data=False)
         onnx.checker.check_model(quantized_model)
+        quantize_linear_nodes = sum(
+            node.op_type == "QuantizeLinear" for node in quantized_model.graph.node
+        )
+        dequantize_linear_nodes = sum(
+            node.op_type == "DequantizeLinear" for node in quantized_model.graph.node
+        )
+        if (
+            args.quantization_mode in ("fp8", "int8")
+            and nodes_to_quantize
+            and quantize_linear_nodes == 0
+        ):
+            raise RuntimeError(
+                "selected nodes produced no Q/DQ nodes; the requested layers are not "
+                "supported by this quantizer"
+            )
         quantization.update(
             {
                 "calibration_samples": len(frames),
@@ -733,13 +752,8 @@ def main() -> int:
                     for node in onnx_model.graph.node
                     if nodes_to_quantize and node.name in nodes_to_quantize
                 },
-                "quantize_linear_nodes": sum(
-                    node.op_type == "QuantizeLinear" for node in quantized_model.graph.node
-                ),
-                "dequantize_linear_nodes": sum(
-                    node.op_type == "DequantizeLinear"
-                    for node in quantized_model.graph.node
-                ),
+                "quantize_linear_nodes": quantize_linear_nodes,
+                "dequantize_linear_nodes": dequantize_linear_nodes,
             }
         )
     print(f"building {engine_path}", flush=True)

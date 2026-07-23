@@ -72,6 +72,14 @@ class QuantizationSelectionTest(unittest.TestCase):
             "student.backbone.body.stages_2.blocks.4.mlp.fc1",
         )
 
+    def test_calibration_reader_supports_awq_iteration(self) -> None:
+        import numpy as np
+
+        frames = [np.zeros((3, 2, 2), dtype=np.float16) for _ in range(2)]
+        rows = list(MODULE._CalibrationReader(frames))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["image"].shape, (1, 3, 2, 2))
+
 
 if __name__ == "__main__":
     unittest.main()

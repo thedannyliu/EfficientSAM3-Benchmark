@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-module load python/3.12.5 cuda/12.6.1
+module load python/3.12.5 "${CUDA_MODULE:-cuda/12.6.1}"
 source .venv/bin/activate
 
 LABELS=(
