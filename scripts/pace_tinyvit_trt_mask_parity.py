@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -24,6 +25,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--distill-root", required=True)
     parser.add_argument("--video", required=True)
     parser.add_argument("--frames", type=int, default=8)
+    parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument("--sequential-frames", action="store_true")
     parser.add_argument("--minimum-mask-iou", type=float, default=0.999)
     parser.add_argument("--minimum-mean-mask-iou", type=float, default=0.0)
     parser.add_argument("--output", required=True)
@@ -124,26 +127,40 @@ def _patch_tensorrt_student(model, engine):
     model.forward_image = types.MethodType(forward_image, model)
 
 
-def _read_frames(path: str, count: int) -> list[np.ndarray]:
+def _read_frames(
+    path: str, count: int, sequential: bool
+) -> tuple[list[np.ndarray], list[float]]:
     capture = cv2.VideoCapture(path)
     if not capture.isOpened():
         raise RuntimeError(f"failed to open video: {path}")
     total = max(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), count)
-    indices = np.linspace(0, total - 1, count, dtype=np.int64)
+    indices = (
+        np.arange(count, dtype=np.int64)
+        if sequential
+        else np.linspace(0, total - 1, count, dtype=np.int64)
+    )
     frames = []
+    decode_ms = []
     for index in indices:
-        capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+        if not sequential:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+        started = time.perf_counter()
         ok, frame = capture.read()
         if not ok:
             raise RuntimeError(f"failed to decode video frame {index}")
         frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        decode_ms.append((time.perf_counter() - started) * 1000.0)
     capture.release()
-    return frames
+    return frames, decode_ms
 
 
-def _predict(predictor, frame: np.ndarray) -> dict[str, np.ndarray]:
+def _predict(predictor, frame: np.ndarray, torch) -> tuple[dict[str, np.ndarray], dict]:
     height, width = frame.shape[:2]
+    torch.cuda.synchronize()
+    started = time.perf_counter()
     predictor.set_image(frame)
+    torch.cuda.synchronize()
+    set_image_ms = (time.perf_counter() - started) * 1000.0
     prompts = {
         "point": {
             "point_coords": np.asarray([[width * 0.5, height * 0.5]], dtype=np.float32),
@@ -156,14 +173,53 @@ def _predict(predictor, frame: np.ndarray) -> dict[str, np.ndarray]:
         },
     }
     results = {}
+    prompt_ms = {}
     for name, prompt in prompts.items():
+        torch.cuda.synchronize()
+        started = time.perf_counter()
         masks, _, _ = predictor.predict(
             **prompt,
             multimask_output=False,
             return_logits=True,
         )
+        torch.cuda.synchronize()
+        prompt_ms[name] = (time.perf_counter() - started) * 1000.0
         results[name] = masks[0].astype(np.float32, copy=False)
-    return results
+    return results, {"set_image_ms": set_image_ms, "prompt_ms": prompt_ms}
+
+
+def _timing_summary(values: list[float]) -> dict[str, float]:
+    array = np.asarray(values, dtype=np.float64)
+    return {
+        "mean_ms": float(array.mean()),
+        "p50_ms": float(np.percentile(array, 50)),
+        "p95_ms": float(np.percentile(array, 95)),
+        "fps": float(1000.0 / array.mean()),
+    }
+
+
+def _backend_timing(rows: list[dict], decode_ms: list[float]) -> dict:
+    set_image = [row["set_image_ms"] for row in rows]
+    point = [row["prompt_ms"]["point"] for row in rows]
+    box = [row["prompt_ms"]["box"] for row in rows]
+    point_model = [left + right for left, right in zip(set_image, point, strict=True)]
+    point_e2e = [
+        decode + model for decode, model in zip(decode_ms, point_model, strict=True)
+    ]
+    two_prompt_e2e = [
+        decode + image + point_ms + box_ms
+        for decode, image, point_ms, box_ms in zip(
+            decode_ms, set_image, point, box, strict=True
+        )
+    ]
+    return {
+        "set_image": _timing_summary(set_image),
+        "point_prompt": _timing_summary(point),
+        "box_prompt": _timing_summary(box),
+        "point_model_pipeline": _timing_summary(point_model),
+        "point_end_to_end": _timing_summary(point_e2e),
+        "two_prompt_end_to_end": _timing_summary(two_prompt_e2e),
+    }
 
 
 def _binary_iou(left: np.ndarray, right: np.ndarray) -> float:
@@ -184,11 +240,15 @@ def main() -> int:
     import torch
     from sam2.sam2_image_predictor import SAM2ImagePredictor
 
-    frames = _read_frames(args.video, args.frames)
+    frames, decode_ms = _read_frames(args.video, args.frames, args.sequential_frames)
     pytorch_model = _build_model(args, torch)
     _patch_pytorch_student(pytorch_model, args, torch)
     pytorch_predictor = SAM2ImagePredictor(pytorch_model)
-    references = [_predict(pytorch_predictor, frame) for frame in frames]
+    for _ in range(args.warmup):
+        _predict(pytorch_predictor, frames[0], torch)
+    reference_rows = [_predict(pytorch_predictor, frame, torch) for frame in frames]
+    references = [row[0] for row in reference_rows]
+    pytorch_timing_rows = [row[1] for row in reference_rows]
     del pytorch_predictor, pytorch_model
     torch.cuda.empty_cache()
 
@@ -196,10 +256,14 @@ def main() -> int:
     engine = TensorRtEncoder(args.engine, torch, trt)
     _patch_tensorrt_student(tensorrt_model, engine)
     tensorrt_predictor = SAM2ImagePredictor(tensorrt_model)
+    for _ in range(args.warmup):
+        _predict(tensorrt_predictor, frames[0], torch)
 
     rows = []
+    tensorrt_timing_rows = []
     for frame_index, (frame, reference) in enumerate(zip(frames, references, strict=True)):
-        candidate = _predict(tensorrt_predictor, frame)
+        candidate, timing_row = _predict(tensorrt_predictor, frame, torch)
+        tensorrt_timing_rows.append(timing_row)
         for prompt in ("point", "box"):
             difference = candidate[prompt] - reference[prompt]
             reference_mask = reference[prompt] > 0.0
@@ -221,6 +285,8 @@ def main() -> int:
 
     minimum_iou = min(row["binary_iou"] for row in rows)
     mean_iou = float(np.mean([row["binary_iou"] for row in rows]))
+    pytorch_timing = _backend_timing(pytorch_timing_rows, decode_ms)
+    tensorrt_timing = _backend_timing(tensorrt_timing_rows, decode_ms)
     report = {
         "passed": (
             minimum_iou >= args.minimum_mask_iou
@@ -235,6 +301,21 @@ def main() -> int:
         "sam2_checkpoint": str(Path(args.sam2_checkpoint).resolve()),
         "video": str(Path(args.video).resolve()),
         "frames": args.frames,
+        "sequential_frames": args.sequential_frames,
+        "warmup": args.warmup,
+        "decode": _timing_summary(decode_ms),
+        "timing": {
+            "pytorch": pytorch_timing,
+            "tensorrt": tensorrt_timing,
+            "point_model_speedup": (
+                pytorch_timing["point_model_pipeline"]["mean_ms"]
+                / tensorrt_timing["point_model_pipeline"]["mean_ms"]
+            ),
+            "point_end_to_end_speedup": (
+                pytorch_timing["point_end_to_end"]["mean_ms"]
+                / tensorrt_timing["point_end_to_end"]["mean_ms"]
+            ),
+        },
         "rows": rows,
     }
     output = Path(args.output)
