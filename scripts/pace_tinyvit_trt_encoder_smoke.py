@@ -40,12 +40,108 @@ def _arguments() -> argparse.Namespace:
         ),
         default="none",
     )
+    parser.add_argument(
+        "--quantization-mode", choices=("none", "fp8", "int8", "int4"), default="none"
+    )
+    parser.add_argument(
+        "--quantization-op-set",
+        choices=(
+            "conv_matmul",
+            "matmul",
+            "conv",
+            "attention_matmul",
+            "linear_matmul",
+            "backbone_conv",
+            "neck_conv",
+        ),
+        default="conv_matmul",
+    )
+    parser.add_argument(
+        "--calibration-method",
+        choices=("max", "entropy", "awq_clip", "awq_lite", "rtn_dq"),
+        default="max",
+    )
+    parser.add_argument("--calibration-video")
+    parser.add_argument("--calibration-samples", type=int, default=32)
     parser.add_argument("--allow-tf32", action="store_true")
     parser.add_argument("--builder-optimization-level", type=int, choices=range(0, 6), default=3)
+    parser.add_argument("--max-aux-streams", type=int, choices=range(0, 9))
     parser.add_argument("--workspace-gib", type=float, default=8.0)
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--runs", type=int, default=100)
     return parser.parse_args()
+
+
+def _calibration_frames(video_path: str, count: int):
+    import cv2
+    import numpy as np
+
+    capture = cv2.VideoCapture(video_path)
+    if not capture.isOpened():
+        raise RuntimeError(f"failed to open calibration video: {video_path}")
+    frame_count = max(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), count)
+    indices = np.linspace(0, frame_count - 1, count, dtype=np.int64)
+    mean = np.asarray((0.485, 0.456, 0.406), dtype=np.float32)
+    std = np.asarray((0.229, 0.224, 0.225), dtype=np.float32)
+    frames = []
+    for index in indices:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
+        ok, frame = capture.read()
+        if not ok:
+            raise RuntimeError(f"failed to decode calibration frame {index}")
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        resized = cv2.resize(rgb, (1024, 1024), interpolation=cv2.INTER_LINEAR)
+        normalized = (resized.astype(np.float32) / 255.0 - mean) / std
+        frames.append(np.transpose(normalized, (2, 0, 1)).astype(np.float16))
+    capture.release()
+    return frames
+
+
+class _CalibrationReader:
+    def __init__(self, frames):
+        self.frames = frames
+        self.index = 0
+
+    def get_next(self):
+        if self.index >= len(self.frames):
+            return None
+        frame = self.frames[self.index]
+        self.index += 1
+        return {"image": frame[None, ...]}
+
+    def get_first(self):
+        return {"image": self.frames[0][None, ...]}
+
+    def rewind(self):
+        self.index = 0
+
+
+def _quantization_selection(model, profile: str) -> tuple[list[str], list[str] | None]:
+    if profile == "conv_matmul":
+        return ["Conv", "MatMul"], None
+    if profile in ("matmul", "conv"):
+        return [{"matmul": "MatMul", "conv": "Conv"}[profile]], None
+
+    nodes = []
+    for node in model.graph.node:
+        is_attention = (
+            node.op_type == "MatMul" and "scaled_dot_product_attention" in node.name
+        )
+        is_neck_conv = node.op_type == "Conv" and node.name.startswith("node_conv2d_")
+        selected = (
+            (profile == "attention_matmul" and is_attention)
+            or (profile == "linear_matmul" and node.op_type == "MatMul" and not is_attention)
+            or (profile == "backbone_conv" and node.op_type == "Conv" and not is_neck_conv)
+            or (profile == "neck_conv" and is_neck_conv)
+        )
+        if selected:
+            if not node.name:
+                raise RuntimeError(f"quantization profile {profile} selected an unnamed node")
+            nodes.append(node.name)
+    if not nodes:
+        raise RuntimeError(f"quantization profile selected no ONNX nodes: {profile}")
+    op_type = "MatMul" if profile.endswith("matmul") else "Conv"
+    return [op_type], nodes
 
 
 def _network_flags(trt) -> int:
@@ -262,6 +358,7 @@ def _build_engine(
     workspace_gib: float,
     allow_tf32: bool,
     optimization_level: int,
+    max_aux_streams: int | None,
 ) -> dict[str, object]:
     import tensorrt as trt
 
@@ -277,6 +374,8 @@ def _build_engine(
     if not allow_tf32 and hasattr(trt.BuilderFlag, "TF32"):
         config.clear_flag(trt.BuilderFlag.TF32)
     config.builder_optimization_level = optimization_level
+    if max_aux_streams is not None:
+        config.max_aux_streams = max_aux_streams
     started = time.perf_counter()
     serialized = builder.build_serialized_network(network, config)
     build_seconds = time.perf_counter() - started
@@ -412,6 +511,23 @@ def main() -> int:
     args = _arguments()
     if args.mixed_precision_profile != "none" and args.precision != "fp32":
         raise ValueError("mixed precision requires an FP32 ONNX export and FP32 oracle")
+    if args.quantization_mode != "none" and args.mixed_precision_profile != "none":
+        raise ValueError("quantization and FP32-island search are separate experiments")
+    if args.quantization_mode != "none" and args.precision != "fp32":
+        raise ValueError("quantization requires an FP32 PyTorch oracle")
+    if args.quantization_mode != "none" and not args.calibration_video:
+        raise ValueError("quantization requires --calibration-video")
+    if args.quantization_mode == "int4" and args.calibration_method not in (
+        "awq_clip",
+        "awq_lite",
+        "rtn_dq",
+    ):
+        raise ValueError("INT4 requires an AWQ or RTN calibration method")
+    if args.quantization_mode in ("fp8", "int8") and args.calibration_method not in (
+        "max",
+        "entropy",
+    ):
+        raise ValueError("FP8/INT8 requires max or entropy calibration")
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -493,10 +609,13 @@ def main() -> int:
         print(f"exporting {fp32_onnx_path}", flush=True)
         torch.onnx.export(model, (image,), str(fp32_onnx_path), **export_options)
 
-    engine_precision = "fp16" if args.mixed_precision_profile != "none" else args.precision
+    low_precision_export = (
+        args.mixed_precision_profile != "none" or args.quantization_mode != "none"
+    )
+    engine_precision = "fp16" if low_precision_export else args.precision
     export_model = model
     export_image = image
-    if args.mixed_precision_profile != "none":
+    if low_precision_export:
         del model
         torch.cuda.empty_cache()
         export_student = build_stage1_student(family, model_name, None, adapter_mode)
@@ -529,6 +648,53 @@ def main() -> int:
         )
     onnx.save(onnx_model, onnx_path)
     onnx.checker.check_model(onnx_model)
+    quantization = {
+        "mode": args.quantization_mode,
+        "op_set": args.quantization_op_set,
+        "calibration_method": args.calibration_method,
+        "calibration_video": args.calibration_video,
+        "calibration_samples": 0,
+        "selected_nodes": [],
+        "quantize_linear_nodes": 0,
+        "dequantize_linear_nodes": 0,
+    }
+    if args.quantization_mode != "none":
+        from modelopt.onnx.quantization import quantize
+
+        frames = _calibration_frames(args.calibration_video, args.calibration_samples)
+        quantized_path = output_dir / f"encoder.{args.quantization_mode}.onnx"
+        print(f"quantizing {quantized_path}", flush=True)
+        quantize_op_types, nodes_to_quantize = _quantization_selection(
+            onnx_model, args.quantization_op_set
+        )
+        quantize(
+            str(onnx_path),
+            quantize_mode=args.quantization_mode,
+            calibration_data_reader=_CalibrationReader(frames),
+            calibration_method=args.calibration_method,
+            calibration_eps=["cuda:0", "cpu"],
+            op_types_to_quantize=quantize_op_types,
+            nodes_to_quantize=nodes_to_quantize,
+            high_precision_dtype="fp16",
+            output_path=str(quantized_path),
+        )
+        onnx_path = quantized_path
+        engine_path = output_dir / f"encoder.{args.quantization_mode}.engine"
+        quantized_model = onnx.load(onnx_path, load_external_data=False)
+        onnx.checker.check_model(quantized_model)
+        quantization.update(
+            {
+                "calibration_samples": len(frames),
+                "selected_nodes": nodes_to_quantize or [],
+                "quantize_linear_nodes": sum(
+                    node.op_type == "QuantizeLinear" for node in quantized_model.graph.node
+                ),
+                "dequantize_linear_nodes": sum(
+                    node.op_type == "DequantizeLinear"
+                    for node in quantized_model.graph.node
+                ),
+            }
+        )
     print(f"building {engine_path}", flush=True)
     build = _build_engine(
         onnx_path,
@@ -536,6 +702,7 @@ def main() -> int:
         args.workspace_gib,
         args.allow_tf32,
         args.builder_optimization_level,
+        args.max_aux_streams,
     )
     torch.cuda.synchronize()
     actual, timing = _run_engine(engine_path, export_image, args.warmup, args.runs)
@@ -586,8 +753,10 @@ def main() -> int:
         "allow_tf32": args.allow_tf32,
         "mixed_precision_profile": args.mixed_precision_profile,
         "mixed_precision": mixed_precision,
+        "quantization": quantization,
         "pytorch_oracle_tf32": False,
         "builder_optimization_level": args.builder_optimization_level,
+        "max_aux_streams": args.max_aux_streams,
         "seed": 20260722,
         "slurm_array_job_id": os.environ.get("SLURM_ARRAY_JOB_ID"),
         "slurm_array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),

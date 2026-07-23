@@ -25,6 +25,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--video", required=True)
     parser.add_argument("--frames", type=int, default=8)
     parser.add_argument("--minimum-mask-iou", type=float, default=0.999)
+    parser.add_argument("--minimum-mean-mask-iou", type=float, default=0.0)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
 
@@ -219,11 +220,16 @@ def main() -> int:
             )
 
     minimum_iou = min(row["binary_iou"] for row in rows)
+    mean_iou = float(np.mean([row["binary_iou"] for row in rows]))
     report = {
-        "passed": minimum_iou >= args.minimum_mask_iou,
+        "passed": (
+            minimum_iou >= args.minimum_mask_iou
+            and mean_iou >= args.minimum_mean_mask_iou
+        ),
         "minimum_mask_iou_required": args.minimum_mask_iou,
+        "minimum_mean_mask_iou_required": args.minimum_mean_mask_iou,
         "minimum_mask_iou": minimum_iou,
-        "mean_mask_iou": float(np.mean([row["binary_iou"] for row in rows])),
+        "mean_mask_iou": mean_iou,
         "student_checkpoint": str(Path(args.student_checkpoint).resolve()),
         "engine": str(Path(args.engine).resolve()),
         "sam2_checkpoint": str(Path(args.sam2_checkpoint).resolve()),
