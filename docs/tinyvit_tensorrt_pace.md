@@ -126,9 +126,63 @@ The first all-MatMul row failed because Dynamo ONNX contains Int64 shape-calcula
 MatMul nodes. A first filter then exposed that anonymous `val_*` initializer names are
 not stable between separate FP32 and FP16 exports. The corrected matcher now requires
 all known MatMul inputs to be floating point and pairs initializers by node name, input
-position, operator, dtype, and shape rather than initializer name. Corrected L40S job
-`11372229_3` is pending on `embers` priority. The redundant H100 probe was canceled;
-final Pareto latency comparisons must use L40S and will ultimately be rerun on Thor.
+position, operator, dtype, and shape rather than initializer name. Job `11372229_3`
+completed at 1.1928 ms with maximum relative L2 `0.004693`, but its report confirms zero
+FP32 initializers were restored. It therefore tests FP32 MatMul accumulation with FP16
+weights, not a complete FP32 MatMul island, and is not promoted as a final candidate.
+Final Pareto latency comparisons must use paired L40S runs and will ultimately be rerun
+on Thor.
+
+### FP8/INT8 post-training quantization search
+
+The speed-first search uses NVIDIA ModelOpt 0.45 to insert explicit Q/DQ nodes into the
+FP16 ONNX graph. Calibration uses 32 evenly spaced, SAM2-normalized frames from
+`videos/test1.mov`; TensorRT 11.1 then builds the strongly typed engine. Install the
+optional dependencies with `python -m pip install -r requirements-quantization.txt`.
+
+The first TinyViT-5M sweep quantized every Conv and MatMul. Its encoder-only timing was
+promising, but final mask agreement ruled it out:
+
+| Profile | Isolated L40S latency | Mean mask IoU | Minimum mask IoU | Decision |
+| --- | ---: | ---: | ---: | --- |
+| FP16 | 1.2736 ms | 0.9793 | 0.9402 | current speed baseline |
+| FP8, all Conv + MatMul | 1.1592 ms | 0.5335 | 0.0749 | reject |
+| FP8, all MatMul | 1.2432 ms | 0.7558 | 0.1566 | reject |
+| FP8, all Conv | 1.2911 ms | not run | not run | reject from feature error and no speed gain |
+| INT8, all Conv + MatMul | 1.2889 ms | not run | not run | reject from feature error and no speed gain |
+
+The isolated full-FP8 row initially appeared about 9.0% faster, but job `11373832`
+alternated all engines for 200 rounds on the same L40S and removed that clock-state
+bias:
+
+| Engine | Paired latency | Speed relative to FP16 |
+| --- | ---: | ---: |
+| FP16 | 1.2379 ms | baseline |
+| FP8, all Conv + MatMul | 1.1974 ms | 3.38% faster |
+| FP8, all MatMul | 1.2456 ms | 0.62% slower |
+| FP8, all Conv | 1.3088 ms | 5.42% slower |
+
+Full FP8 therefore gives only a small real speed gain and does **not** meet the allowed
+five-percent accuracy envelope. Full INT8 is both slower and substantially less
+accurate at the encoder outputs. These rows show why feature cosine alone is not an
+acceptance metric: full FP8 retained cosine values near 0.98--0.99 while changing
+thresholded SAM2 masks substantially. They also show that selective Q/DQ overhead can
+outweigh lower-precision compute in this small encoder.
+
+The next sweep partitions the graph by architectural role rather than arbitrary node
+index: attention-score MatMul, other linear MatMul, backbone Conv, and the three neck
+output Conv layers. The attention-only candidate quantizes eight MatMuls and reduces
+maximum feature relative L2 from 9.47% for all-MatMul FP8 to 1.26%; its isolated timing
+was 1.4883 ms, so it is retained only for mask diagnosis and not yet as a speed winner.
+Jobs `11373770`, `11373772`, `11373773`, and `11373774` contain the L40S sweep. A paired,
+alternating engine benchmark is used for final speed decisions because independent
+L40S runs show material clock-state variation.
+
+For the speed-first criterion, a quantized candidate passes this proxy only when mean
+binary-mask IoU against the same-model PyTorch path is at least 0.95 over the 16 fixed
+masks. Minimum IoU remains in reports as a diagnostic but is not the primary gate:
+near-empty masks can change it drastically through only a few pixels. This proxy still
+does not replace a labelled J&F/mIoU evaluation.
 
 ### TinyViT-21M graph fix
 
