@@ -184,6 +184,32 @@ masks. Minimum IoU remains in reports as a diagnostic but is not the primary gat
 near-empty masks can change it drastically through only a few pixels. This proxy still
 does not replace a labelled J&F/mIoU evaluation.
 
+#### Semantic per-layer precision search
+
+Dynamo ONNX retains `pkg.torch.onnx.name_scopes` metadata, so the search maps TensorRT
+nodes back to stable TinyViT scopes such as `stages_2.blocks.4.attn.qkv` and
+`stages_2.blocks.4.mlp.fc2`. Legacy ONNX node paths are normalized to the same scope
+format for TinyViT-21M. Repeated `--quantization-scope-regex` arguments select the exact
+Conv/MatMul layers assigned FP8; all unselected encoder layers stay FP16. The report
+records both actual ONNX node names and semantic scopes, making the final precision map
+auditable and reproducible.
+
+The hierarchical search avoids building every possible engine combination:
+
+1. Quantize one of 16 regions at a time: patch embedding, individual convolutional or
+   transformer blocks, downsampling blocks, and individual SAM2 output projections.
+2. Independently test layer roles across all transformer blocks: QKV, attention output
+   projection, MLP FC1, MLP FC2, and local convolution.
+3. Split only promising blocks into their seven individual Conv/MatMul operations.
+4. Greedily combine layers in sensitivity order, rerunning the mean-mask-IoU 0.95 gate
+   after each addition.
+5. Pair the final candidates against FP16 on one GPU, then repeat the selected map for
+   11M and 21M and rebuild it on Thor.
+
+Job `11374488` is the 16-region TinyViT-5M sweep and `11374524` is the five-role sweep.
+Both target the RTX PRO 6000 Blackwell partition with `embers`, which is architecturally
+closer to Thor than L40S; final deployment numbers still require Thor-native engines.
+
 ### TinyViT-21M graph fix
 
 The original Dynamo ONNX contained six expanded attention-bias cache initializers, each
@@ -293,6 +319,29 @@ Run the seven-profile layer-wise mixed-precision matrix with:
 
 ```bash
 sbatch scripts/pace_l40s_tinyvit_trt_mixed_precision.sbatch
+```
+
+Run the semantic FP8 sensitivity screens with:
+
+```bash
+sbatch scripts/pace_gpu_tinyvit_trt_layer_sensitivity.sbatch
+sbatch scripts/pace_gpu_tinyvit_trt_role_sensitivity.sbatch
+```
+
+For a hand-selected precision map, repeat the semantic selector; every selected layer is
+FP8 and every other image-encoder layer remains FP16:
+
+```bash
+python scripts/pace_tinyvit_trt_encoder_smoke.py \
+  --checkpoint checkpoints/distill/tv5.pt \
+  --distill-root /path/to/SAM2-Distillation-Pipeline \
+  --output-dir results/pace/tinyvit_trt_layer_sensitivity/manual \
+  --precision fp32 \
+  --quantization-mode fp8 \
+  --calibration-video videos/test1.mov \
+  --builder-optimization-level 5 \
+  --quantization-scope-regex 'stages_2\.blocks\.0\.attn\.qkv$' \
+  --quantization-scope-regex 'stages_2\.blocks\.3\.mlp\.fc1$'
 ```
 
 Run the downstream SAM2-L mask-agreement smoke for one precision tier with:
