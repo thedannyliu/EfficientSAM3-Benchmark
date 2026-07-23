@@ -214,7 +214,10 @@ On the first Blackwell attempt, all tasks failed during the FP32 PyTorch oracle 
 `CUBLAS_STATUS_NOT_INITIALIZED` before export or quantization. The jobs loaded the CUDA
 12.6 module while this Blackwell node needs a newer CUDA runtime. The sensitivity scripts
 now accept `CUDA_MODULE`; job `11398195` retries one role with CUDA 12.9 before the full
-array is resubmitted.
+array is resubmitted. CUDA 12.9 allowed the PyTorch oracle to run in retry `11398195`,
+but ONNX Runtime calibration then failed in CUBLAS with `CUBLAS_STATUS_INVALID_VALUE`.
+The Blackwell failure is now isolated to the ModelOpt/ORT CUDA calibration environment,
+not TinyViT export or TensorRT support; H200 remains the working sensitivity platform.
 
 The H200 role sweep `11374583` completed and quantized eight nodes per real FP8 row:
 
@@ -229,13 +232,22 @@ The H200 role sweep `11374583` completed and quantized eight nodes per real FP8 
 The local-Conv graph contained zero Q/DQ nodes: ModelOpt reported those convolutions as
 unsupported and returned an FP16 graph. The runner now fails when explicitly selected
 FP8/INT8 nodes produce zero Q/DQ nodes, preventing this false positive. Final mask jobs
-`11398190`--`11398193` cover the four genuinely quantized H200 engines.
+`11398190`--`11398193` rejected all four genuinely quantized H200 engines:
+
+| Layers assigned FP8 | Mean mask IoU | Minimum mask IoU |
+| --- | ---: | ---: |
+| attention QKV | 0.87145 | 0.51540 |
+| attention output projection | 0.84257 | 0.48341 |
+| MLP FC1 | 0.82209 | 0.46154 |
+| MLP FC2 | 0.88217 | 0.66258 |
 
 Quantizing all eight attention-score MatMuls produced mean mask IoU `0.93489` and minimum
 IoU `0.80947` in job `11373913`. It is close but outside the declared mean-IoU 0.95 gate.
 Job `11398216` therefore quantizes the two attention MatMuls in each transformer block
 individually, allowing low-sensitivity blocks to be combined without quantizing all
-eight blocks.
+eight blocks. Its first two stage-1 blocks measured maximum feature relative L2
+`0.002525`; their final mask jobs are `11398410` and `11398411`. Stage-2 block 0 produced
+non-finite image embeddings and was rejected before mask evaluation.
 
 Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 
@@ -245,10 +257,15 @@ Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 | 1 | 1.2766 ms | **1.9611 ms** |
 | 2 | 1.2787 ms | 2.0950 ms |
 
-The sub-percent L40S difference requires the alternating same-GPU comparison in job
-`11398218` before selecting zero auxiliary streams. The first INT4 AWQ attempts failed
-because ModelOpt expects an iterable calibration reader; iterable support was added and
-job `11398217` is the corrected L40S retry.
+The alternating same-GPU comparison in job `11398218` confirmed 1.2627, 1.2688, and
+1.2684 ms for zero, one, and two auxiliary streams respectively. Zero streams is the
+selected L40S setting, providing a repeatable 0.45--0.48% gain without changing model
+numerics.
+
+The first INT4 AWQ attempts failed because ModelOpt expects an iterable calibration
+reader. After adding iterable support, job `11398217` completed: its 7.58 MB engine ran
+at 1.3289 ms on L40S, while image-embedding relative L2 reached 0.779 and cosine fell to
+0.676. INT4 is therefore rejected without a downstream mask run.
 
 ### TinyViT-21M graph fix
 
