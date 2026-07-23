@@ -245,9 +245,13 @@ Quantizing all eight attention-score MatMuls produced mean mask IoU `0.93489` an
 IoU `0.80947` in job `11373913`. It is close but outside the declared mean-IoU 0.95 gate.
 Job `11398216` therefore quantizes the two attention MatMuls in each transformer block
 individually, allowing low-sensitivity blocks to be combined without quantizing all
-eight blocks. Its first two stage-1 blocks measured maximum feature relative L2
-`0.002525`; their final mask jobs are `11398410` and `11398411`. Stage-2 block 0 produced
-non-finite image embeddings and was rejected before mask evaluation.
+eight blocks. All eight candidates produced non-finite `image_embedding` tensors and
+were rejected. The initially low L2 values for the first two outputs were misleading
+because the third output was non-finite. Mask jobs `11398410` and `11398411` confirmed
+mean IoU `0.0` for the two stage-1 candidates. Paired H200 job `11398420` measured FP16
+at 1.2078 ms, stage-1 block 0 FP8 at 1.5463 ms, and stage-1 block 1 FP8 at 1.3159 ms:
+selective attention Q/DQ was both invalid and 28.0%/9.0% slower. Per-block attention FP8
+is therefore closed as a candidate.
 
 Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 
