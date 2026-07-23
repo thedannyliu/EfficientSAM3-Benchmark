@@ -43,6 +43,35 @@ class QuantizationSelectionTest(unittest.TestCase):
             MODULE._quantization_selection(self.model, "conv"), (["Conv"], None)
         )
 
+    def test_semantic_scope_selects_one_layer(self) -> None:
+        metadata = types.SimpleNamespace(
+            key="pkg.torch.onnx.name_scopes",
+            value=str(["", "student.backbone.body.stages_2.blocks.4.mlp.fc1", "linear"]),
+        )
+        node = types.SimpleNamespace(
+            op_type="MatMul", name="node_MatMul_1", metadata_props=[metadata]
+        )
+        model = types.SimpleNamespace(graph=types.SimpleNamespace(node=[node]))
+        op_types, selected = MODULE._quantization_selection(
+            model, "conv_matmul", [r"stages_2\.blocks\.4\.mlp\.fc1$"]
+        )
+        self.assertEqual(op_types, ["Conv", "MatMul"])
+        self.assertEqual(selected, ["node_MatMul_1"])
+        self.assertEqual(
+            MODULE._semantic_scope(node),
+            "student.backbone.body.stages_2.blocks.4.mlp.fc1",
+        )
+
+    def test_legacy_node_name_is_normalized_to_same_scope(self) -> None:
+        node = types.SimpleNamespace(
+            name="/student/backbone/body/stages_2/blocks/blocks.4/mlp/fc1/MatMul",
+            metadata_props=[],
+        )
+        self.assertEqual(
+            MODULE._semantic_scope(node),
+            "student.backbone.body.stages_2.blocks.4.mlp.fc1",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

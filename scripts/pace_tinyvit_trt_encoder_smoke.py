@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -55,6 +57,12 @@ def _arguments() -> argparse.Namespace:
             "neck_conv",
         ),
         default="conv_matmul",
+    )
+    parser.add_argument(
+        "--quantization-scope-regex",
+        action="append",
+        default=[],
+        help="Quantize Conv/MatMul nodes whose exported module scope matches this regex",
     )
     parser.add_argument(
         "--calibration-method",
@@ -116,7 +124,40 @@ class _CalibrationReader:
         self.index = 0
 
 
-def _quantization_selection(model, profile: str) -> tuple[list[str], list[str] | None]:
+def _semantic_scope(node) -> str:
+    metadata = {item.key: item.value for item in getattr(node, "metadata_props", [])}
+    encoded_scopes = metadata.get("pkg.torch.onnx.name_scopes")
+    if encoded_scopes:
+        scopes = ast.literal_eval(encoded_scopes)
+        module_scopes = [scope for scope in scopes if scope.startswith("student.")]
+        if module_scopes:
+            return module_scopes[-1]
+    scope = node.name.strip("/").replace("/", ".")
+    scope = scope.replace(".blocks.blocks.", ".blocks.")
+    scope = re.sub(r"\.(?:Conv|MatMul(?:_\d+)?)$", "", scope)
+    for output_name in ("high_res_s0", "high_res_s1", "image_embed"):
+        scope = scope.replace(
+            f"student.{output_name}", f"student.projections.{output_name}"
+        )
+    return scope
+
+
+def _quantization_selection(
+    model, profile: str, scope_patterns: list[str] | None = None
+) -> tuple[list[str], list[str] | None]:
+    if scope_patterns:
+        expressions = [re.compile(pattern) for pattern in scope_patterns]
+        nodes = [
+            node.name
+            for node in model.graph.node
+            if node.op_type in ("Conv", "MatMul")
+            and any(expression.search(_semantic_scope(node)) for expression in expressions)
+        ]
+        if not nodes:
+            raise RuntimeError(
+                f"quantization scopes selected no Conv/MatMul nodes: {scope_patterns}"
+            )
+        return ["Conv", "MatMul"], nodes
     if profile == "conv_matmul":
         return ["Conv", "MatMul"], None
     if profile in ("matmul", "conv"):
@@ -655,6 +696,7 @@ def main() -> int:
         "calibration_video": args.calibration_video,
         "calibration_samples": 0,
         "selected_nodes": [],
+        "selected_scopes": {},
         "quantize_linear_nodes": 0,
         "dequantize_linear_nodes": 0,
     }
@@ -665,7 +707,7 @@ def main() -> int:
         quantized_path = output_dir / f"encoder.{args.quantization_mode}.onnx"
         print(f"quantizing {quantized_path}", flush=True)
         quantize_op_types, nodes_to_quantize = _quantization_selection(
-            onnx_model, args.quantization_op_set
+            onnx_model, args.quantization_op_set, args.quantization_scope_regex
         )
         quantize(
             str(onnx_path),
@@ -686,6 +728,11 @@ def main() -> int:
             {
                 "calibration_samples": len(frames),
                 "selected_nodes": nodes_to_quantize or [],
+                "selected_scopes": {
+                    node.name: _semantic_scope(node)
+                    for node in onnx_model.graph.node
+                    if nodes_to_quantize and node.name in nodes_to_quantize
+                },
                 "quantize_linear_nodes": sum(
                     node.op_type == "QuantizeLinear" for node in quantized_model.graph.node
                 ),
