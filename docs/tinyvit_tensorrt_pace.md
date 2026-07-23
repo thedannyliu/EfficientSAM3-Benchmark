@@ -105,11 +105,30 @@ present, the selected MatMul consumes the FP32 copy, and the transformed model p
 ONNX checker. Results from jobs before that fix are development diagnostics and must not
 be used as mixed-precision measurements.
 
-Active second-round jobs as of 2026-07-22 are L40S `11371234_[1-4]` and the independent
-H100 graph-build probe `11371356_3`, both pending on `embers` priority. The L40S baseline
-from `11370104_0` completed at 1.2705 ms / 787.1 FPS and measured maximum relative L2
-`0.005046` against the FP32 oracle. H100 is only a compatibility probe; final Pareto
-latencies must come from the same L40S generation and will be rerun on Thor.
+The L40S baseline from `11370104_0` completed at 1.2705 ms / 787.1 FPS and measured
+maximum relative L2 `0.005046` against the FP32 oracle. The valid second-round 5M rows
+ran sequentially on the same L40S node in `11371234_[1-4]`:
+
+| Profile | Latency | Max relative L2 | FP32 nodes | FP32 initializer data | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| FP16 baseline | 1.3659 ms | 0.005041 | 0 | 0 | speed reference |
+| output projections FP32 | 1.4134 ms | 0.004999 | 3 | 0.21 MB | dominated |
+| LayerNorm FP32 | 1.2304 ms | 0.005078 | 16 | 0.02 MB | no accuracy gain; timing needs paired rerun |
+| all Conv FP32 | 2.8488 ms | 0.003062 | 25 | 0.91 MB | 39% lower error, 109% slower |
+
+Projection and LayerNorm precision do not explain the FP16 error. Convolution weights
+are sensitive, but promoting all convolutions is too expensive; the next useful search
+is stage-wise Conv promotion. The apparent LayerNorm speed gain is not accepted because
+the error is worse and L40S node/DVFS variation has already moved the same FP16 engine by
+about seven percent between runs.
+
+The first all-MatMul row failed because Dynamo ONNX contains Int64 shape-calculation
+MatMul nodes. A first filter then exposed that anonymous `val_*` initializer names are
+not stable between separate FP32 and FP16 exports. The corrected matcher now requires
+all known MatMul inputs to be floating point and pairs initializers by node name, input
+position, operator, dtype, and shape rather than initializer name. Corrected L40S job
+`11372229_3` is pending on `embers` priority. The redundant H100 probe was canceled;
+final Pareto latency comparisons must use L40S and will ultimately be rerun on Thor.
 
 ### TinyViT-21M graph fix
 

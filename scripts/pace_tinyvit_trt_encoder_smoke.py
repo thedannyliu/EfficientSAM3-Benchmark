@@ -12,6 +12,7 @@ from pathlib import Path
 
 OUTPUT_NAMES = ("high_res_s0", "high_res_s1", "image_embedding")
 EXPECTED_SHAPES = ((1, 32, 256, 256), (1, 64, 128, 128), (1, 256, 64, 64))
+FLOAT_ONNX_TYPES = frozenset((1, 10, 16))  # FLOAT, FLOAT16, BFLOAT16
 
 
 def _arguments() -> argparse.Namespace:
@@ -56,10 +57,21 @@ def _network_flags(trt) -> int:
     return flags
 
 
-def _mixed_node_selected(node, profile: str, graph_outputs: set[str]) -> bool:
+def _mixed_node_selected(
+    node, profile: str, graph_outputs: set[str], element_types: dict[str, int] | None = None
+) -> bool:
     is_softmax = node.op_type == "Softmax"
     is_norm = node.op_type in ("LayerNormalization", "InstanceNormalization")
-    is_matmul = node.op_type in ("MatMul", "Gemm")
+    known_input_types = [
+        element_types[name] for name in node.input if element_types and name in element_types
+    ]
+    is_matmul = node.op_type in ("MatMul", "Gemm") and (
+        element_types is None
+        or (
+            any(data_type in FLOAT_ONNX_TYPES for data_type in known_input_types)
+            and all(data_type in FLOAT_ONNX_TYPES for data_type in known_input_types)
+        )
+    )
     is_conv = node.op_type == "Conv"
     is_projection = any(output in graph_outputs for output in node.output)
     return (
@@ -84,20 +96,47 @@ def _restore_selected_fp32_initializers(onnx, fp16_model, fp32_model, profile: s
         return {"fp32_initializer_count": 0, "fp32_initializer_bytes": 0}
 
     graph_outputs = {value.name for value in fp16_model.graph.output}
-    fp32_initializers = {initializer.name: initializer for initializer in fp32_model.graph.initializer}
+    inferred = onnx.shape_inference.infer_shapes(fp16_model)
+    element_types = {}
+    for value in (*inferred.graph.input, *inferred.graph.value_info, *inferred.graph.output):
+        tensor_type = value.type.tensor_type
+        if tensor_type.HasField("elem_type"):
+            element_types[value.name] = tensor_type.elem_type
+    for initializer in inferred.graph.initializer:
+        element_types[initializer.name] = initializer.data_type
+    fp16_initializers = {
+        initializer.name: initializer for initializer in fp16_model.graph.initializer
+    }
+    fp32_initializers = {
+        initializer.name: initializer for initializer in fp32_model.graph.initializer
+    }
+    fp32_nodes = {node.name: node for node in fp32_model.graph.node if node.name}
     existing_names = {initializer.name for initializer in fp16_model.graph.initializer}
     restored = {}
     restored_bytes = 0
-    for node in fp16_model.graph.node:
-        if not _mixed_node_selected(node, profile, graph_outputs):
+    for node_index, node in enumerate(fp16_model.graph.node):
+        if not _mixed_node_selected(node, profile, graph_outputs, element_types):
+            continue
+        fp32_node = fp32_nodes.get(node.name)
+        if fp32_node is None or fp32_node.op_type != node.op_type:
             continue
         for input_index, name in enumerate(node.input):
-            fp32_initializer = fp32_initializers.get(name)
-            if fp32_initializer is None:
+            if input_index >= len(fp32_node.input):
                 continue
-            restored_name = restored.get(name)
+            fp16_initializer = fp16_initializers.get(name)
+            fp32_initializer = fp32_initializers.get(fp32_node.input[input_index])
+            if (
+                fp16_initializer is None
+                or fp32_initializer is None
+                or fp16_initializer.data_type != onnx.TensorProto.FLOAT16
+                or fp32_initializer.data_type != onnx.TensorProto.FLOAT
+                or tuple(fp16_initializer.dims) != tuple(fp32_initializer.dims)
+            ):
+                continue
+            initializer_pair = (name, fp32_initializer.name)
+            restored_name = restored.get(initializer_pair)
             if restored_name is None:
-                restored_name = f"{name}__mixed_fp32_initializer"
+                restored_name = f"mixed_fp32_initializer_{node_index}_{input_index}"
                 if restored_name in existing_names:
                     raise RuntimeError(f"duplicate mixed initializer name: {restored_name}")
                 restored_initializer = onnx.TensorProto()
@@ -105,7 +144,7 @@ def _restore_selected_fp32_initializers(onnx, fp16_model, fp32_model, profile: s
                 restored_initializer.name = restored_name
                 fp16_model.graph.initializer.append(restored_initializer)
                 existing_names.add(restored_name)
-                restored[name] = restored_name
+                restored[initializer_pair] = restored_name
                 restored_bytes += len(restored_initializer.raw_data)
             node.input[input_index] = restored_name
     return {
@@ -129,7 +168,9 @@ def _insert_fp32_islands(onnx, model, profile: str) -> dict[str, object]:
 
     nodes = list(model.graph.node)
     graph_outputs = {value.name for value in model.graph.output}
-    selected = [_mixed_node_selected(node, profile, graph_outputs) for node in nodes]
+    selected = [
+        _mixed_node_selected(node, profile, graph_outputs, element_types) for node in nodes
+    ]
     if not any(selected):
         raise RuntimeError(f"mixed precision profile selected no ONNX nodes: {profile}")
     consumers = {}
