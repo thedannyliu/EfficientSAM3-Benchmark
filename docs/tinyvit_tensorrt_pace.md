@@ -210,6 +210,46 @@ Job `11374488` is the 16-region TinyViT-5M sweep and `11374524` is the five-role
 Both target the RTX PRO 6000 Blackwell partition with `embers`, which is architecturally
 closer to Thor than L40S; final deployment numbers still require Thor-native engines.
 
+On the first Blackwell attempt, all tasks failed during the FP32 PyTorch oracle with
+`CUBLAS_STATUS_NOT_INITIALIZED` before export or quantization. The jobs loaded the CUDA
+12.6 module while this Blackwell node needs a newer CUDA runtime. The sensitivity scripts
+now accept `CUDA_MODULE`; job `11398195` retries one role with CUDA 12.9 before the full
+array is resubmitted.
+
+The H200 role sweep `11374583` completed and quantized eight nodes per real FP8 row:
+
+| Layers assigned FP8 | Maximum feature relative L2 | Isolated H200 latency | Encoder gate |
+| --- | ---: | ---: | --- |
+| attention QKV | 0.02918 | 1.2759 ms | fail |
+| attention output projection | 0.04857 | 1.2114 ms | fail |
+| MLP FC1 | 0.04370 | 1.2986 ms | fail |
+| MLP FC2 | 0.05023 | 1.3172 ms | fail |
+| local depthwise Conv | 0.00478 | 1.1864 ms | invalid FP8 row |
+
+The local-Conv graph contained zero Q/DQ nodes: ModelOpt reported those convolutions as
+unsupported and returned an FP16 graph. The runner now fails when explicitly selected
+FP8/INT8 nodes produce zero Q/DQ nodes, preventing this false positive. Final mask jobs
+`11398190`--`11398193` cover the four genuinely quantized H200 engines.
+
+Quantizing all eight attention-score MatMuls produced mean mask IoU `0.93489` and minimum
+IoU `0.80947` in job `11373913`. It is close but outside the declared mean-IoU 0.95 gate.
+Job `11398216` therefore quantizes the two attention MatMuls in each transformer block
+individually, allowing low-sensitivity blocks to be combined without quantizing all
+eight blocks.
+
+Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
+
+| Maximum auxiliary streams | L40S latency | A100 latency |
+| ---: | ---: | ---: |
+| 0 | **1.2682 ms** | 1.9879 ms |
+| 1 | 1.2766 ms | **1.9611 ms** |
+| 2 | 1.2787 ms | 2.0950 ms |
+
+The sub-percent L40S difference requires the alternating same-GPU comparison in job
+`11398218` before selecting zero auxiliary streams. The first INT4 AWQ attempts failed
+because ModelOpt expects an iterable calibration reader; iterable support was added and
+job `11398217` is the corrected L40S retry.
+
 ### TinyViT-21M graph fix
 
 The original Dynamo ONNX contained six expanded attention-bias cache initializers, each
