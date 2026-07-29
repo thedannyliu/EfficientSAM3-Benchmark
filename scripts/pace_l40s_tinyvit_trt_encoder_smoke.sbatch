@@ -26,6 +26,7 @@ python scripts/pace_tinyvit_trt_encoder_smoke.py \
   --distill-root "${DISTILL_ROOT}" \
   --output-dir "${OUTPUT_ROOT}/${MODEL}" \
   --precision "${PRECISION:-fp32}" \
+  --exporter "${EXPORTER:-dynamo}" \
   --workspace-gib "${WORKSPACE_GIB:-8}" \
   --warmup "${WARMUP:-20}" \
   --runs "${RUNS:-100}"
