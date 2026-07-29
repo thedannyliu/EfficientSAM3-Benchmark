@@ -253,6 +253,33 @@ at 1.2078 ms, stage-1 block 0 FP8 at 1.5463 ms, and stage-1 block 1 FP8 at 1.315
 selective attention Q/DQ was both invalid and 28.0%/9.0% slower. Per-block attention FP8
 is therefore closed as a candidate.
 
+#### TinyViT-11M/21M selective FP8 follow-up
+
+Jobs `11562237` and `11562238` repeat the semantic region sweep for TV11M
+and TV21M on L40S. The feature-parity exit code remains deliberately strict,
+so a task can return exit 2 while leaving a valid candidate engine for the
+downstream mask gate. Independent timings are used only to nominate
+candidates; job `11562920` alternates the nominated engines with FP16 for 200
+rounds on one L40S.
+
+| Model and FP8 region | FP16 paired latency | Candidate paired latency | Encoder speedup | Image-embedding cosine | Mean / minimum mask IoU | Decision |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| TV11M stage-2 block 4 | 1.4668 ms | 1.3775 ms | 6.48% | 0.999717 | 0.91143 / 0.38983 | reject accuracy |
+| TV21M patch embedding | 2.7753 ms | 2.7443 ms | 1.13% | 0.999964 | 0.949893 / 0.32143 | below gate |
+
+The downstream checks are jobs `11562891` and `11562765`. They use 16 frames,
+one point and one box per frame, and require mean binary-mask IoU at least
+0.95. The minimum remains diagnostic because threshold-sensitive near-empty
+masks can dominate it. TV11M demonstrates again that cosine near one does not
+guarantee mask agreement.
+
+TV21M misses the mean gate by 0.000107 while providing only 1.13% encoder
+speedup, which would save roughly 0.1--0.2 ms in the complete Thor pipeline.
+It is not promoted by rounding. Calibration refinement job
+`11562961_[0-3]` tests 64/128 calibration frames with max/entropy scales; the
+candidate will remain FP16 unless refinement passes the declared gate and a
+paired speed check.
+
 Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 
 | Maximum auxiliary streams | L40S latency | A100 latency |
