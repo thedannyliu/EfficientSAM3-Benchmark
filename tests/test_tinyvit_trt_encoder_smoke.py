@@ -1,7 +1,9 @@
 import importlib.util
+import sys
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "pace_tinyvit_trt_encoder_smoke.py"
@@ -79,6 +81,45 @@ class QuantizationSelectionTest(unittest.TestCase):
         rows = list(MODULE._CalibrationReader(frames))
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["image"].shape, (1, 3, 2, 2))
+
+    def test_calibration_sampling_does_not_seek_past_short_video(self) -> None:
+        import numpy as np
+
+        class Capture:
+            def __init__(self) -> None:
+                self.position = 0
+                self.positions = []
+
+            def isOpened(self) -> bool:
+                return True
+
+            def get(self, _property: int) -> int:
+                return 3
+
+            def set(self, _property: int, position: int) -> None:
+                self.position = position
+                self.positions.append(position)
+
+            def read(self):
+                return self.position < 3, np.zeros((2, 2, 3), dtype=np.uint8)
+
+            def release(self) -> None:
+                pass
+
+        capture = Capture()
+        fake_cv2 = types.SimpleNamespace(
+            CAP_PROP_FRAME_COUNT=1,
+            CAP_PROP_POS_FRAMES=2,
+            COLOR_BGR2RGB=3,
+            INTER_LINEAR=4,
+            VideoCapture=lambda _path: capture,
+            cvtColor=lambda frame, _conversion: frame,
+            resize=lambda frame, _size, interpolation: frame,
+        )
+        with mock.patch.dict(sys.modules, {"cv2": fake_cv2}):
+            frames = MODULE._calibration_frames("short.mov", 5)
+        self.assertEqual(len(frames), 5)
+        self.assertLess(max(capture.positions), 3)
 
 
 if __name__ == "__main__":

@@ -87,7 +87,9 @@ def _calibration_frames(video_path: str, count: int):
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
         raise RuntimeError(f"failed to open calibration video: {video_path}")
-    frame_count = max(int(capture.get(cv2.CAP_PROP_FRAME_COUNT)), count)
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    if frame_count < 1:
+        raise RuntimeError(f"calibration video has no frames: {video_path}")
     indices = np.linspace(0, frame_count - 1, count, dtype=np.int64)
     mean = np.asarray((0.485, 0.456, 0.406), dtype=np.float32)
     std = np.asarray((0.229, 0.224, 0.225), dtype=np.float32)
