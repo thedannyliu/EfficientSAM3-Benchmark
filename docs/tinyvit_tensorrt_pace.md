@@ -277,8 +277,14 @@ TV21M misses the mean gate by 0.000107 while providing only 1.13% encoder
 speedup, which would save roughly 0.1--0.2 ms in the complete Thor pipeline.
 It is not promoted by rounding. Calibration refinement job
 `11562961_[0-3]` tests 64/128 calibration frames with max/entropy scales; the
-candidate will remain FP16 unless refinement passes the declared gate and a
-paired speed check.
+H100 duplicate is `11562983_[0-3]`. The first 128-frame H100 task exposed a
+sampling bug: the loader used the requested sample count as the video length
+and sought past frame 121 of the 122-frame input. Commit `c4b10ca` samples
+repeated positions within the real frame count instead. H100 retry
+`11563371_1` runs the corrected max/128 case and `11563442_3` runs the
+corrected entropy/128 case; pending array tasks read the corrected workspace
+code when they start. The candidate will remain FP16 unless refinement passes
+the declared gate and a paired speed check.
 
 Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 
