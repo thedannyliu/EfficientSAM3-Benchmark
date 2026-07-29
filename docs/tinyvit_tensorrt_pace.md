@@ -286,6 +286,14 @@ corrected entropy/128 case; pending array tasks read the corrected workspace
 code when they start. The candidate will remain FP16 unless refinement passes
 the declared gate and a paired speed check.
 
+The TV21 attention-block H200 sweep `11562690_[0-7]` found that stage-1
+blocks 0 and 1 both pass the strict encoder feature gate
+(`image_embedding` relative L2 0.00286, cosine 0.999996). Their isolated
+latencies were 2.1400 and 2.1507 ms, respectively. Downstream 16-frame mask
+checks `11563448` and `11563449` are pending; neither block is a deployment
+candidate until that gate and a same-GPU alternating FP16 speed comparison
+pass.
+
 Auxiliary-stream jobs show that more streams do not improve TinyViT-5M on L40S:
 
 | Maximum auxiliary streams | L40S latency | A100 latency |
