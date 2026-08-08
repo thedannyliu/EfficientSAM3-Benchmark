@@ -529,6 +529,14 @@ metrics:
   for an external frame. This run is invalid, not a zero-throughput control.
   The corrected runner passes the known local robot URDF, pbstream, and map
   paths explicitly.
+- `sg5-stateless-missing-tf-static`: localization started with the corrected
+  paths, but mid-bag playback skipped the transient `/tf_static` samples near
+  offset zero. Cartographer repeatedly reported that `livox_frame` did not
+  exist and never published `/tracked_pose`; the detector again remained in
+  its startup wait. The corrected runner now starts all subscribers, replays
+  only `/tf_static` once at 1000x without `/clock`, and only then starts the
+  measured 1x interval. This preload is outside timing and identical for both
+  conditions.
 - `state-test-unittest-path`: the first isolated state test passed an absolute
   file path to `python -m unittest`, which was interpreted as a module name;
   no tests executed.

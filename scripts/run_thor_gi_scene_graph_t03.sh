@@ -73,6 +73,21 @@ docker exec -d "$ether_container" bash -lc \
 
 sleep 5
 
+# Starting mid-bag skips the transient static transforms recorded near offset
+# zero. All consumers are alive here, so replay only /tf_static once before the
+# measured interval; do not publish /clock during this warmup.
+set +e
+docker exec "$ether_container" bash -lc \
+    "$ros_setup; timeout --signal=INT 5s ros2 bag play '$bag_path' --rate 1000 --topics /tf_static --disable-keyboard-controls" \
+    >"$output_dir/tf_static_preload.log" 2>&1
+tf_preload_rc=$?
+set -e
+if [[ $tf_preload_rc -ne 0 && $tf_preload_rc -ne 124 && $tf_preload_rc -ne 130 ]]; then
+    echo "static TF preload failed with exit $tf_preload_rc" >&2
+    exit "$tf_preload_rc"
+fi
+sleep 1
+
 python3 -m sam_backend.thor_resources \
     --output "$output_dir/resources.jsonl" \
     --duration 45 \
@@ -105,9 +120,10 @@ curl --silent --show-error --fail --max-time 3 \
     http://127.0.0.1:8767/status.json >"$output_dir/runtime_final_status.json"
 docker logs --since "$runtime_log_since" "$runtime_container" >"$output_dir/runtime.log" 2>&1
 
-printf '{\n  "label": "%s",\n  "stateful": %s,\n  "runtime_started_ns": %s,\n  "runtime_ready_ns": %s,\n  "runtime_startup_seconds": %.6f,\n  "play_started_ns": %s,\n  "play_ended_ns": %s,\n  "play_wall_seconds": %.6f,\n  "bag_exit_code": %s,\n  "bag_start_offset_seconds": 145.3,\n  "requested_play_seconds": 30.0,\n  "scene_graph_commit": "46673c6",\n  "runtime_overlay_sha256": "c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd"\n}\n' \
+printf '{\n  "label": "%s",\n  "stateful": %s,\n  "runtime_started_ns": %s,\n  "runtime_ready_ns": %s,\n  "runtime_startup_seconds": %.6f,\n  "tf_static_preload_exit_code": %s,\n  "play_started_ns": %s,\n  "play_ended_ns": %s,\n  "play_wall_seconds": %.6f,\n  "bag_exit_code": %s,\n  "bag_start_offset_seconds": 145.3,\n  "requested_play_seconds": 30.0,\n  "scene_graph_commit": "46673c6",\n  "runtime_overlay_sha256": "c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd"\n}\n' \
     "$label" "$stateful" "$runtime_started_ns" "$runtime_ready_ns" \
     "$(awk -v a="$runtime_started_ns" -v b="$runtime_ready_ns" 'BEGIN {print (b-a)/1000000000}')" \
+    "$tf_preload_rc" \
     "$play_started_ns" "$play_ended_ns" \
     "$(awk -v a="$play_started_ns" -v b="$play_ended_ns" 'BEGIN {print (b-a)/1000000000}')" \
     "$bag_rc" >"$output_dir/run_metadata.json"
