@@ -35,9 +35,9 @@ modified by these experiments.
 
 | ID | Question | Status | Decision |
 | --- | --- | --- | --- |
-| T01 | Does GI become useful when five prompts are initialized once and tracked, with grounding only every 30 frames? | Designed; execution pending | Pending |
-| T02 | Can shared memory or a Unix socket remove the HTTP/JPEG/NPZ cost after T01 proves model-level value? | Blocked on T01 | Do not implement before T01 |
-| T03 | Can Scene Graph schedule high-frequency known-object tracking and low-frequency category discovery? | Blocked on T01 | Do not implement before T01 |
+| T01 | Does GI become useful when five prompts are initialized once and tracked, with grounding only every 30 frames? | Complete | Partial pass: tracking is useful, but 4.17x missed the 5x gate |
+| T02 | How much latency can a mask-only/headless API remove without changing model output? | Complete | Pass: 23.8% lower tracking p50 with bitwise-identical outputs |
+| T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | Designed; execution pending | Authorized by T02; candidate Scene Graph branch only |
 
 ## T01: Five-Prompt Keyframe Detection and Tracking
 
@@ -168,6 +168,352 @@ gi-refresh1/
 gi-refresh30/
 report/
 failed-attempts/
+```
+
+### Results
+
+T01 completed all three 100-frame conditions. The immutable input starts at
+`1781705602980560640` ns and ends at `1781705606316382720` ns, spanning
+3.33582208 s. Mean frame period was 33.70 ms. The 100 JPEG hashes and the input
+manifest/config/summary checksums passed.
+
+Evaluation overlay:
+
+```text
+SHA-256: 935e8f0243454c166aad0ffe6d6601b41a214df8f70e3a2ed1e655df5398a409
+```
+
+It differs from the completed 39-prompt overlay only by allowing external
+sequential input to honor `--detect-every`. Stateless reset-and-prompt clients
+still trigger a detection for each frame.
+
+#### Speed
+
+| Metric | O5 | G5-R1 | G5-R30 |
+| --- | ---: | ---: | ---: |
+| Startup/model initialization | 12.06 s | 84.63 s | 87.65 s |
+| Sequence wall time | 51.34 s | 90.56 s | 28.81 s |
+| Effective sequence FPS | 1.948 | 1.104 | 3.471 |
+| All-frame p50 | 498.2 ms | 818.5 ms | 197.2 ms |
+| Mask observations | 329 | 597 | 470 |
+| Non-empty frames | 95 | 100 | 100 |
+
+G5-R30 contained exactly four measured detection frames: 0, 30, 60, and 90.
+The remaining 96 frames had `detect_ms=0` and are the formal tracking-only set.
+
+| G5-R30 frame type | Count | Mean client | p50 client | p95 client | p50 runtime process |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Refresh | 4 | 1,154.1 ms | 868.9 ms | 1,913.7 ms | 803.8 ms |
+| Tracking only | 96 | 197.2 ms | 196.3 ms | 219.2 ms | 125.2 ms |
+
+The first refresh was a cold sequence initialization at 2,088.8 ms. Later
+refreshes were 921.1, 789.8, and 816.7 ms. Tracking-only p50 was 4.17x faster
+than G5-R1 and 2.54x faster than Original. The approximately 71 ms difference
+between tracking client p50 and runtime-process p50 motivates T02.
+
+#### Teacher agreement and tracking stability
+
+| Directed comparison | Instance mIoU | Recall at IoU 0.5 |
+| --- | ---: | ---: |
+| O5 to G5-R1 | 0.6014 | 0.6231 |
+| O5 to G5-R30 | 0.5215 | 0.5380 |
+| G5-R1 to G5-R30 | 0.7686 | 0.7873 |
+
+G5-R30 teacher recall was 0.0851 below G5-R1, within the pre-registered 0.10
+gate. G5-R1-to-G5-R30 agreement by tracking phase was:
+
+| Frames since refresh | Instance mIoU | Recall at IoU 0.5 |
+| --- | ---: | ---: |
+| Refresh | 0.8483 | 0.8636 |
+| 1-9 | 0.7767 | 0.7953 |
+| 10-19 | 0.7588 | 0.7778 |
+| 20-29 | 0.7590 | 0.7778 |
+
+Agreement drops after initialization, then plateaus rather than continuing to
+collapse through frame 29. None of the GI frames reported a lost object. These
+numbers are teacher/self agreement on one short sequence, not ground-truth
+accuracy.
+
+#### Hardware
+
+| Mean / limit metric | O5 | G5-R1 | G5-R30 |
+| --- | ---: | ---: | ---: |
+| Mean GPU utilization | 89.8% | 64.0% | 75.3% |
+| GPU utilization p95 | 97.0% | 96.9% | 96.0% |
+| Mean GPU power | 32.9 W | 22.6 W | 21.7 W |
+| Maximum GPU temperature | 52 C | 49 C | 47 C |
+| Minimum Linux `MemAvailable` | 87.18 GiB | 82.33 GiB | 82.28 GiB |
+| Mean Docker working set | 5.57 GiB | 11.41 GiB | 11.44 GiB |
+| Mean NVIDIA process memory | 6.02 GiB | 8.84 GiB | 8.78 GiB |
+
+No condition approached the temperature or unified-memory gates. G5-R30 used
+the same model memory as G5-R1; its improvement comes from scheduling, not a
+smaller resident model.
+
+#### Gate decision
+
+| Gate | Result |
+| --- | --- |
+| Tracking p50 <= 250 ms | Pass |
+| At least 5x faster than G5-R1 | Fail: 4.17x |
+| Teacher recall decrease <= 0.10 | Pass: 0.0851 |
+| No monotonic phase-bucket collapse | Pass |
+| Complete 100 frames, below 80 C, at least 32 GiB available | Pass |
+
+T01 is therefore a strict partial pass. It missed one deliberately aggressive
+speed ratio, but it demonstrated a real model/runtime tracking advantage and
+stable short-horizon output. T02 is authorized only as a bounded measurement of
+the remaining client/runtime boundary; ROS Scene Graph scheduling remains
+unchanged until T02 is evaluated.
+
+Full generated report and figures:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-tracking-t01-20260808/report/
+```
+
+Preserved preflights excluded from all metrics:
+
+- `extractor-shutdown-preflight`: the first ROS extractor reached 100 images
+  but called shutdown inside its subscription callback and did not close the
+  manifest. The fixed extractor uses `spin_once` and a done flag.
+- `original-preflight-pythonpath-duration`: incorrect copied-package path and
+  missing resource-sampler duration.
+- `original-preflight-rclpy-pythonpath`: replacing `PYTHONPATH` hid ROS Python
+  packages; the formal command prepends instead.
+- `original-preflight-config-path`: standalone Detection construction lacked
+  the launch-provided object config; the formal command sets the explicit fixed
+  T01 config.
+
+## T02: Mask-Only External API
+
+### Question and hypothesis
+
+G5-R30 tracking-only runtime-process p50 was 125.2 ms, while client p50 was
+196.3 ms. The current UI-oriented render worker still constructs an overlay and
+JPEG-encodes both raw and tracked frames before publishing the mask snapshot.
+T02 tests whether disabling those unused UI products reduces the approximately
+71 ms boundary without changing inference, tracker state, masks, IDs, or labels.
+
+This is intentionally smaller than a shared-memory redesign. If mask-only mode
+does not materially reduce latency, transport work will stop rather than adding
+IPC complexity.
+
+### Fixed input and control
+
+- Reuse the exact T01 input manifest, 100 JPEGs, five prompts, threshold 0.5,
+  and refresh cadence 30.
+- Reuse `G5-R30` as the control; do not rerun or alter it.
+- Run a fresh `G5-R30-H` container so tracker state is independent.
+- Preserve the existing 768 tracking / 1152 detection TensorRT engines.
+
+### Runtime change allowed for T02
+
+Create another evaluation overlay variant with an explicit `--api-headless`
+flag. When set, the render worker must still copy masks, labels, scores, lost
+flags, frame index, and `input_sequence` into `/masks.npz`, but it skips UI
+overlay drawing and raw/tracked JPEG encoding. Default behavior remains
+unchanged. Archive the new overlay and checksum separately.
+
+No model, threshold, prompt, tracking, memory stride, mask resize, HTTP client,
+or Scene Graph code may change in T02.
+
+### Measurements and gates
+
+- Same per-frame latency, runtime status, mask, resource, and startup records as
+  T01.
+- Compare tracking-only client p50/p95 and the client-minus-process boundary.
+- Compare every G5-R30-H mask to G5-R30 by label and source frame.
+- Inspect refresh indices to confirm 0/30/60/90.
+
+T02 passes only if tracking-only client p50 is at most 160 ms, at least 20%
+lower than G5-R30's 196.3 ms, all masks/labels/lost flags are bitwise identical,
+all 100 frames complete, and hardware gates remain satisfied.
+
+Planned artifact directory:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-tracking-t01-20260808/gi-refresh30-headless/
+```
+
+### Results
+
+T02 completed all 100 frames with refreshes at exactly frames 0, 30, 60, and
+90. The evaluation overlay checksum was:
+
+```text
+SHA-256: c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd
+```
+
+The variant is archived on NAS at:
+
+```text
+/mnt/nas/danny/thor-scene-graph/candidates/instinctsam-drive-1DyLOdRXWD_GT4s5jKT6AGkBbO5TKjS5c/runtime-overlay/live_tracking_sam3.t02_api_headless.py
+```
+
+#### Speed
+
+| Metric | G5-R30 UI control | G5-R30-H headless | Change |
+| --- | ---: | ---: | ---: |
+| Startup/model initialization | 87.65 s | 87.65 s | No material change |
+| Sequence wall time | 28.81 s | 27.02 s | -6.2% |
+| Effective sequence FPS | 3.471 | 3.701 | +6.6% |
+| Tracking-only client p50 | 196.3 ms | 149.6 ms | -23.8% |
+| Tracking-only client p95 | 219.2 ms | 175.0 ms | -20.2% |
+| Tracking-only runtime-process p50 | 125.2 ms | 129.4 ms | +3.3% |
+| Client-minus-process boundary p50 | 71.1 ms | 20.3 ms | -71.5% |
+
+The headless all-frame mean/p50/p95 were 190.3/152.7/181.2 ms. The four
+refresh frames averaged 1,097.3 ms, with p50 810.4 ms and p95 1,828.0 ms. The
+96 tracking-only frames averaged 152.5 ms. The model/runtime processing time
+did not improve; the gain is specifically the removal of UI drawing and two
+JPEG encodes from the API response boundary.
+
+#### Output identity and hardware
+
+All 100 source-aligned frames had exactly identical masks, labels, IDs, lost
+flags, and scores compared with the UI control. Therefore T02 changes delivery
+work only, not model output.
+
+| Resource metric | G5-R30-H |
+| --- | ---: |
+| Mean / p95 GPU utilization | 61.0% / 95.0% |
+| Mean / maximum GPU power | 22.27 W / 26.37 W |
+| Mean / maximum system power | 50.14 W / 78.25 W |
+| Mean / maximum GPU temperature | 43.58 C / 46 C |
+| Minimum Linux `MemAvailable` | 82.51 GiB |
+| Mean Docker working set | 11.46 GiB |
+| Mean NVIDIA process memory | 8.77 GiB |
+
+#### Gate decision
+
+| Gate | Result |
+| --- | --- |
+| Tracking-only p50 <= 160 ms | Pass: 149.6 ms |
+| At least 20% below G5-R30 | Pass: 23.8% |
+| All outputs bitwise identical | Pass: 100/100 frames |
+| Complete 100 frames and preserve cadence | Pass |
+| Below 80 C and at least 32 GiB available | Pass |
+
+T02 passes. Shared-memory transport is not justified yet because the bounded
+headless change removed 71.5% of the observed client/runtime boundary while
+preserving output exactly. T03 is authorized to integrate this mode into the
+candidate Scene Graph pipeline.
+
+Full generated report and figures:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-tracking-t01-20260808/report-t02/
+```
+
+## T03: Stateful GI Scheduling in Scene Graph
+
+### Question and hypothesis
+
+The current candidate Scene Graph HTTP backend resets GI and resends prompts
+for every accepted color/depth pair. That discards tracker state and converts
+every accepted frame into a slow grounding frame. The synchronized ROS callback
+already rejects new frames while a worker is active, so it behaves as a
+one-worker, latest-future-frame scheduler rather than building an unbounded
+queue.
+
+T03 tests the smallest integration change: initialize prompts once, retain GI
+state across accepted frames, and let the existing busy-frame rejection provide
+backpressure. The hypothesis is that this will increase completed 3D detection
+updates, keep detections close to the live camera timestamp, and still update
+the graph without altering projection, point-cloud, or graph code.
+
+### Code boundary and safety
+
+Only `~/scene-graph-instinctsam` on branch `dev/instinctsam-integration` may be
+changed. The stable checkout under Ether, its image, and the completed A/B
+artifacts remain untouched.
+
+Add an opt-in `instinctsam_stateful` detector parameter, default `false`:
+
+1. when disabled, preserve the existing reset-and-prompt-per-frame behavior;
+2. when enabled, call reset and prompt once before the first accepted frame;
+3. reuse the runtime session for later accepted frames;
+4. invalidate the initialized state after an HTTP failure so the next accepted
+   frame performs a clean reset and prompt;
+5. do not change image timestamps, mask-to-depth projection, detection message
+   construction, graph update logic, threshold, prompts, or category mapping.
+
+The GI runtime uses the T02 `--api-headless` overlay and `--detect-every 30`.
+Scene Graph itself also runs headless so visualization does not contaminate the
+throughput measurement.
+
+### Fixed live-playback input and conditions
+
+- Source: the same Lifestyle Lab D435 bag and the same region beginning near
+  camera offset 140 s as T01.
+- Playback: 30 source seconds at 1x ROS bag rate, separately for each condition.
+- Prompts, in fixed order: `keyboard`, `table`, `book`, `computer desk`, and
+  `stool`.
+- GI threshold: 0.5; refresh cadence: every 30 GI-accepted frames.
+- Start each condition from stopped model containers and a fresh GI runtime.
+- Record image source timestamps rather than completion time.
+
+| ID | Scene Graph HTTP behavior | GI mode | Purpose |
+| --- | --- | --- | --- |
+| SG5-S | Reset and prompt for every accepted frame | API headless | Existing stateless control |
+| SG5-T30 | Reset/prompt once, then retain state | API headless, refresh every 30 accepted frames | Candidate stateful integration |
+
+The conditions run serially. Container/model startup is reported separately
+and excluded from steady-state pipeline measurements.
+
+### Measurements
+
+Pipeline behavior:
+
+- source camera messages, accepted/started frames, completed detections, and
+  busy-frame skips;
+- completed update rate and source-frame coverage;
+- source timestamp to detection publication latency, including p50/p95/max and
+  linear latency slope over playback time;
+- accepted-frame source timestamp gaps to verify fresh-frame sampling instead
+  of queued sequential processing;
+- `/scene_graph/detections_3d` message count, detections per message, and
+  non-empty-message rate;
+- graph node/object counts at the end of playback;
+- GI refresh indices and runtime detect/tracker/process timing.
+
+Hardware and capacity:
+
+- GPU utilization, GPU/system power, and GPU temperature time series;
+- Linux `MemAvailable`, Docker working set, NVIDIA process memory, and summed
+  container CPU;
+- peak resident model footprint and remaining unified-memory headroom.
+
+Quality is a pipeline sanity check rather than a ground-truth claim: preserve
+labels, require non-empty 3D detections and graph objects, inspect mask/3D
+overlays at fixed source times if available, and report any lost-object or empty
+collapse. T01 remains the source-aligned teacher-agreement measurement.
+
+### Pre-registered gates
+
+SG5-T30 passes this integration screen only if it:
+
+1. completes at least twice as many 3D detection updates as SG5-S in the same
+   30 source seconds;
+2. has source-to-publication p50 below 500 ms and p95 below 1.0 s;
+3. shows no accumulating stale queue: latency slope is at most 10 ms per source
+   second and accepted source timestamps continue advancing throughout playback;
+4. refreshes at accepted-frame indices 0, 30, 60, and so on, without resetting
+   between them;
+5. publishes at least one non-empty 3D detection message and produces at least
+   one Scene Graph object node;
+6. completes without restart, remains below 80 C, and retains at least 32 GiB
+   of Linux unified-memory headroom.
+
+If an instrumentation limitation prevents an exact metric, preserve the run as
+a preflight, document the limitation, fix only the measurement, and rerun both
+conditions. Do not reinterpret a failed gate after viewing results.
+
+### Planned artifact directory
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-scene-graph-t03-20260808/
 ```
 
 ### Results
