@@ -7,5 +7,8 @@
     "stool"
   ],
   "container_types": [],
-  "surface_types": []
+  "surface_types": [],
+  "category_colors": {
+    "default": [128, 128, 128]
+  }
 }
