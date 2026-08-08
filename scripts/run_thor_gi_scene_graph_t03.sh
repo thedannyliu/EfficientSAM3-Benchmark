@@ -62,13 +62,13 @@ container_output="/workspace/.scene_graph_runs/gi-scene-graph-t03-20260808/$labe
 ros_setup='source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; export RCUTILS_COLORIZED_OUTPUT=0'
 
 docker exec -d "$ether_container" bash -lc \
-    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/scene_graph_ros_node.py --ros-args -p mode:=online -p category_config_file:='$container_output/prompts.json' -p online_scene_graph_file:='$container_output/final_graph.json' -p detection.confidence_threshold:=0.5 >'$container_output/scene_graph.log' 2>&1"
+    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/scene_graph_ros_node.py --ros-args -p mode:=online -p category_config_file:=/root/.ros/ether/scene/maps/scene_objects.json -p online_scene_graph_file:='$container_output/final_graph.json' -p detection.confidence_threshold:=0.5 >'$container_output/scene_graph.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
     "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/detection_ros_node.py --ros-args -p config_file_path:='$container_output/prompts.json' -p detection_node.backend:=instinctsam_http -p detection_node.instinctsam_url:=http://127.0.0.1:8767 -p detection_node.instinctsam_timeout:=30.0 -p detection_node.instinctsam_stateful:=$stateful -p detection_node.headless:=true -p detection_node.depth:=camera -p detection.confidence_threshold:=0.5 -p use_sim_time:=true >'$container_output/detection.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
-    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; echo \$\$ >'$container_output/recorder.pid'; exec python3 '$container_output/scene_graph_ab_recorder.py' --output-dir '$container_output' --label '$label' --sample-period 5.0 >'$container_output/recorder.log' 2>&1"
+    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 '$container_output/scene_graph_ab_recorder.py' --output-dir '$container_output' --label '$label' --sample-period 5.0 --max-wall-duration 42 >'$container_output/recorder.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
     "$ros_setup; exec python3 '$container_output/scene_graph_pose_fixture.py' >'$container_output/pose_fixture.log' 2>&1"
@@ -101,8 +101,8 @@ fi
 sleep 3
 wait "$resource_pid"
 
-recorder_pid=$(<"$output_dir/recorder.pid")
-docker exec "$ether_container" kill -INT "$recorder_pid" || true
+curl --silent --show-error --fail --max-time 3 \
+    http://127.0.0.1:8767/status.json >"$output_dir/runtime_final_status.json"
 for _ in $(seq 1 10); do
     [[ -f "$output_dir/recorder_summary.json" ]] && break
     sleep 1
@@ -111,8 +111,6 @@ if [[ ! -f "$output_dir/recorder_summary.json" ]]; then
     echo "recorder did not write its summary" >&2
     exit 1
 fi
-curl --silent --show-error --fail --max-time 3 \
-    http://127.0.0.1:8767/status.json >"$output_dir/runtime_final_status.json"
 docker logs --since "$runtime_log_since" "$runtime_container" >"$output_dir/runtime.log" 2>&1
 
 printf '{\n  "label": "%s",\n  "stateful": %s,\n  "runtime_started_ns": %s,\n  "runtime_ready_ns": %s,\n  "runtime_startup_seconds": %.6f,\n  "play_started_ns": %s,\n  "play_ended_ns": %s,\n  "play_wall_seconds": %.6f,\n  "bag_exit_code": %s,\n  "bag_start_offset_seconds": 145.3,\n  "requested_play_seconds": 30.0,\n  "scene_graph_commit": "46673c6",\n  "pose_fixture_sha256": "%s",\n  "runtime_overlay_sha256": "c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd"\n}\n' \

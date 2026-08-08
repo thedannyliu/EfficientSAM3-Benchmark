@@ -206,8 +206,17 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
+    deadline = (
+        time.monotonic() + args.max_wall_duration
+        if args.max_wall_duration > 0
+        else None
+    )
     try:
-        rclpy.spin(recorder)
+        while rclpy.ok():
+            if deadline is not None and time.monotonic() >= deadline:
+                rclpy.shutdown()
+                break
+            rclpy.spin_once(recorder, timeout_sec=0.1)
     finally:
         recorder.close()
         recorder.destroy_node()
@@ -220,6 +229,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--label", required=True)
     parser.add_argument("--sample-period", type=float, default=5.0)
+    parser.add_argument(
+        "--max-wall-duration",
+        type=float,
+        default=0.0,
+        help="Stop cleanly after this many wall seconds; zero waits for a signal.",
+    )
     parser.add_argument("--camera-topic", default="/d435/color/image_raw_jpeg")
     parser.add_argument("--detections-topic", default="/scene_graph/detections_3d")
     parser.add_argument("--graph-topic", default="/scene_graph/online_sg")

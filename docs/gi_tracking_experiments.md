@@ -488,6 +488,14 @@ SG5-S and SG5-T30. All pre-registered T03 gates remain unchanged, except
 "source-to-publication" is explicitly detector-to-graph pipeline latency under
 the fixed pose fixture.
 
+The detection node continues to receive the five-prompt T01 config. The Scene
+Graph node receives the existing full `scene_objects.json`, because it also
+contains graph-only fields such as `relation_colors`; this does not expand the
+detector prompt list. The recorder stops itself after 42 wall seconds and must
+write `recorder_summary.json` before a run can be accepted. This replaces
+process-signal shutdown so both conditions have the same deterministic
+measurement lifetime.
+
 ### Measurements
 
 Pipeline behavior:
@@ -572,6 +580,17 @@ metrics:
   calls did demonstrate the intended session behavior (one initialization and
   13 tracking calls), but neither run is used for throughput or gate results.
   T03b uses the pre-registered controlled-pose amendment above.
+- `sg5-stateless-pose-fixture-v1` and
+  `sg5-stateful-r30-pose-fixture-v1`: the pose fixture gave both attempts 866
+  camera and 866 pose messages, confirming controlled synchronization. The
+  stateful detector completed 92 calls with one initialization and four
+  refreshes, versus 32 stateless calls. However, the minimal detector prompt
+  config was also passed to the graph node; when stateful output created an
+  edge, graph visualization raised `KeyError: relation_colors`. Its recorder
+  also failed to close after a process signal. The corrected protocol keeps the
+  five-prompt detector config, gives the graph its complete existing config,
+  and uses fixed-duration recorder shutdown. Per the instrumentation rule,
+  both conditions will be rerun and the v1 numbers are excluded from gates.
 - `state-test-unittest-path`: the first isolated state test passed an absolute
   file path to `python -m unittest`, which was interpreted as a module name;
   no tests executed.
