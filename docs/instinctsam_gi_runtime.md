@@ -198,11 +198,16 @@ Keep large overlays and runtime artifacts out of Git.
 
 ## Current Status
 
-- Baseline Scene Graph display run stopped and archived.
-- Benchmark and Scene Graph development branches created and pushed.
-- Fixed COCO evaluation inputs copied to NAS and checksummed.
-- Runtime archive download/checksum: in progress.
-- Docker compatibility smoke: pending.
-- Raw-mask API inspection: pending.
-- Benchmark adapter and Scene Graph bridge: pending.
-- Speed, GT accuracy, and teacher-agreement results: pending.
+- Baseline Scene Graph run is archived and its stable checkout remains unchanged.
+- Benchmark and Scene Graph development branches are created and pushed.
+- Runtime archive, fixed COCO inputs, and all formal results are on NAS with checksums.
+- Both supplied TensorRT engines load and execute on Thor R38.4 / SM110.
+- The evaluation-only overlay exposes source-aligned JPEG and packed-mask APIs.
+- The Scene Graph bridge preserves the existing 3D detection message contract.
+- Source-aligned Original/GI runs, COCO-10 GT evaluation, bag teacher agreement,
+  and resource profiling are complete.
+
+The measured GI deployment is slower and produces fewer Scene Graph detections
+for the current 39-prompt workload. Detailed protocol, results, limitations,
+artifact locations, and the next acceptance gate are recorded in
+`docs/scene_graph_ab_20260808.md`.
