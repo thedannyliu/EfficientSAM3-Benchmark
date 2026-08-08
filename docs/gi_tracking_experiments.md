@@ -38,7 +38,7 @@ modified by these experiments.
 | T01 | Does GI become useful when five prompts are initialized once and tracked, with grounding only every 30 frames? | Complete | Partial pass: tracking is useful, but 4.17x missed the 5x gate |
 | T02 | How much latency can a mask-only/headless API remove without changing model output? | Complete | Pass: 23.8% lower tracking p50 with bitwise-identical outputs |
 | T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | Complete | Partial pass: 2.72x throughput; complete-publication p95 missed by 72.7 ms |
-| T04 | Can 1 cm voxel aggregation remove redundant 3D JSON points without changing graph geometry? | Designed; execution pending | Authorized by T03 publication tail |
+| T04 | Can 1 cm voxel aggregation remove redundant 3D JSON points without changing graph geometry? | Complete | Partial pass: transport and latency gates passed; non-empty 3D frame gate failed |
 
 ## T01: Five-Prompt Keyframe Detection and Tracking
 
@@ -751,4 +751,116 @@ Planned artifact directory:
 
 ### Results
 
-Pending execution.
+The offline geometry check and the live `SG5-T30-V01` condition completed. The
+live run used the same 866 camera messages, 866 deterministic fixture poses,
+29.25557376 source seconds, prompt order, threshold, R30 cadence, and T02
+runtime overlay as the formal T03b dense control. The candidate Scene Graph
+implementation is commit `dfc7085` (`Compress Scene Graph instance points by
+voxel`). The stable checkout remained at `e9c7a14` and was not modified.
+
+#### Offline geometry verification
+
+The checker replayed all 79 non-empty dense T03b messages through the proposed
+1 cm aggregation. It compared the integer cell keys and cell means obtained
+from the transmitted aggregate points with direct downstream-equivalent
+compression of the original full point clouds.
+
+| Metric | Result |
+| --- | ---: |
+| Dense messages checked | 79 |
+| Original points | 1,558,802 |
+| Aggregated points | 81,660 |
+| Point reduction | 94.76% |
+| Identical cell-key sets | 79 / 79 |
+| Maximum cell-mean error | 0.0 m |
+
+Bounding-box position and size remain calculated from the full cloud before
+aggregation. This establishes exact equivalence for the geometry data consumed
+by `GeometryBuilder`; it does not establish segmentation accuracy.
+
+#### Live latency and transport
+
+| Metric | T03b dense control | T04 voxel01 | Change |
+| --- | ---: | ---: | ---: |
+| Completed full frames | 87 | 92 | +5.7% |
+| Completed frames / source-second | 2.974 | 3.145 | +5.7% |
+| Full-frame p50 / p95 | 198.0 / 617.3 ms | 177.1 / 690.6 ms | p50 -10.5%; p95 +11.9% |
+| Tracking HTTP p50 / p95 | 153.5 / 178.1 ms | 150.2 / 174.6 ms | p50 -2.1%; p95 -1.9% |
+| Camera to last 3D p50 / p95 | 452.6 / 1,072.7 ms | 457.9 / 820.6 ms | p95 -23.5% |
+| Complete-publication latency slope | -32.6 ms/source-s | -11.2 ms/source-s | no stale queue |
+| `detections.jsonl` bytes | 94,741,692 | 4,808,514 | -94.92% |
+| Live raw / transmitted points | 1,558,802 / 1,558,802 | 1,487,952 / 78,358 | voxel run transmitted -94.73% |
+| Detector publication p50 / p95 | not instrumented | 53.1 / 122.0 ms | diagnostic |
+
+The condition made 93 detector calls and completed 92. It initialized once,
+refreshed at accepted-frame indices 0, 30, 60, and 90, and used tracking for
+the other 89 calls. The publication-tail target passed: p95 fell below 1 s and
+was 23.5% lower than the dense control. The full detector p95 increased, but
+that interval ends before the point-cloud JSON publication work; the end-to-end
+metric targeted by T04 improved substantially.
+
+#### Pipeline output and quality limitation
+
+| Output metric | T03b dense control | T04 voxel01 |
+| --- | ---: | ---: |
+| Non-empty 3D source frames | 44 | 32 |
+| 3D detection messages | 79 | 67 |
+| Per-label messages | table 54, book 15, keyboard 10 | table 42, book 15, keyboard 10 |
+| Final graph nodes / edges | 5 / 5 | 7 / 8 |
+| Final graph categories | table 1, book 2, keyboard 2 | table 2, book 3, keyboard 2 |
+
+The pre-registered requirement of at least 40 non-empty source frames failed.
+The voxel transform occurs after mask inference and 3D projection, so it cannot
+change which masks the GI runtime returns. Because the optimized run completes
+faster under the latest-frame-wins callback, however, it accepts a different
+subset of camera timestamps and therefore follows a different tracker path.
+The unchanged book and keyboard counts, lower table count, and richer final
+graph are consistent with sampling-path variation, but do not prove that the
+quality difference is harmless. A fixed-frame replay or paired source-timestamp
+run is required before merging this optimization.
+
+#### Hardware and capacity
+
+| Resource metric | T03b dense control | T04 voxel01 |
+| --- | ---: | ---: |
+| Mean / p95 GPU utilization | 33.7% / 96.0% | 33.8% / 95.2% |
+| Mean GPU power | 15.37 W | 15.83 W |
+| Mean system power | 34.70 W | 37.36 W |
+| Maximum GPU temperature | 47 C | 45 C |
+| Minimum Linux `MemAvailable` | 82.63 GiB | 82.71 GiB |
+| Mean Docker working set | 11.09 GiB | 11.02 GiB |
+| Mean NVIDIA process memory | 8.73 GiB | 8.70 GiB |
+| Mean summed container CPU | 128.6% | 111.2% |
+
+Voxel transport did not materially change resident model memory or peak GPU
+pressure. It lowered mean container CPU while preserving more than 82 GiB of
+unified-memory headroom. Additional onboard models must still be scheduled
+around approximately 95% GPU-utilization bursts even though memory capacity is
+comfortable.
+
+#### Gate decision
+
+| Gate | Result |
+| --- | --- |
+| Complete-publication p95 below 1.0 s | Pass: 820.6 ms |
+| At least 10% p95 improvement | Pass: 23.5% |
+| JSON bytes at least 50% lower | Pass: 94.92% |
+| Transmitted points at least 50% lower | Pass: 94.73% |
+| Exact offline cells and mean error at most `1e-5` m | Pass: all exact, 0.0 m |
+| At least 87 completed full frames | Pass: 92 |
+| Exact R30 cadence | Pass: 0, 30, 60, 90 |
+| At least 40 non-empty 3D source frames | **Fail: 32** |
+| Non-empty graph and no traceback | Pass: 7 nodes / 8 edges; no traceback |
+| Below 80 C and at least 32 GiB available | Pass: 45 C; 82.71 GiB |
+
+T04 is a strict partial pass: every recorded check except the non-empty-frame
+gate passed, including all intended transport, geometry, latency, and resource
+checks. The code stays opt-in and development-only until the non-empty-frame
+difference is resolved with paired input frames. The result does establish that
+dense per-pixel JSON transport is a major avoidable pipeline cost.
+
+Raw condition, geometry check, generated report, and figures:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-scene-graph-t04-20260808/
+```

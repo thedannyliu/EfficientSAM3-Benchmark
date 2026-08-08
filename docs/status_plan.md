@@ -1,8 +1,31 @@
 # Status and Plan
 
-Last updated: 2026-05-27.
+Last updated: 2026-08-08.
 
 ## Current Status
+
+### Thor GI Scene Graph integration
+
+- Development remains on `dev/instinctsam-gi-runtime`; the stable Thor Scene
+  Graph checkout is unchanged at `e9c7a14`.
+- T01 established that stateful GI tracking at R30 reaches 196.3 ms tracking
+  p50 and remains within 0.0851 teacher-recall loss, but missed its 5x speed
+  gate at 4.17x.
+- T02's headless mask API reduced tracking p50 another 23.8% with bitwise-
+  identical output.
+- T03 integrated persistent GI state into the Scene Graph pipeline. It
+  completed 2.72x as many frames as stateless GI, but complete-publication p95
+  was 1,072.7 ms and missed the 1 s gate.
+- T04 moved the downstream-equivalent 1 cm voxel aggregation ahead of JSON
+  publication. It reduced serialized detection data by 94.92% and
+  complete-publication p95 to 820.6 ms. Offline voxel geometry was exact, but
+  the live run produced 32 non-empty 3D source frames versus the pre-registered
+  minimum of 40, so the change remains opt-in and development-only pending a
+  paired-frame quality check.
+- Detailed designs, failed preflights, commands, hardware measurements, gates,
+  and decisions are in `docs/gi_tracking_experiments.md`. Raw T03/T04 artifacts
+  and checksums are stored under
+  `/mnt/nas/danny/thor-scene-graph/run-artifacts/`.
 
 - Repo tracks benchmark code, ROS wrappers, scripts, configs, and lightweight tests only.
 - Ignored local/runtime content includes `.venv/`, `external/`, `videos/`, `images/`,
