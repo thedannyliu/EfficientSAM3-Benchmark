@@ -518,4 +518,23 @@ conditions. Do not reinterpret a failed gate after viewing results.
 
 ### Results
 
-Pending execution.
+Formal execution is pending. Preserved preflights excluded from all T03
+metrics:
+
+- `sg5-stateless-missing-urdf`: the first control runner did not pass
+  `ETHER_ROBOT_URDF` into a freshly started Ether container. Localization
+  exited before bag playback, so `/tracked_pose` never appeared and the
+  detector remained in its startup wait. The recorder captured 866 camera
+  messages but zero detections. The GI runtime subsequently timed out waiting
+  for an external frame. This run is invalid, not a zero-throughput control.
+  The corrected runner passes the known local robot URDF, pbstream, and map
+  paths explicitly.
+- `state-test-unittest-path`: the first isolated state test passed an absolute
+  file path to `python -m unittest`, which was interpreted as a module name;
+  no tests executed.
+- `state-test-ros-environment`: two subsequent state-test invocations had not
+  sourced the container's actual ROS Humble installation (the first assumed
+  Jazzy); no tests executed. With `/opt/ros/humble/setup.bash` and the workspace
+  sourced, all three state tests passed: one stateful initialization, per-frame
+  stateless initialization, and reinitialization after an injected HTTP
+  failure.

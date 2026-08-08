@@ -60,7 +60,7 @@ container_output="/workspace/.scene_graph_runs/gi-scene-graph-t03-20260808/$labe
 ros_setup='source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; export RCUTILS_COLORIZED_OUTPUT=0'
 
 docker exec -d "$ether_container" bash -lc \
-    "$ros_setup; exec ros2 launch ether_cartographers g1_3d_localization_real.launch.py use_sim_time:=true use_rviz:=false >'$container_output/localization.log' 2>&1"
+    "$ros_setup; export ETHER_ROBOT_URDF=/root/.ros/ether/robot/urdf/g1_comp_dex1_1.urdf; exec ros2 launch ether_cartographers g1_3d_localization_real.launch.py use_sim_time:=true use_rviz:=false load_state_filename:=/root/.ros/ether/scene/maps/map.pbstream occupancy_map_filename:=/root/.ros/ether/scene/maps/map.yaml >'$container_output/localization.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
     "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/scene_graph_ros_node.py --ros-args -p mode:=online -p category_config_file:='$container_output/prompts.json' -p online_scene_graph_file:='$container_output/final_graph.json' -p detection.confidence_threshold:=0.5 >'$container_output/scene_graph.log' 2>&1"
@@ -99,7 +99,7 @@ fi
 sleep 10
 wait "$resource_pid"
 
-docker exec "$ether_container" pkill -INT -f scene_graph_ab_recorder.py || true
+docker exec "$ether_container" pkill -INT -f '[s]cene_graph_ab_recorder.py' || true
 sleep 3
 curl --silent --show-error --fail --max-time 3 \
     http://127.0.0.1:8767/status.json >"$output_dir/runtime_final_status.json"
