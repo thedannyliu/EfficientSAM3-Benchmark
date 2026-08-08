@@ -56,6 +56,12 @@ FIELDNAMES = [
     "cuda_reserved_mb",
     "cuda_peak_allocated_mb",
     "cuda_peak_reserved_mb",
+    "cuda_free_mb",
+    "cuda_total_mb",
+    "runtime_process_ms",
+    "runtime_detect_ms",
+    "runtime_frame",
+    "input_sequence",
     "params_total",
     "params_backbone",
     "params_image_encoder",
@@ -161,8 +167,17 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
                 else:
                     prediction = backend.predict(frame_rgb, prompt)
                 total_ms = (perf_counter() - start) * 1000.0
+                runtime_status = prediction.metadata.get("status", {})
                 component_total = sum(profile.values())
                 memory = cuda_memory_mb(torch_module) if torch_module is not None else cuda_memory_mb(None)
+                for key in (
+                    "cuda_allocated_mb",
+                    "cuda_reserved_mb",
+                    "cuda_peak_allocated_mb",
+                    "cuda_peak_reserved_mb",
+                ):
+                    if runtime_status.get(key) is not None:
+                        memory[key] = runtime_status[key]
                 scores = to_numpy(prediction.scores)
                 best_iou, merged_iou = _prediction_iou(prediction.masks, gt_mask) if use_gt else ("", "")
                 overlay_path = _write_overlay(args.overlay_dir, item, prompt_mode, frame_rgb, prediction) if use_overlay else ""
@@ -204,6 +219,12 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
                     "memory_attention_ms": profile.get("memory_attention_ms", 0.0),
                     "memory_encoder_ms": profile.get("memory_encoder_ms", 0.0),
                     "other_ms": max(0.0, total_ms - component_total),
+                    "cuda_free_mb": runtime_status.get("cuda_free_mb", ""),
+                    "cuda_total_mb": runtime_status.get("cuda_total_mb", ""),
+                    "runtime_process_ms": runtime_status.get("process_ms", ""),
+                    "runtime_detect_ms": runtime_status.get("detect_ms", ""),
+                    "runtime_frame": prediction.metadata.get("runtime_frame", ""),
+                    "input_sequence": prediction.metadata.get("input_sequence", ""),
                     "checkpoint_file_bytes": _checkpoint_file_bytes(args.checkpoint_path),
                     "overlay": str(overlay_path),
                     **memory,
