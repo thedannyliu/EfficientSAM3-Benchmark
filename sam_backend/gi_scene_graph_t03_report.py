@@ -342,7 +342,7 @@ def _make_plots(root: Path, output: Path, report: dict[str, Any]) -> None:
     ]
     axis.boxplot(
         data,
-        tick_labels=[
+        labels=[
             "Stateless HTTP",
             "Stateful tracking HTTP",
             "Stateless full frame",
