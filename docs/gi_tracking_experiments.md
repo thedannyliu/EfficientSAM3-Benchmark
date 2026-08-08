@@ -37,7 +37,7 @@ modified by these experiments.
 | --- | --- | --- | --- |
 | T01 | Does GI become useful when five prompts are initialized once and tracked, with grounding only every 30 frames? | Complete | Partial pass: tracking is useful, but 4.17x missed the 5x gate |
 | T02 | How much latency can a mask-only/headless API remove without changing model output? | Complete | Pass: 23.8% lower tracking p50 with bitwise-identical outputs |
-| T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | Designed; execution pending | Authorized by T02; candidate Scene Graph branch only |
+| T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | T03a preflight invalid; T03b designed | Isolate detector scheduling from localization nondeterminism |
 
 ## T01: Five-Prompt Keyframe Detection and Tracking
 
@@ -462,6 +462,32 @@ throughput measurement.
 The conditions run serially. Container/model startup is reported separately
 and excluded from steady-state pipeline measurements.
 
+#### T03b controlled pose amendment
+
+T03a showed that starting Cartographer from the middle of this bag is not a
+repeatable A/B input. Although both attempts had identical camera messages,
+one produced 252 tracked poses and the other only 18 because the latter hit
+hundreds of transform past-extrapolation failures. Comparing detector
+throughput under those conditions would be invalid.
+
+Before further execution, T03 is therefore split into two scopes:
+
+- T03b is the controlled detector-to-graph scheduler experiment. A small ROS
+  fixture subscribes to the color stream and publishes an identity
+  `/tracked_pose` plus `map -> d435_color_optical_frame` transform with the
+  exact camera header timestamp. Bag playback is restricted to the fixed
+  color, aligned depth, and camera-info topics. This retains real images,
+  recorded depth, synchronization, mask-to-3D projection, detection messages,
+  and graph updates while removing Cartographer as an uncontrolled variable.
+- A later deployment validation must start localization from bag offset zero
+  and pre-roll to the measured interval. T03b passing does not replace that
+  validation and makes no localization-performance claim.
+
+The pose fixture, topic filter, timing, and code checksum are identical in
+SG5-S and SG5-T30. All pre-registered T03 gates remain unchanged, except
+"source-to-publication" is explicitly detector-to-graph pipeline latency under
+the fixed pose fixture.
+
 ### Measurements
 
 Pipeline behavior:
@@ -537,6 +563,15 @@ metrics:
   only `/tf_static` once at 1000x without `/clock`, and only then starts the
   measured 1x interval. This preload is outside timing and identical for both
   conditions.
+- `sg5-stateless-localization` and `sg5-stateful-localization`: the first pair
+  with static transforms present still had non-equivalent localization. Both
+  recorded 866 camera messages over 29.26 source seconds, but the control
+  produced 252 pose messages and 252 synchronized callbacks while stateful
+  produced only 18. The stateful localization log contained 906 transform
+  past-extrapolation warnings and its recorder did not close cleanly. Its 14 GI
+  calls did demonstrate the intended session behavior (one initialization and
+  13 tracking calls), but neither run is used for throughput or gate results.
+  T03b uses the pre-registered controlled-pose amendment above.
 - `state-test-unittest-path`: the first isolated state test passed an absolute
   file path to `python -m unittest`, which was interpreted as a module name;
   no tests executed.
