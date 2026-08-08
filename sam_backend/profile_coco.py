@@ -114,6 +114,8 @@ def profile_coco(args: argparse.Namespace) -> dict[str, Any]:
             model_config=args.model_config,
             external_repo=args.external_repo,
             mobile_sam_model_type=getattr(args, "mobile_sam_model_type", "vit_t"),
+            runtime_url=getattr(args, "runtime_url", "http://127.0.0.1:8767"),
+            runtime_timeout=getattr(args, "runtime_timeout", 30.0),
         )
     )
     torch_module = getattr(backend, "torch", None)
@@ -390,7 +392,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-id", default="sam3-coco")
     parser.add_argument(
         "--backend",
-        choices=["null", "sam3", "efficientsam3", "sam2", "efficient-sam2", "efficienttam", "mobilesam", "sam1"],
+        choices=["null", "sam3", "efficientsam3", "instinctsam-http", "sam2", "efficient-sam2", "efficienttam", "mobilesam", "sam1"],
         default="sam3",
     )
     parser.add_argument("--checkpoint-path")
@@ -404,6 +406,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text-encoder-pos-embed-table-size", type=int)
     parser.add_argument("--interpolate-pos-embed", action="store_true")
     parser.add_argument("--mobile-sam-model-type", default="vit_t")
+    parser.add_argument("--runtime-url", default="http://127.0.0.1:8767")
+    parser.add_argument("--runtime-timeout", type=float, default=30.0)
     parser.add_argument("--prompt-mode", choices=["text", "point", "box", "both", "all"], default="both")
     parser.add_argument(
         "--eval-mode",

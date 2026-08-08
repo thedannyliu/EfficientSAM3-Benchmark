@@ -47,6 +47,8 @@ class BackendConfig:
     mobile_sam_model_type: str = "vit_t"
     instinctsam_text_checkpoint: str | None = None
     instinctsam_vision_checkpoint: str | None = None
+    runtime_url: str = "http://127.0.0.1:8767"
+    runtime_timeout: float = 30.0
 
 
 class SegmentationBackend(Protocol):
@@ -318,6 +320,10 @@ def create_backend(config: BackendConfig) -> SegmentationBackend:
     config = resolve_backend_config(config)
     if config.backend == "null":
         return NullBackend()
+    if config.backend == "instinctsam-http":
+        from .instinctsam_runtime import InstinctSamHttpBackend
+
+        return InstinctSamHttpBackend(config)
     if config.backend in {"sam3", "efficientsam3", "instinctsam"}:
         return Sam3ImageBackend(config)
     if config.backend in {"sam2", "efficient-sam2"}:
@@ -357,6 +363,8 @@ def resolve_backend_config(config: BackendConfig) -> BackendConfig:
         mobile_sam_model_type=config.mobile_sam_model_type,
         instinctsam_text_checkpoint=config.instinctsam_text_checkpoint,
         instinctsam_vision_checkpoint=config.instinctsam_vision_checkpoint,
+        runtime_url=config.runtime_url,
+        runtime_timeout=config.runtime_timeout,
     )
 
 
