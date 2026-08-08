@@ -1,0 +1,11 @@
+{
+  "movable_types": [
+    "keyboard",
+    "table",
+    "book",
+    "computer_desk",
+    "stool"
+  ],
+  "container_types": [],
+  "surface_types": []
+}

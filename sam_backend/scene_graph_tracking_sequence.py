@@ -68,6 +68,7 @@ def main() -> None:
         for row in rows:
             image_path = args.image_dir / Path(row["image"]).name
             payload = image_path.read_bytes()
+            started_wall_ns = time.time_ns()
             started = time.perf_counter()
             frame_response = json.loads(
                 client.request("/frame.jpg", payload, "image/jpeg")
@@ -95,6 +96,8 @@ def main() -> None:
                         "wait_ms": (masks_ready - submitted) * 1000.0,
                         "status_ms": (completed - masks_ready) * 1000.0,
                         "total_ms": (completed - started) * 1000.0,
+                        "started_wall_ns": started_wall_ns,
+                        "ended_wall_ns": time.time_ns(),
                         "status": status,
                     },
                     separators=(",", ":"),

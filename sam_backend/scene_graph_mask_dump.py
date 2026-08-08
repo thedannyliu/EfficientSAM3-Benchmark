@@ -21,6 +21,7 @@ def main() -> None:
     predictions_dir = args.output_dir / "predictions"
     predictions_dir.mkdir(exist_ok=True)
 
+    init_started = time.perf_counter()
     if args.backend == "original-node":
         predictor = _OriginalNodePredictor(args.scene_graph_source, prompts)
     else:
@@ -31,12 +32,15 @@ def main() -> None:
                 runtime_timeout=args.runtime_timeout,
             )
         )
+    model_init_ms = (time.perf_counter() - init_started) * 1000.0
 
     profile_path = args.output_dir / "profile.jsonl"
+    sequence_started = time.perf_counter()
     with profile_path.open("w", encoding="utf-8") as profile_file:
         for sample in samples:
             image_path = _image_path(sample, args.image_dir)
             image = Image.open(image_path).convert("RGB")
+            started_wall_ns = time.time_ns()
             started = time.perf_counter()
             if args.backend == "original-node":
                 masks, labels, scores, metadata = predictor.predict(image)
@@ -57,6 +61,8 @@ def main() -> None:
                 "prompt_count": len(prompts),
                 "mask_count": int(len(masks)),
                 "total_ms": total_ms,
+                "started_wall_ns": started_wall_ns,
+                "ended_wall_ns": time.time_ns(),
                 "metadata": metadata,
             }
             profile_file.write(json.dumps(row, separators=(",", ":")) + "\n")
@@ -65,6 +71,20 @@ def main() -> None:
     close = getattr(predictor, "close", None)
     if close is not None:
         close()
+    (args.output_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "backend": args.backend,
+                "frames": len(samples),
+                "prompts": prompts,
+                "model_init_ms": model_init_ms,
+                "sequence_wall_seconds": time.perf_counter() - sequence_started,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 class _OriginalNodePredictor:
