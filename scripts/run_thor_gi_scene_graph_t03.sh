@@ -28,7 +28,9 @@ fi
 
 mkdir -p "$output_dir"
 cp "$repo_dir/sam_backend/scene_graph_ab_recorder.py" "$output_dir/"
+cp "$repo_dir/sam_backend/scene_graph_pose_fixture.py" "$output_dir/"
 cp "$repo_dir/configs/scene_graph_tracking_t01_prompts.json" "$output_dir/prompts.json"
+pose_fixture_sha256=$(sha256sum "$output_dir/scene_graph_pose_fixture.py" | awk '{print $1}')
 
 cleanup() {
     docker stop "$ether_container" >/dev/null 2>&1 || true
@@ -60,37 +62,22 @@ container_output="/workspace/.scene_graph_runs/gi-scene-graph-t03-20260808/$labe
 ros_setup='source /opt/ros/humble/setup.bash; source /workspace/install/setup.bash; export RCUTILS_COLORIZED_OUTPUT=0'
 
 docker exec -d "$ether_container" bash -lc \
-    "$ros_setup; export ETHER_ROBOT_URDF=/root/.ros/ether/robot/urdf/g1_comp_dex1_1.urdf; exec ros2 launch ether_cartographers g1_3d_localization_real.launch.py use_sim_time:=true use_rviz:=false load_state_filename:=/root/.ros/ether/scene/maps/map.pbstream occupancy_map_filename:=/root/.ros/ether/scene/maps/map.yaml >'$container_output/localization.log' 2>&1"
-
-docker exec -d "$ether_container" bash -lc \
     "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/scene_graph_ros_node.py --ros-args -p mode:=online -p category_config_file:='$container_output/prompts.json' -p online_scene_graph_file:='$container_output/final_graph.json' -p detection.confidence_threshold:=0.5 >'$container_output/scene_graph.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
     "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 /workspace/src/scene_graph/src/detection_ros_node.py --ros-args -p config_file_path:='$container_output/prompts.json' -p detection_node.backend:=instinctsam_http -p detection_node.instinctsam_url:=http://127.0.0.1:8767 -p detection_node.instinctsam_timeout:=30.0 -p detection_node.instinctsam_stateful:=$stateful -p detection_node.headless:=true -p detection_node.depth:=camera -p detection.confidence_threshold:=0.5 -p use_sim_time:=true >'$container_output/detection.log' 2>&1"
 
 docker exec -d "$ether_container" bash -lc \
-    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; exec python3 '$container_output/scene_graph_ab_recorder.py' --output-dir '$container_output' --label '$label' --sample-period 5.0 >'$container_output/recorder.log' 2>&1"
+    "$ros_setup; export PYTHONPATH=/workspace/src/scene_graph/src:\${PYTHONPATH}; echo \$\$ >'$container_output/recorder.pid'; exec python3 '$container_output/scene_graph_ab_recorder.py' --output-dir '$container_output' --label '$label' --sample-period 5.0 >'$container_output/recorder.log' 2>&1"
+
+docker exec -d "$ether_container" bash -lc \
+    "$ros_setup; exec python3 '$container_output/scene_graph_pose_fixture.py' >'$container_output/pose_fixture.log' 2>&1"
 
 sleep 5
 
-# Starting mid-bag skips the transient static transforms recorded near offset
-# zero. All consumers are alive here, so replay only /tf_static once before the
-# measured interval; do not publish /clock during this warmup.
-set +e
-docker exec "$ether_container" bash -lc \
-    "$ros_setup; timeout --signal=INT 5s ros2 bag play '$bag_path' --rate 1000 --topics /tf_static --disable-keyboard-controls" \
-    >"$output_dir/tf_static_preload.log" 2>&1
-tf_preload_rc=$?
-set -e
-if [[ $tf_preload_rc -ne 0 && $tf_preload_rc -ne 124 && $tf_preload_rc -ne 130 ]]; then
-    echo "static TF preload failed with exit $tf_preload_rc" >&2
-    exit "$tf_preload_rc"
-fi
-sleep 1
-
 python3 -m sam_backend.thor_resources \
     --output "$output_dir/resources.jsonl" \
-    --duration 45 \
+    --duration 35 \
     --interval 1 \
     --container "$runtime_container" \
     --container "$ether_container" \
@@ -101,7 +88,7 @@ resource_pid=$!
 play_started_ns=$(date +%s%N)
 set +e
 docker exec "$ether_container" bash -lc \
-    "$ros_setup; timeout --signal=INT 30s ros2 bag play '$bag_path' --rate 1.0 --clock 100 --start-offset 145.3 --disable-keyboard-controls" \
+    "$ros_setup; timeout --signal=INT 30s ros2 bag play '$bag_path' --rate 1.0 --clock 100 --start-offset 145.3 --topics /d435/color/image_raw_jpeg /d435/aligned_depth_to_color/image_raw /d435/color/camera_info --disable-keyboard-controls" \
     >"$output_dir/bag_play.log" 2>&1
 bag_rc=$?
 set -e
@@ -111,22 +98,29 @@ if [[ $bag_rc -ne 0 && $bag_rc -ne 124 && $bag_rc -ne 130 ]]; then
     exit "$bag_rc"
 fi
 
-sleep 10
+sleep 3
 wait "$resource_pid"
 
-docker exec "$ether_container" pkill -INT -f '[s]cene_graph_ab_recorder.py' || true
-sleep 3
+recorder_pid=$(<"$output_dir/recorder.pid")
+docker exec "$ether_container" kill -INT "$recorder_pid" || true
+for _ in $(seq 1 10); do
+    [[ -f "$output_dir/recorder_summary.json" ]] && break
+    sleep 1
+done
+if [[ ! -f "$output_dir/recorder_summary.json" ]]; then
+    echo "recorder did not write its summary" >&2
+    exit 1
+fi
 curl --silent --show-error --fail --max-time 3 \
     http://127.0.0.1:8767/status.json >"$output_dir/runtime_final_status.json"
 docker logs --since "$runtime_log_since" "$runtime_container" >"$output_dir/runtime.log" 2>&1
 
-printf '{\n  "label": "%s",\n  "stateful": %s,\n  "runtime_started_ns": %s,\n  "runtime_ready_ns": %s,\n  "runtime_startup_seconds": %.6f,\n  "tf_static_preload_exit_code": %s,\n  "play_started_ns": %s,\n  "play_ended_ns": %s,\n  "play_wall_seconds": %.6f,\n  "bag_exit_code": %s,\n  "bag_start_offset_seconds": 145.3,\n  "requested_play_seconds": 30.0,\n  "scene_graph_commit": "46673c6",\n  "runtime_overlay_sha256": "c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd"\n}\n' \
+printf '{\n  "label": "%s",\n  "stateful": %s,\n  "runtime_started_ns": %s,\n  "runtime_ready_ns": %s,\n  "runtime_startup_seconds": %.6f,\n  "play_started_ns": %s,\n  "play_ended_ns": %s,\n  "play_wall_seconds": %.6f,\n  "bag_exit_code": %s,\n  "bag_start_offset_seconds": 145.3,\n  "requested_play_seconds": 30.0,\n  "scene_graph_commit": "46673c6",\n  "pose_fixture_sha256": "%s",\n  "runtime_overlay_sha256": "c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd"\n}\n' \
     "$label" "$stateful" "$runtime_started_ns" "$runtime_ready_ns" \
     "$(awk -v a="$runtime_started_ns" -v b="$runtime_ready_ns" 'BEGIN {print (b-a)/1000000000}')" \
-    "$tf_preload_rc" \
     "$play_started_ns" "$play_ended_ns" \
     "$(awk -v a="$play_started_ns" -v b="$play_ended_ns" 'BEGIN {print (b-a)/1000000000}')" \
-    "$bag_rc" >"$output_dir/run_metadata.json"
+    "$bag_rc" "$pose_fixture_sha256" >"$output_dir/run_metadata.json"
 
 cleanup
 trap - EXIT
