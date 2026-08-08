@@ -29,6 +29,7 @@ def main() -> None:
         def __init__(self) -> None:
             super().__init__("compressed_frame_extractor")
             self.rows: list[dict[str, Any]] = []
+            self.done = False
             self.started_wall_ns = time.time_ns()
             qos = QoSProfile(depth=100)
             qos.reliability = ReliabilityPolicy.RELIABLE
@@ -53,7 +54,7 @@ def main() -> None:
                 }
             )
             if len(self.rows) == args.count:
-                rclpy.shutdown()
+                self.done = True
 
         def close(self) -> None:
             manifest = args.output_dir / "manifest.jsonl"
@@ -89,10 +90,13 @@ def main() -> None:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     try:
-        rclpy.spin(extractor)
+        while rclpy.ok() and not extractor.done:
+            rclpy.spin_once(extractor, timeout_sec=0.1)
     finally:
         extractor.close()
         extractor.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
     if len(extractor.rows) != args.count:
         raise RuntimeError(f"extracted {len(extractor.rows)} frames, expected {args.count}")
