@@ -37,7 +37,8 @@ modified by these experiments.
 | --- | --- | --- | --- |
 | T01 | Does GI become useful when five prompts are initialized once and tracked, with grounding only every 30 frames? | Complete | Partial pass: tracking is useful, but 4.17x missed the 5x gate |
 | T02 | How much latency can a mask-only/headless API remove without changing model output? | Complete | Pass: 23.8% lower tracking p50 with bitwise-identical outputs |
-| T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | T03a preflight invalid; T03b designed | Isolate detector scheduling from localization nondeterminism |
+| T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | Complete | Partial pass: 2.72x throughput; complete-publication p95 missed by 72.7 ms |
+| T04 | Can 1 cm voxel aggregation remove redundant 3D JSON points without changing graph geometry? | Designed; execution pending | Authorized by T03 publication tail |
 
 ## T01: Five-Prompt Keyframe Detection and Tracking
 
@@ -552,8 +553,97 @@ conditions. Do not reinterpret a failed gate after viewing results.
 
 ### Results
 
-Formal execution is pending. Preserved preflights excluded from all T03
-metrics:
+T03b completed both controlled conditions with identical input: 866 camera
+messages, 866 fixture poses, the same first/last source timestamps, and
+29.25557376 source seconds. The fixture SHA-256 was
+`f703f906a5dc8730220bc61ad7a64b81e478b8f76174e2f73e19a4c42caa0460`.
+The T02 runtime overlay SHA-256 remained
+`c6685227317c6698e4cd56f2ba1ba28905cb756ba182d61fb3af96192d703efd`.
+
+#### Speed and scheduling
+
+| Metric | SG5-S stateless | SG5-T30 stateful |
+| --- | ---: | ---: |
+| Runtime startup | 59.42 s | 59.34 s |
+| Detector calls | 33 | 88 |
+| Completed full frames | 32 | 87 |
+| Completed frames / source-second | 1.094 | 2.974 |
+| Full-frame p50 / p95 | 815.8 / 1,176.4 ms | 198.0 / 617.3 ms |
+| HTTP p50 | 667.5 ms | 153.5 ms tracking-only |
+| Tracking runtime-process p50 / p95 | n/a | 131.7 / 156.1 ms |
+| Busy synchronized callbacks | 825 / 857 | 770 / 857 |
+
+Stateful scheduling completed 2.71875x as many full frames. It initialized
+prompts once and refreshed at exactly zero-based accepted indices 0, 30, and
+60; the other 85 calls were tracking-only. The callback continued consuming
+new source timestamps rather than queuing every camera frame.
+
+#### Source-to-publication latency and graph output
+
+| Metric | SG5-S stateless | SG5-T30 stateful |
+| --- | ---: | ---: |
+| Non-empty 3D source frames | 18 | 44 |
+| 3D detection messages | 26 | 79 |
+| Mean gap between non-empty source frames | 1.574 s | 0.448 s |
+| Camera to first 3D p50 / p95 | 1,072.4 / 1,301.6 ms | 452.6 / 991.3 ms |
+| Camera to last 3D p50 / p95 | 1,112.5 / 1,397.3 ms | 452.6 / 1,072.7 ms |
+| Complete-publication latency slope | -22.0 ms/source-s | -32.6 ms/source-s |
+| Final graph nodes / edges | 2 / 0 | 5 / 5 |
+
+Stateful first-publication p95 passed 1.0 s, but the stricter complete-frame
+measurement waits for the final per-object JSON message and missed by 72.7 ms.
+The negative slope and advancing source timestamps show no accumulating stale
+queue. The gap between first and last messages, plus the very large serialized
+per-instance point arrays, motivates T04 rather than shared-memory mask work.
+
+Stateful output contained 54 table, 15 book, and 10 keyboard 3D messages. Its
+final graph contained two keyboards, two books, and one table. These are
+pipeline sanity results under a fixed pose, not semantic accuracy; T01 remains
+the source-aligned mask-agreement experiment.
+
+#### Hardware and capacity
+
+| Resource metric | SG5-S stateless | SG5-T30 stateful |
+| --- | ---: | ---: |
+| Mean / p95 GPU utilization | 48.1% / 91.8% | 33.7% / 96.0% |
+| Mean GPU power | 15.61 W | 15.37 W |
+| Mean system power | 40.24 W | 34.70 W |
+| Maximum GPU temperature | 45 C | 47 C |
+| Minimum Linux `MemAvailable` | 82.61 GiB | 82.63 GiB |
+| Mean Docker working set | 11.11 GiB | 11.09 GiB |
+| Mean NVIDIA process memory | 8.77 GiB | 8.73 GiB |
+
+The resident-memory footprint is essentially unchanged by scheduling. Thor
+retained more than 82 GiB of unified-memory headroom, but both modes still had
+GPU bursts above 90%; co-resident model planning must consider peak compute,
+not only memory capacity.
+
+#### Gate decision
+
+| Gate | Result |
+| --- | --- |
+| At least 2x completed full frames | Pass: 2.71875x |
+| Complete-publication p50 below 500 ms | Pass: 452.6 ms |
+| Complete-publication p95 below 1.0 s | Fail: 1,072.7 ms |
+| Latency slope at most 10 ms/source-s | Pass: -32.6 ms/source-s |
+| Refresh cadence exact | Pass: 0, 30, 60 |
+| Non-empty 3D output and graph | Pass: 44 frames, 5 nodes |
+| No pipeline traceback | Pass |
+| Below 80 C and at least 32 GiB available | Pass |
+
+T03 is a strict partial pass: eight of nine gates passed. Stateful GI is the
+correct integration mode and substantially improves throughput, but the 3D
+publication tail remains above the pre-registered limit. The runtime reports a
+post-playback external-frame idle timeout after the player stops; it occurs
+after all measured calls and is not a playback restart.
+
+Full generated report and figures:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-scene-graph-t03-20260808/report-t03b/
+```
+
+Preserved preflights excluded from all T03 metrics:
 
 - `sg5-stateless-missing-urdf`: the first control runner did not pass
   `ETHER_ROBOT_URDF` into a freshly started Ether container. Localization
@@ -600,3 +690,65 @@ metrics:
   sourced, all three state tests passed: one stateful initialization, per-frame
   stateless initialization, and reinitialization after an injected HTTP
   failure.
+
+- `report-matplotlib-keyword`: the first report generation wrote its JSON and
+  Markdown, then Thor's older Matplotlib rejected the newer `tick_labels`
+  keyword. The compatible rerun uses `labels`; this changed no measurements.
+
+## T04: Voxel-Compressed 3D Detection Transport
+
+### Question and hypothesis
+
+Each non-empty instance currently serializes every masked depth pixel as nested
+JSON floats. Scene Graph immediately compresses those points into 1 cm voxels
+in `GeometryBuilder`, so the transport performs substantial redundant JSON
+formatting, copying, DDS serialization, parsing, and NumPy allocation.
+
+T04 tests whether performing the same 1 cm aggregation before publication can
+bring complete source-to-last-3D p95 below 1.0 s while preserving the exact
+geometry consumed by Scene Graph.
+
+### Fixed control and allowed change
+
+- Reuse the formal T03b `SG5-T30` run as the dense-point control.
+- Run one fresh `SG5-T30-V01` condition with the same bag, pose fixture,
+  prompts, threshold, refresh cadence, headless runtime, and resource sampling.
+- Add opt-in `detection_node.instance_point_voxel_size`, default `0.0` so
+  existing behavior is unchanged. T04 sets it to `0.01` m.
+- Compute world-frame bounding-box position and size from the full point set.
+  Only then group points using the same integer voxel index rule as downstream
+  `GeometryBuilder` and transmit each voxel's mean point.
+- Record raw point count, transmitted point count, JSON bytes, and publication
+  time. No mask, confidence, association, graph, or runtime code may change.
+
+### Geometry verification
+
+Before the live run, replay every dense T03b stateful detection through the new
+aggregation helper. For each message, compare the downstream 1 cm voxel cell
+keys and per-cell mean against direct `GeometryBuilder`-equivalent compression
+of the full points. Position and size fields must remain computed from the full
+cloud. This is a transport/geometry test, not segmentation mIoU.
+
+### Pre-registered gates
+
+T04 passes only if:
+
+1. complete source-to-last-3D p95 is below 1.0 s and at least 10% below T03b's
+   1,072.7 ms;
+2. total 3D JSON bytes and transmitted point count are each at least 50% lower;
+3. offline voxel cell keys are identical for every T03b stateful detection and
+   maximum per-cell mean error is at most `1e-5` m;
+4. it completes at least 87 full frames, preserves exact R30 cadence, produces
+   at least 40 non-empty 3D source frames and a non-empty graph, with no
+   pipeline traceback;
+5. it remains below 80 C and retains at least 32 GiB `MemAvailable`.
+
+Planned artifact directory:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-scene-graph-t04-20260808/
+```
+
+### Results
+
+Pending execution.
