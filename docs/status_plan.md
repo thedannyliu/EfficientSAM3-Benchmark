@@ -1,6 +1,6 @@
 # Status and Plan
 
-Last updated: 2026-08-08.
+Last updated: 2026-08-11.
 
 ## Current Status
 
@@ -22,9 +22,20 @@ Last updated: 2026-08-08.
   the live run produced 32 non-empty 3D source frames versus the pre-registered
   minimum of 40, so the change remains opt-in and development-only pending a
   paired-frame quality check.
+- T05 replaced five serialized GI grounding calls with one native five-text
+  batch. It preserved masks and teacher agreement while reducing every-frame
+  client p50 from 818.5 to 607.3 ms, but remained slower than Original's
+  498.2 ms.
+- T06 added an isolated detector-only R1 path. Its 459.8 ms p50 was 7.7% below
+  Original and it reduced model memory, power, and CPU, but Original-teacher
+  mIoU/recall fell from 0.6012/0.6231 to 0.3542/0.3647 after temporal object
+  retention was removed. It remains evaluation-only.
+- T07 screened the same detector-only path at input 768. P50 fell to 394.0 ms,
+  but ten-frame teacher mIoU/recall declined further, so the run stopped before
+  a formal 100-frame condition.
 - Detailed designs, failed preflights, commands, hardware measurements, gates,
-  and decisions are in `docs/gi_tracking_experiments.md`. Raw T03/T04 artifacts
-  and checksums are stored under
+  and decisions are in `docs/gi_tracking_experiments.md`. Raw T01-T07 artifacts,
+  reports, plots, and checksums are stored under
   `/mnt/nas/danny/thor-scene-graph/run-artifacts/`.
 
 - Repo tracks benchmark code, ROS wrappers, scripts, configs, and lightweight tests only.

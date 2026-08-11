@@ -39,6 +39,9 @@ modified by these experiments.
 | T02 | How much latency can a mask-only/headless API remove without changing model output? | Complete | Pass: 23.8% lower tracking p50 with bitwise-identical outputs |
 | T03 | Can Scene Graph preserve GI tracker state and consume live camera input without accumulating stale frames? | Complete | Partial pass: 2.72x throughput; complete-publication p95 missed by 72.7 ms |
 | T04 | Can 1 cm voxel aggregation remove redundant 3D JSON points without changing graph geometry? | Complete | Partial pass: transport and latency gates passed; non-empty 3D frame gate failed |
+| T05 | Can GI batch all text prompts in one grounding call and make every-frame five-prompt detection faster than Original SAM3.1? | Complete | Partial pass: batching cut p50 25.8%, but 607.3 ms remained slower than Original |
+| T06 | Can an R1 detector-only GI path remove redundant tracker work and beat Original O5 end to end? | Complete | Partial pass: 459.8 ms beat Original, but teacher agreement dropped substantially |
+| T07 | Can 768-input batched detector-only inference improve both T06 speed and teacher agreement? | Complete | Fail: 394.0 ms was faster, but both teacher metrics declined |
 
 ## T01: Five-Prompt Keyframe Detection and Tracking
 
@@ -863,4 +866,425 @@ Raw condition, geometry check, generated report, and figures:
 
 ```text
 /mnt/nas/danny/thor-scene-graph/run-artifacts/gi-scene-graph-t04-20260808/
+```
+
+## T05: Batched Multi-Text GI Grounding
+
+### Question and hypothesis
+
+The delivered GI application currently encodes each configured text label
+separately and calls `det.forward_grounding` once per label. It shares the
+high-resolution image features, but five labels still produce five serialized
+grounding-head invocations. Original SAM3.1 instead maps all text IDs to one
+image and performs one batched grounding call.
+
+T05 tests whether the GI detector supports the same native multi-text shape.
+The hypothesis is that replacing five Python-level grounding invocations with
+one batched invocation will remove enough repeated decoder and synchronization
+work for GI every-frame detection to beat the existing Original O5 operating
+point. The TensorRT image-trunk engines remain unchanged because their batch is
+one image; only the downstream text/grounding batch changes.
+
+### Allowed change and isolation
+
+- Copy the T02 headless Python overlay to a new T05 overlay on restricted NAS.
+- Add an opt-in `batched` text-grounding mode while preserving `sequential` as
+  the default and fallback.
+- In batched mode, call `forward_text(labels)` once, construct a `FindStage`
+  with `img_ids=zeros(N)` and `text_ids=arange(N)`, request `N` dummy prompts,
+  and call `forward_grounding` once.
+- Parse the leading prompt dimension independently, preserving the existing
+  per-label mask-IoU NMS, cross-label NMS, thresholds, labels, scores, and
+  `max_objects` behavior.
+- Do not modify the stable Scene Graph checkout, Docker image layers, supplied
+  TensorRT engines, GI checkpoints, or Meta SAM source.
+- Keep the proprietary overlay and all runtime artifacts off GitHub. Git tracks
+  only our experiment design, benchmark/report tooling, and lightweight tests.
+
+This is source-level evaluation under the supplied non-production license. It
+does not decompile or reverse engineer a TensorRT engine.
+
+### Fixed input and conditions
+
+Reuse T01's immutable 100-frame Lifestyle Lab input, frame order, JPEG bytes,
+timestamps, and SHA-256 manifest. Reuse the fixed prompt order:
+
+```text
+keyboard
+table
+book
+computer desk
+stool
+```
+
+Use GI threshold `0.5`, detection cadence R1, tracking input 768, detection
+input 1152, FP16 TensorRT trunks, headless API output, and `max_objects=24`.
+Run conditions serially from fresh containers so they never contend for the
+GPU.
+
+| ID | Detector | Prompt execution | Purpose |
+| --- | --- | --- | --- |
+| O5 | Original SAM3.1 | One native five-text batch per independent image | Fixed target and teacher from T01 |
+| G5-S-R1 | GI T02 | Five sequential grounding calls per detection frame | Existing GI control from T01 |
+| G5-B-R1 | GI T05 | One five-text grounding call per detection frame | Batched candidate |
+
+Before the formal run, execute bounded shape/parity checks:
+
+1. one prompt, one fixed frame: sequential versus batched;
+2. five prompts, one fixed frame: validate output tensor shapes and labels;
+3. five prompts, ten frames: screen latency, stability, and memory;
+4. proceed to all 100 frames only after the candidate completes without a
+   traceback, NaN, CUDA error, or missing label dimension.
+
+Failed preflights remain under `failed-attempts/` and are not mixed into formal
+metrics.
+
+### Measurements
+
+Speed:
+
+- prompt encoding time, reported separately from per-frame warm latency;
+- image backbone and high-resolution detector-feature time;
+- grounding-only time and complete runtime `detect_ms`;
+- HTTP/client latency and 100-frame wall time/effective FPS;
+- initialization and first-frame latency, but no container/model startup in
+  warm distributions;
+- p50, p90, p95, mean, standard deviation, minimum, and maximum.
+
+Output and quality:
+
+- N=1 masks, labels, scores, and counts against sequential GI;
+- per-label directed instance IoU and recall at IoU 0.5 against G5-S-R1;
+- teacher agreement against O5, explicitly not ground-truth accuracy;
+- non-empty-frame rate, detections per label, lost-object rate, and NMS output
+  count;
+- representative overlays/contact sheets from identical source frames.
+
+Hardware and capacity:
+
+- GPU utilization distribution and active-process GPU memory;
+- Linux `MemAvailable`, Docker working set, and summed container CPU;
+- GPU/system power and GPU temperature;
+- peak allocated and reserved CUDA memory where the runtime exposes them.
+
+### Pre-registered gates
+
+T05's primary speed gate is deliberately end-to-end at the detector boundary:
+
+```text
+G5-B-R1 client-visible p50 < Original O5 p50 (498.2 ms)
+```
+
+It must also improve client-visible p50 by at least 20% relative to G5-S-R1,
+complete all 100 frames without a restart, and use exactly one grounding call
+per five-prompt detection frame. Startup and prompt-cache construction do not
+count toward warm per-frame latency.
+
+The quality gate requires N=1 output parity within normal FP16 numerical
+variation, no missing prompt dimension at N=5, G5-B-R1 teacher recall at IoU
+0.5 no more than `0.02` below G5-S-R1, and mean directed teacher IoU no more
+than `0.02` below G5-S-R1. It must remain below 80 C and retain at least 32 GiB
+of Linux unified-memory headroom.
+
+If the GI text tower or grounding head rejects `N > 1`, record the exact shape
+failure and stop before changing model weights or rebuilding engines. If native
+batching works but misses the speed gate, profile the batched call before
+attempting resolution, query-count, precision, or engine changes; those would
+be separate pre-registered attempts rather than silent changes to T05.
+
+### Planned artifact root
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-batched-grounding-t05-20260811/
+```
+
+Planned layout:
+
+```text
+input/                  # reference or manifest link to immutable T01 input
+gi-sequential-r1/       # existing control metadata or rerun if required
+gi-batched-r1/
+report/
+failed-attempts/
+SHA256SUMS
+```
+
+### Results
+
+The implementation and measurements used
+overlay SHA-256
+`fa872de0550d6227db800c1410cc98cea4935886d0700222667cf1e8da86da30`.
+N=1 and N=5 both completed without a prompt-dimension, CUDA, or TensorRT
+failure. The warmed N=5 single-frame check returned the same four semantic
+instances expected on the first T01 frame: two `table`, one `keyboard`, and one
+`book`.
+
+The pre-registered ten-frame screening run then measured:
+
+| Metric | G5-B-R1 preliminary value |
+| --- | ---: |
+| Frames | 10 |
+| Runtime `detect_ms` mean / p50 | 424.8 / 423.8 ms |
+| Runtime `process_ms` mean / p50 | 590.0 / 581.3 ms |
+| Client-visible mean / p50 | 619.9 / 602.9 ms |
+
+The batched detector calculation itself is already below Original O5's
+498.2 ms client-visible p50, but the complete GI client path is not. Inspection
+shows that R1 still computes the 768-input tracking backbone, propagates prior
+tracker state, and consolidates detection masks into tracker state on every
+frame. Those operations are useful for R30, but redundant for an independent
+every-frame detector comparison. T05 therefore continues through formal parity
+measurement; T06 separately tests removal of this identified non-grounding
+work rather than silently expanding T05.
+
+The formal 100-frame T05 condition completed with exactly one five-text
+grounding call per accepted frame:
+
+| Metric | GI sequential R1 | GI batched+tracker R1 | Change |
+| --- | ---: | ---: | ---: |
+| Client p50 | 818.5 ms | 607.3 ms | -25.8% |
+| Client p95 | 852.8 ms | 642.5 ms | -24.7% |
+| Runtime detect p50 | 579.3 ms | 420.1 ms | -27.5% |
+| Mask observations | 597 | 597 | unchanged |
+| Original-teacher mIoU | 0.6014 | 0.6012 | -0.0002 |
+| Original-teacher recall at IoU 0.5 | 0.6231 | 0.6231 | unchanged |
+
+The N=1 sequential and batched prediction archives were byte-identical. On
+the N=5 first-frame parity check, labels and lost flags were identical, maximum
+score difference was `0.0015922`, mean mask IoU was `0.9999782`, and only two
+pixels differed across four masks.
+
+T05 therefore proves that native prompt batching is correct and materially
+faster, but it fails its primary end-to-end target because 607.3 ms is still
+21.9% above Original O5's 498.2 ms p50. This result authorized T06 without
+changing T05's gate after measurement.
+
+Formal T05 artifacts and checksums:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-batched-grounding-t05-20260811/
+```
+
+## T06: R1 Detector-Only Fast Path
+
+### Question and hypothesis
+
+T05's ten-frame screen reduced five prompt grounding to one call and reached a
+423.8 ms `detect_ms` p50, but client p50 remained 602.9 ms. T06 asks whether a
+strict detector-only operating mode can remove the remaining redundant tracker
+work and make the complete GI request faster than Original O5.
+
+The hypothesis is that a detector invoked on every frame does not need to run
+the 768-input tracking backbone, propagate old objects, initialize a tracker,
+or re-anchor state. The 1152-input TensorRT detector features and one batched
+grounding call are sufficient to return the current frame's masks, labels, and
+scores.
+
+### Allowed change and isolation
+
+- Add an opt-in `--detector-only` mode to a new restricted T06 overlay derived
+  from the checksum-addressed T05 overlay.
+- Require `--text-grounding-mode batched` and `--detect-every 1` in this mode.
+- Transform the input once and run only the 1152 detector trunk plus batched
+  grounding; do not compute the 768 tracker trunk or create/propagate state.
+- Apply the same detector threshold, per-label NMS, cross-label NMS,
+  `max_objects` cap, and detector-mask-to-runtime-mask resampling used when T05
+  seeds a new object.
+- Publish deterministic frame-local IDs and `lost=false`. IDs are explicitly
+  not temporal identities in detector-only mode.
+- Preserve the existing packed-mask HTTP schema so Scene Graph's stateless
+  detector client requires no change.
+- Keep T02/T05 overlays, supplied engines, checkpoints, Docker image layers,
+  and stable Scene Graph unchanged.
+
+### Conditions and fixed input
+
+Use the same immutable T01 input, five prompts, threshold, 1152 detection
+resolution, FP16 engine, headless API, and serial execution as T05.
+
+| ID | Mode | Purpose |
+| --- | --- | --- |
+| O5 | Original SAM3.1 independent per-frame batch | Fixed target and teacher |
+| G5-B-R1 | T05 batched grounding with tracker path | Isolate removed tracker cost |
+| G5-B-D1 | T06 batched detector-only path | Candidate complete request |
+
+Run one-frame output checks first, then ten frames. Proceed to the formal
+100-frame condition only if client-visible p50 is below 498.2 ms and the output
+schema, labels, masks, scores, and frame-to-sequence association remain valid.
+
+### Measurements and gates
+
+Record the same latency, output/teacher-agreement, GPU, memory, CPU, power, and
+temperature fields as T05. In addition, report the time removed by skipping
+the tracker backbone/state path and verify every frame reports detector-only
+mode with zero retained tracker states.
+
+T06 passes only if:
+
+1. 100-frame client-visible p50 is below Original O5's 498.2 ms and at least
+   20% below G5-S-R1;
+2. all frames complete without restart, stale sequence, traceback, or NaN;
+3. teacher recall at IoU 0.5 and mean directed teacher IoU are each no more
+   than `0.02` below the formal T05 batched condition;
+4. the packed-mask API contract is unchanged and IDs are documented as
+   frame-local;
+5. maximum temperature stays below 80 C and Linux `MemAvailable` stays above
+   32 GiB.
+
+If the ten-frame speed screen misses 498.2 ms, stop and profile the 1152 trunk,
+grounding decoder, mask head, and HTTP boundary. Resolution, query count,
+precision, or TensorRT compilation changes require a new attempt and new
+quality gates.
+
+### Planned artifact root
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-detector-only-t06-20260811/
+```
+
+### Results
+
+T06 completed its ten-frame screen and formal 100-frame condition with overlay
+SHA-256
+`c63ff487120afe700ff603083aae8c4d4342e16baf6ed4527d614bfdd74a3c09`.
+Every frame reported `backend=detector_only`, retained zero tracker states, and
+preserved the packed-mask API schema.
+
+#### Speed
+
+| Metric | Original O5 | T05 batched+tracker | T06 detector-only |
+| --- | ---: | ---: | ---: |
+| Client mean | 506.4 ms | 617.5 ms | 460.5 ms |
+| Client p50 | 498.2 ms | 607.3 ms | 459.8 ms |
+| Client p95 | 506.4 ms | 642.5 ms | 473.9 ms |
+| Runtime detect p50 | 497.9 ms | 420.1 ms | 435.0 ms |
+
+T06 is 7.7% lower latency than Original by client p50 and 43.8% lower than the
+original sequential GI R1 condition. The detector-only path removed 147.5 ms
+from T05's client p50 by skipping the 768 tracking backbone, propagation, and
+state consolidation. Its runtime detect p50 is slightly higher than T05
+because T06 consistently uses the intended 1152 detector trunk; the tracker
+path's effective detector resolution depends on its current backend state.
+
+Benchmark NPZ writing is excluded from `total_ms`. The 101.7 s sequence wall
+time includes writing large packed masks to NAS and is therefore not a detector
+throughput metric.
+
+#### Quality
+
+| Directed comparison | Instance mIoU | Recall at IoU 0.5 | Mask observations |
+| --- | ---: | ---: | ---: |
+| Original to GI sequential | 0.6014 | 0.6231 | 597 GI |
+| Original to T05 batched+tracker | 0.6012 | 0.6231 | 597 GI |
+| Original to T06 detector-only | 0.3542 | 0.3647 | 310 GI |
+| T05 batched+tracker to T06 detector-only | 0.4591 | 0.4858 | 310 target |
+
+Batching itself preserved teacher agreement. T06's quality loss comes from
+removing temporal object retention: the detector-only response contains only
+objects detected on the current frame, while the R1 tracker path continues to
+publish previously initialized objects. T06 also emitted no `computer desk` or
+`stool`, as did the GI tracker conditions, and had fewer `table`, `book`, and
+`keyboard` observations than the retained-state conditions.
+
+#### Hardware and capacity
+
+| Resource metric | Original | GI sequential | T05 batched+tracker | T06 detector-only |
+| --- | ---: | ---: | ---: | ---: |
+| Mean GPU utilization | 89.8% | 64.0% | 57.6% | 42.7% |
+| P95 GPU utilization | 97.0% | 96.9% | 97.0% | 97.0% |
+| Mean GPU power | 32.95 W | 22.59 W | 15.43 W | 14.80 W |
+| Mean system power | 74.70 W | 51.44 W | 40.87 W | 39.76 W |
+| Maximum GPU temperature | 52 C | 49 C | 47 C | 45 C |
+| Minimum `MemAvailable` | 87.18 GiB | 82.33 GiB | 84.63 GiB | 86.85 GiB |
+| Mean container working set | 5.57 GiB | 11.41 GiB | 10.32 GiB | 8.70 GiB |
+| Mean NVIDIA process memory | 6.02 GiB | 8.84 GiB | 10.12 GiB | 7.29 GiB |
+| Mean container CPU | 27.5% | 58.9% | 16.6% | 14.8% |
+
+T06 preserved substantial memory and thermal headroom for other onboard
+models, although every condition still reached approximately 97% GPU
+utilization bursts.
+
+#### Decision
+
+T06 passes both speed gates, completion, API, resource, and zero-state gates,
+but fails both pre-registered teacher-agreement gates. It is a strict partial
+pass and must not replace the current stateful integration. T07 tests a single
+configuration variable before considering model-level changes.
+
+Formal report, plots, raw profiles, predictions, telemetry, and checksums:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-detector-only-t06-20260811/
+```
+
+## T07: 768-Input Batched Detector-Only Screen
+
+### Question and hypothesis
+
+T06 consistently uses the supplied 1152-input detection trunk and is faster
+than Original, but its per-frame teacher agreement is much lower than the
+retained-state GI conditions. The first-frame observations also showed that
+the runtime's 768 and 1152 detector feature paths produce materially different
+scores and masks on this sequence.
+
+T07 asks whether using the existing 768-input TensorRT trunk for the same
+batched detector-only path can improve teacher agreement while further lowering
+latency. This is a configuration experiment, not a code change or engine
+rebuild.
+
+### Fixed conditions and allowed change
+
+- Reuse the T06 overlay, five prompts, threshold `0.5`, independent R1 frames,
+  API schema, input manifest, and hardware sampling.
+- Change only detection input from 1152 to 768. Tracking remains disabled.
+- Reuse the existing checksum-addressed 768 FP16 TensorRT engine.
+- Run one warm-up frame, then the same first ten source frames.
+- Compare those ten outputs against the corresponding Original masks and T06
+  1152 outputs before deciding whether to run 100 frames.
+
+### Screen gates
+
+Proceed to 100 frames only if the warmed ten-frame condition:
+
+1. completes with zero tracker states and no error;
+2. keeps client p50 below Original's 498.2 ms;
+3. improves or preserves both teacher mIoU and recall at IoU 0.5 relative to
+   T06 on the same ten frames; and
+4. does not increase GPU memory or temperature beyond T06's formal limits.
+
+The formal quality target remains to close the gap to T05: teacher mIoU and
+recall may be at most `0.02` below T05. If 768 does not materially improve
+quality, stop rather than sweeping resolutions after observing results.
+
+### Planned artifact root
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-detector-only-t07-in768-20260811/
+```
+
+### Results
+
+T07 used the unchanged T06 overlay and the existing 768 FP16 engine. A separate
+warm-up frame was excluded, after which all ten fixed frames completed with
+zero tracker states and no runtime error.
+
+| Ten-frame metric | T06 1152 | T07 768 | Change |
+| --- | ---: | ---: | ---: |
+| Client p50 | 467.4 ms | 394.0 ms | -15.7% |
+| Runtime detect p50 | 439.0 ms | 371.9 ms | -15.3% |
+| Mask observations | 48 | 29 | -39.6% |
+| Original-teacher mIoU | 0.3989 | 0.3463 | -0.0526 |
+| Original-teacher recall at IoU 0.5 | 0.4800 | 0.4400 | -0.0400 |
+
+T07 passed the speed, completion, and zero-state gates but failed both
+pre-registered quality-improvement gates. The lower resolution was 20.9%
+faster than Original's formal p50, but it removed detections and made teacher
+agreement worse. The experiment therefore stopped after ten frames as planned;
+no 100-frame T07 result exists and the configuration is not a candidate for
+integration.
+
+Screen profiles, predictions, telemetry, runtime log, and input subset:
+
+```text
+/mnt/nas/danny/thor-scene-graph/run-artifacts/gi-detector-only-t07-in768-20260811/
 ```
