@@ -7,6 +7,11 @@ This document records the isolated evaluation of General Instinct's
 measure the delivered TensorRT runtime before using it as a candidate detector
 for the Scene Graph pipeline.
 
+For a consolidated explanation of the Docker delivery, two-container boundary,
+public component weights, Original SAM3.1 prompt batching, and the detection
+versus tracking performance distinction, see
+`docs/gi_runtime_delivery_and_performance.md`.
+
 The existing SAM3/SAM3.1 deployment remains the reproducible baseline. Runtime
 integration work must stay on development branches until the compatibility,
 mask-output, accuracy, and ROS interface gates below pass.
