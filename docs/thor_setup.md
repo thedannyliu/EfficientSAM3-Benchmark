@@ -99,7 +99,7 @@ Use it in every Thor terminal:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 If your paths differ, set them before sourcing:
@@ -108,7 +108,7 @@ If your paths differ, set them before sourcing:
 export THOR_VENV=/path/to/venv
 export SAM3_SOURCE=/path/to/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 ## 4. Install Python Dependencies
@@ -121,7 +121,7 @@ packages unexpectedly:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m pip install -U pip
 python -m pip install "numpy>=1.26,<2" opencv-python-headless pillow pyyaml huggingface_hub
@@ -142,7 +142,7 @@ python -c "import cv2, rclpy, cv_bridge, torch, sam3, sam_backend; print('ok', t
 If NumPy was accidentally upgraded to 2.x:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 python -m pip install --force-reinstall "numpy>=1.26,<2"
 python -m pip install -e . --no-deps
 ```
@@ -150,7 +150,7 @@ python -m pip install -e . --no-deps
 ## 5. Hugging Face and Local Inputs
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 hf auth login
 hf auth whoami
 ```
@@ -177,7 +177,7 @@ results.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 mkdir -p results/thor_pipeline_smoke overlays/thor_pipeline_smoke
 
 python -m sam_backend.thor_pipeline_smoke \
@@ -197,7 +197,7 @@ head results/thor_pipeline_smoke/null-test1.jsonl
 ls -lh overlays/thor_pipeline_smoke/null-test1.mp4
 ```
 
-Do not run `scripts/run_pace_thor_pipeline_smoke.sh` on Thor. That wrapper is
+Do not run `scripts/pace/run_pace_thor_pipeline_smoke.sh` on Thor. That wrapper is
 PACE-specific and calls `module load`.
 
 ## 7. EfficientSAM3 Performance Profiling
@@ -209,7 +209,7 @@ Run `test1`:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 mkdir -p results overlays
 
 python -m sam_backend.profile_video \
@@ -265,7 +265,7 @@ Preferred summary command:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m sam_backend.summarize_results results \
   --output results/benchmark_summary.csv \
@@ -280,7 +280,7 @@ Manual one-off summary:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python - <<'PY'
 import csv
@@ -353,7 +353,7 @@ Run SAM3 with `prompt=cats`:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 mkdir -p results/image_checks overlays/image_checks
 
 python -m sam_backend.profile_image \
@@ -505,14 +505,14 @@ python3 -c "import rclpy, sensor_msgs, std_msgs; print('ros ok')"
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -c "import cv2, rclpy, cv_bridge, torch, sam3, sam_backend; print('ros python ok')"
 
 cd ros_ws
 colcon build --symlink-install
 cd ..
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Check the ROS entrypoint:
@@ -527,7 +527,7 @@ It may show:
 #!/usr/bin/python3
 ```
 
-That is acceptable when `scripts/source_thor_ros_env.sh` has been sourced,
+That is acceptable when `scripts/thor/source_thor_ros_env.sh` has been sourced,
 because it adds the venv site-packages and EfficientSAM3 source to `PYTHONPATH`.
 
 ## 13. ROS Video Pipeline from a Real Video File
@@ -547,7 +547,7 @@ videos/test1.mov -> /image -> sam_backend_node -> /sam/result_json
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 
 ros2 run sam_benchmark_ros video_stream_node --ros-args \
@@ -572,7 +572,7 @@ message flow and overlay recording:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
@@ -637,7 +637,7 @@ Replace the LiteText checkpoint path with the local filename you downloaded.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 
 ros2 topic echo /sam/result_json
@@ -650,7 +650,7 @@ Each message should contain fields such as `latency_ms`, `mask_count`,
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 
 ros2 run sam_benchmark_ros result_recorder_node --ros-args \
@@ -664,7 +664,7 @@ ros2 run sam_benchmark_ros result_recorder_node --ros-args \
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 
 ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
@@ -760,7 +760,7 @@ You are running a PACE script on Thor. Do not use scripts that call
 Downgrade NumPy in the Thor venv:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 python -m pip install --force-reinstall "numpy>=1.26,<2"
 python -m pip install -e . --no-deps
 ```
@@ -771,7 +771,7 @@ Use the unified environment script in that terminal:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 python -c "import torch, sam3, sam_backend; print('ok')"
 ```
 
@@ -813,7 +813,7 @@ The benchmark adapter disables EfficientTAM image encoder compile by passing
 repo after pulling the fix:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 python -m pip install -e . --no-deps
 ```
 

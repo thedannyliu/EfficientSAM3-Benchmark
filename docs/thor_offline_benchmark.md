@@ -42,7 +42,7 @@ python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m pip install -U pip
 
@@ -66,7 +66,7 @@ If your paths differ, set them before sourcing:
 export THOR_VENV=/path/to/venv
 export SAM3_SOURCE=/path/to/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Install repo dependencies without replacing the already installed Jetson PyTorch
@@ -88,8 +88,8 @@ same venv. Re-check `torch.cuda.is_available()` after any dependency change.
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
-bash scripts/setup_model_repos.sh
+source scripts/thor/source_thor_ros_env.sh
+bash scripts/setup/setup_model_repos.sh
 ```
 
 This creates ignored editable checkouts under `external/`:
@@ -108,15 +108,15 @@ external/MobileSAM
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
-bash scripts/download_sam3_checkpoint.sh
-bash scripts/download_efficientsam3_checkpoints.sh
-bash scripts/download_instinctsam_vitb_checkpoint.sh
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
-bash scripts/download_sam2_distill_tinyvit_init_weights.sh
-bash scripts/check_storage_budget.sh 300 data checkpoints external
+bash scripts/data/download_sam3_checkpoint.sh
+bash scripts/data/download_efficientsam3_checkpoints.sh
+bash scripts/data/download_instinctsam_vitb_checkpoint.sh
+bash scripts/data/download_sam2_family_checkpoints.sh
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh
+bash scripts/data/download_sam2_distill_tinyvit_init_weights.sh
+bash scripts/data/check_storage_budget.sh 300 data checkpoints external
 ```
 
 Expected key files:
@@ -144,7 +144,7 @@ checkpoints/efficientsam3_ft/efficient_sam3_tinyvit21_stage1_e32_h200_full_sam3.
 COCO fixed10 image benchmark:
 
 ```bash
-bash scripts/prepare_coco_fixed_subset.sh 10
+bash scripts/data/prepare_coco_fixed_subset.sh 10
 ```
 
 Outputs:
@@ -158,7 +158,7 @@ configs/datasets/coco_val2017_fixed10_prompts.json
 SA-V fixed10 video/frame benchmark:
 
 ```bash
-bash scripts/prepare_sav_fixed10_subset.sh
+bash scripts/data/prepare_sav_fixed10_subset.sh
 ```
 
 Outputs:
@@ -171,7 +171,7 @@ data/manifests/sav_val_fixed10_selection.json
 For visually clearer demos, also prepare the salient SA-V subset:
 
 ```bash
-bash scripts/prepare_sav_salient_subset.sh
+bash scripts/data/prepare_sav_salient_subset.sh
 ```
 
 Keep `data/`, `checkpoints/`, and `external/` under the agreed 300 GiB cap.
@@ -182,10 +182,10 @@ weights halfway through a run:
 
 ```bash
 PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=0 YOLO_PRESET=quick EVAL_MODE=profile \
-  bash scripts/run_thor_yolo_coco_suite.sh --dry-run
+  bash scripts/thor/run_thor_yolo_coco_suite.sh --dry-run
 ```
 
-`PREPARE_COCO=1` calls `scripts/prepare_coco_fixed_subset.sh`, which downloads
+`PREPARE_COCO=1` calls `scripts/data/prepare_coco_fixed_subset.sh`, which downloads
 COCO val2017/images plus annotations if needed and writes
 `data/manifests/coco_val2017_fixed${COCO_COUNT}.jsonl`. The default
 `COCO_COUNT` is `10`.
@@ -261,7 +261,7 @@ or box prompt.
 
 InstinctSAM ViT-B is published as ViT-B vision-encoder weights at
 `https://huggingface.co/GM717/InstinctSAM-ViT-B`, not as a standalone full SAM3
-checkpoint. `scripts/download_instinctsam_vitb_checkpoint.sh` downloads the
+checkpoint. `scripts/data/download_instinctsam_vitb_checkpoint.sh` downloads the
 released trunk to `checkpoints/instinctsam/`, then builds
 `checkpoints/instinctsam/instinctsam_vitb_concept.pt` from the local SAM3
 teacher heads and the downloaded MobileCLIP-S1 EfficientSAM3 checkpoint. Run it
@@ -337,7 +337,7 @@ Fastest smoke run, starting from the smallest models:
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=1 YOLO_PRESET=quick \
-  bash scripts/run_thor_yolo_coco_suite.sh
+  bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 The quick preset runs:
@@ -351,7 +351,7 @@ To include the small/medium models after the smoke run:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
-LIMIT=0 YOLO_PRESET=small bash scripts/run_thor_yolo_coco_suite.sh
+LIMIT=0 YOLO_PRESET=small bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 Run every YOLOE segmentation variant plus all YOLO11 segmentation baselines:
@@ -359,7 +359,7 @@ Run every YOLOE segmentation variant plus all YOLO11 segmentation baselines:
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=0 YOLO_PRESET=all \
-  bash scripts/run_thor_yolo_coco_suite.sh
+  bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 The `small` preset runs the quick models plus `yoloe_11s_seg`,
@@ -455,7 +455,7 @@ Use lower confidence while debugging open-vocabulary localization:
 
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
-LIMIT=1 YOLO_PRESET=quick CONF=0.05 bash scripts/run_thor_yolo_coco_suite.sh
+LIMIT=1 YOLO_PRESET=quick CONF=0.05 bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 Run a single model directly:
@@ -484,7 +484,7 @@ the SAM-family COCO suite, and then writes a single comparison CSV:
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
   SAM_MODELS="sam3 es3p1_weak_image_weak_text sam2p1_hiera_tiny efficient_sam2p1_hiera_tiny mobilesam_vit_t" \
-  bash scripts/run_thor_coco_all_benchmarks.sh
+  bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 After the smoke run, run the full matrix. This includes all YOLOE-seg sizes,
@@ -496,7 +496,7 @@ available:
 ```bash
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=0 YOLO_PRESET=all \
-  bash scripts/run_thor_coco_all_benchmarks.sh
+  bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 Important outputs:
@@ -520,13 +520,13 @@ Optional model subsets are space-separated:
 ```bash
 YOLO_MODELS="yoloe_26n_seg yolo11n_seg" \
 SAM_MODELS="sam3 sam2p1_hiera_tiny mobilesam_vit_t" \
-LIMIT=1 YOLO_PRESET=all bash scripts/run_thor_coco_all_benchmarks.sh
+LIMIT=1 YOLO_PRESET=all bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 Use `DRY_RUN=1` to verify the expanded command matrix without loading models:
 
 ```bash
-DRY_RUN=1 YOLO_PRESET=quick LIMIT=1 bash scripts/run_thor_coco_all_benchmarks.sh
+DRY_RUN=1 YOLO_PRESET=quick LIMIT=1 bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 ## 9. Run A Smaller Image Sanity Check
@@ -586,7 +586,7 @@ cd ~/EfficientSAM3-Benchmark
 export THOR_VENV=/path/to/venv
 export SAM3_SOURCE=/path/to/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Expected checkpoint/source roots:
@@ -666,7 +666,7 @@ git clone git@github.com:thedannyliu/SAM2-Distillation-Pipeline.git external/SAM
 If that repo already exists somewhere else on Thor, pass it explicitly:
 
 ```bash
-SAM2D_PIPELINE=/home/ril-thor/SAM2-Distillation-Pipeline bash scripts/run_thor_formal_smoke_matrix.sh
+SAM2D_PIPELINE=/home/ril-thor/SAM2-Distillation-Pipeline bash scripts/thor/run_thor_formal_smoke_matrix.sh
 ```
 
 The Stage1 TinyViT checkpoints are resolved by the SAM2-Distillation-Pipeline
@@ -716,7 +716,7 @@ The Stage1 loader also needs the original TinyViT initialization weights:
 These are public timm TinyViT initialization weights. Download them on Thor:
 
 ```bash
-bash scripts/download_sam2_distill_tinyvit_init_weights.sh
+bash scripts/data/download_sam2_distill_tinyvit_init_weights.sh
 ```
 
 If you want to keep the checkpoints in the original
@@ -733,7 +733,7 @@ TV5_MSE_COS=/path/to/tv5m_mse_cos/checkpoints/best.pt \
 TINYVIT21_CKPT=/path/to/tiny_vit_21m_512.dist_in22k_ft_in1k.safetensors \
 TINYVIT11_CKPT=/path/to/tiny_vit_11m_224.dist_in22k_ft_in1k.safetensors \
 TINYVIT5_CKPT=/path/to/tiny_vit_5m_224.dist_in22k_ft_in1k.safetensors \
-bash scripts/run_thor_formal_smoke_matrix.sh
+bash scripts/thor/run_thor_formal_smoke_matrix.sh
 ```
 
 Those Stage1 rows are included in the smoke and full benchmark:
@@ -750,14 +750,14 @@ then writes a single total summary CSV:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 SAV_ROOT=data/sa-v/sav_test \
 SA1B_ROOT=data/sa1b/extracted_two_tar \
 SA1B_IMAGE_ROOT=data/sa1b/extracted_two_tar \
 RUN_ID="${RUN_ID}" \
-bash scripts/run_thor_formal_smoke_matrix.sh
+bash scripts/thor/run_thor_formal_smoke_matrix.sh
 ```
 
 Smoke outputs:
@@ -795,14 +795,14 @@ videos and a deterministic 1000-image SA1B sample:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 SAV_ROOT=data/sa-v/sav_test \
 SA1B_ROOT=data/sa1b/extracted_two_tar \
 SA1B_IMAGE_ROOT=data/sa1b/extracted_two_tar \
 RUN_ID="${RUN_ID}" \
-bash scripts/run_thor_formal_full_matrix.sh
+bash scripts/thor/run_thor_formal_full_matrix.sh
 ```
 
 Formal full outputs:
@@ -844,7 +844,7 @@ OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
 MAX_VIDEOS=0 \
 MAX_IMAGE_OBJECTS=0 \
 NUM_EVAL_PROCESSES=4 \
-bash scripts/run_thor_sam2_distill_sav_suite.sh sam2
+bash scripts/thor/run_thor_sam2_distill_sav_suite.sh sam2
 ```
 
 Run official EdgeTAM and `tv21m_mse_cos_edgetam`:
@@ -855,7 +855,7 @@ OUT_ROOT="results/thor/offline/sav_test_sam2_distill/${RUN_ID}" \
 MAX_VIDEOS=0 \
 MAX_IMAGE_OBJECTS=0 \
 NUM_EVAL_PROCESSES=4 \
-bash scripts/run_thor_sam2_distill_sav_suite.sh edgetam
+bash scripts/thor/run_thor_sam2_distill_sav_suite.sh edgetam
 ```
 
 The wrapper creates `<OUT_ROOT>/prepared_sav_test_links/` with symlinks and a
@@ -918,7 +918,7 @@ metadata-referenced image files.
 SA1B_ROOT=/path/to/sa1b_two_tar_extracted \
 SA1B_IMAGE_ROOT=/path/to/sa1b_two_tar_extracted \
 SA1B_COUNT=100 \
-bash scripts/prepare_sa1b_fixed_subset.sh
+bash scripts/data/prepare_sa1b_fixed_subset.sh
 ```
 
 Run the image suite for the non-Stage1 rows:
@@ -928,7 +928,7 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 SA1B_COUNT=100 \
 MODELS="sam3 instinctsam_vitb sam2p1_hiera_large sam2p1_hiera_base_plus official_edgetam efficienttam_ti efficienttam_s mobilesam_vit_t sam1_vit_h" \
 LIMIT=0 \
-bash scripts/run_thor_sa1b_image_benchmarks.sh
+bash scripts/thor/run_thor_sa1b_image_benchmarks.sh
 ```
 
 Primary output:
@@ -1107,14 +1107,14 @@ format used by `sa1b_sam_family`:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 RUN_ID="<formal_full_run_id>"
 RUN_ID="${RUN_ID}" \
 SAV_ROOT=data/sa-v/sav_test \
 SAV_IMAGE_COUNT=1000 \
 MODELS="mobilesam_vit_t sam1_vit_l sam3" \
-bash scripts/run_thor_sav_image_box_benchmarks.sh
+bash scripts/thor/run_thor_sav_image_box_benchmarks.sh
 ```
 
 Outputs:
@@ -1141,8 +1141,8 @@ uses the SA-Co noun phrase in the manifest.
 Prepare or refresh the fixed SA-Co/VEval-SAV assets first:
 
 ```bash
-RUN_SUITE=0 RUN_NULL_SMOKE=1 bash scripts/setup_thor_saco_stream_benchmark.sh
-bash scripts/download_instinctsam_vitb_checkpoint.sh
+RUN_SUITE=0 RUN_NULL_SMOKE=1 bash scripts/setup/setup_thor_saco_stream_benchmark.sh
+bash scripts/data/download_instinctsam_vitb_checkpoint.sh
 ```
 
 Run InstinctSAM3 ViT-B and the distilled EfficientSAM3 TinyViT-21M checkpoint
@@ -1226,7 +1226,7 @@ The InstinctSAM3 checkpoint is loaded through
 `build_efficientsam3_image_model(..., backbone_type="vit_base",
 model_name="base", text_encoder_type="MobileCLIP-S1",
 text_encoder_context_length=16, text_encoder_pos_embed_table_size=77,
-load_from_HF=False)`. `scripts/download_instinctsam_vitb_checkpoint.sh`
+load_from_HF=False)`. `scripts/data/download_instinctsam_vitb_checkpoint.sh`
 downloads the `GM717/InstinctSAM-ViT-B` trunk and merges it with the local SAM3
 heads into `checkpoints/instinctsam/instinctsam_vitb_concept.pt`.
 

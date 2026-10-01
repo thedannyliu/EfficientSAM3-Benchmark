@@ -20,7 +20,7 @@ source ROS timestamps to preserve the live camera speed even when inference
 drops frames:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 mkdir -p overlays/thor/ros_camera/live
 
 ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
@@ -278,7 +278,7 @@ All terminals should start from the same environment:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 ### Terminal A: Choose The Stream Source
@@ -509,18 +509,18 @@ installed node:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 colcon build --symlink-install --packages-select sam_benchmark_ros
 cd ..
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Start the camera in Terminal A:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true \
@@ -533,7 +533,7 @@ terminal:
 ```bash
 set -e
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 topic hz /camera/camera/color/image_raw
 
@@ -557,7 +557,7 @@ window, so do not start `live_viewer_node` for these runs.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -586,7 +586,7 @@ attention, and memory encoder remain from SAM2.1-L.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -620,7 +620,7 @@ used by the Thor camera and multi-object video demos.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -651,7 +651,7 @@ ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam2_online_tracking_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -741,7 +741,7 @@ overlay rendering, and display work.
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m sam_backend.sam2_video_demo \
   --video-path videos/iphone16pro_demo.mov \
@@ -775,7 +775,7 @@ four-model comparison:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 VIDEO="$HOME/EfficientSAM3-Benchmark/videos/cup-1.MOV"
 OUT="overlays/thor/video_demo/tv5m_$(date +%Y%m%d-%H%M%S)"
@@ -901,7 +901,7 @@ frame at 20% opacity:
 
 ```bash
 cd ~/EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 VIDEO="$HOME/EfficientSAM3-Benchmark/videos/LBJ-dunk.mp4"
 RUN="overlays/thor/video_demo/four_models_with_masks"
@@ -1088,7 +1088,7 @@ effect on the next image frame. `Backspace` edits and `Esc` cancels text input.
 The viewer must use the same text prompt topic as the backend:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
   -p segmented_image_topic:=/segmented_image \
@@ -1255,7 +1255,7 @@ pkill -f live_viewer_node || true
 cd ros_ws
 colcon build --symlink-install --packages-select sam_benchmark_ros
 cd ..
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 ## 1. Prepare The Same Environment As Offline
@@ -1279,7 +1279,7 @@ https://docs.nvidia.com/deeplearning/frameworks/install-pytorch-jetson-platform/
 Then install this repo. Use `--system-site-packages` so the venv can use the
 ROS and Jetson OpenCV packages installed by APT.
 The command block below assumes the ROS Jazzy packages in the next section are
-already installed because `scripts/source_thor_ros_env.sh` sources
+already installed because `scripts/thor/source_thor_ros_env.sh` sources
 `/opt/ros/jazzy/setup.bash`.
 
 ```bash
@@ -1287,7 +1287,7 @@ python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m pip install -U pip
 python -m pip install "numpy>=1.26,<2" opencv-python-headless pillow pyyaml huggingface_hub
@@ -1305,20 +1305,20 @@ before sourcing:
 export THOR_VENV=/path/to/venv
 export SAM3_SOURCE=/path/to/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Install model source repos and checkpoints:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
-bash scripts/setup_model_repos.sh
-bash scripts/download_sam3_checkpoint.sh
-bash scripts/download_efficientsam3_checkpoints.sh
-bash scripts/download_instinctsam_vitb_checkpoint.sh
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
+source scripts/thor/source_thor_ros_env.sh
+bash scripts/setup/setup_model_repos.sh
+bash scripts/data/download_sam3_checkpoint.sh
+bash scripts/data/download_efficientsam3_checkpoints.sh
+bash scripts/data/download_instinctsam_vitb_checkpoint.sh
+bash scripts/data/download_sam2_family_checkpoints.sh
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh
 ```
 
 ## 2. Install And Source ROS 2
@@ -1349,7 +1349,7 @@ cd EfficientSAM3-Benchmark
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Check imports:
@@ -1366,11 +1366,11 @@ PY
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 colcon build --symlink-install
 cd ..
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Confirm entrypoints:
@@ -1414,7 +1414,7 @@ Terminal A, publish a recorded video into ROS:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros video_stream_node --ros-args \
   -p video_path:=videos/test1.mov \
@@ -1438,7 +1438,7 @@ Terminal B option 1, run SAM3 on each incoming ROS frame:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=sam3 \
@@ -1460,7 +1460,7 @@ see and save every published tracking frame:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p image_topic:=/image \
@@ -1485,7 +1485,7 @@ same incoming ROS frames:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=efficientsam3 \
@@ -1508,11 +1508,11 @@ RepViT-S command for Terminal B, not both at the same time.
 Terminal B option 3, run InstinctSAM ViT-B text-prompt segmentation on the same
 incoming ROS frames. The checkpoint is assembled from
 `GM717/InstinctSAM-ViT-B` trunk weights plus local SAM3 heads by
-`scripts/download_instinctsam_vitb_checkpoint.sh`:
+`scripts/data/download_instinctsam_vitb_checkpoint.sh`:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=efficientsam3 \
@@ -1541,7 +1541,7 @@ incoming ROS video frames:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/image \
@@ -1578,7 +1578,7 @@ node:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/image \
@@ -1605,7 +1605,7 @@ on the same incoming ROS frames:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
   -p image_topic:=/image \
@@ -1630,7 +1630,7 @@ opens the live overlay viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
@@ -1677,7 +1677,7 @@ Terminal A, start the official RealSense ROS wrapper with RGB enabled:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 launch realsense2_camera rs_launch.py \
   enable_color:=true \
@@ -1701,7 +1701,7 @@ stream:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=sam3 \
@@ -1723,7 +1723,7 @@ see and save every published tracking frame:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam3_native_clip_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -1748,7 +1748,7 @@ RealSense RGB stream:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=efficientsam3 \
@@ -1774,7 +1774,7 @@ on the RealSense RGB stream:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros yoloe_text_backend_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -1796,7 +1796,7 @@ viewer. SAM3 native clip tracking has its own window:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -1811,7 +1811,7 @@ Terminal B option 4, run interactive MobileSAM bbox-chain tracking:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -1833,7 +1833,7 @@ Terminal B option 5, run SAM1-H bbox-chain tracking:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros mobile_sam_interactive_node --ros-args \
   -p image_topic:=/camera/camera/color/image_raw \
@@ -1889,7 +1889,7 @@ Terminal A, simple OpenCV camera index:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros camera_stream_node --ros-args \
   -p camera_index:=0 \
@@ -1922,7 +1922,7 @@ Terminal B:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=null \
@@ -1938,7 +1938,7 @@ Terminal C, record 100 result messages:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 mkdir -p results/thor/ros_camera/null overlays/thor/ros_camera/null
 
 ros2 run sam_benchmark_ros result_recorder_node --ros-args \
@@ -1952,7 +1952,7 @@ Terminal D, record matching overlays:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros overlay_video_recorder_node --ros-args \
   -p overlay_topic:=/sam/overlay \
@@ -1972,7 +1972,7 @@ Terminal B:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros sam_backend_node --ros-args \
   -p backend:=sam3 \
@@ -1993,7 +1993,7 @@ Terminal C, open the interactive image-segmentation viewer:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 ros2 run sam_benchmark_ros live_viewer_node --ros-args \
   -p image_topic:=/image \
@@ -2440,19 +2440,19 @@ Accept access to the gated `GM717/InstinctSAM-ViT-B` Hugging Face repository,
 authenticate on Thor, and download both components:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 huggingface-cli login
-bash scripts/download_instinctsam_compressed_checkpoints.sh
+bash scripts/data/download_instinctsam_compressed_checkpoints.sh
 ```
 
 After pulling this change, rebuild and source the ROS workspace:
 
 ```bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 cd ros_ws
 colcon build --symlink-install --packages-select sam_benchmark_ros
 cd ..
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 Keep the RealSense publisher running on

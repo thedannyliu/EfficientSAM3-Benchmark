@@ -75,14 +75,14 @@ not want to add a PPA:
 ```bash
 conda create -y -n effisam3-5090 python=3.12
 conda activate effisam3-5090
-PYTHON_BIN="$(which python)" bash scripts/setup_5090_offline_benchmark.sh
+PYTHON_BIN="$(which python)" bash scripts/setup/setup_5090_offline_benchmark.sh
 ```
 
 Option D, any existing Python 3.12 installation:
 
 ```bash
 /path/to/python3.12 --version
-PYTHON_BIN=/path/to/python3.12 bash scripts/setup_5090_offline_benchmark.sh
+PYTHON_BIN=/path/to/python3.12 bash scripts/setup/setup_5090_offline_benchmark.sh
 ```
 
 The setup script intentionally refuses Python versions other than 3.12 because
@@ -139,7 +139,7 @@ PYTHON_BIN=python3.12 \
   PREPARE_DATASETS=0 \
   PREPARE_SAV_TEXT=0 \
   RUN_SMOKE=0 \
-  bash scripts/setup_5090_offline_benchmark.sh
+  bash scripts/setup/setup_5090_offline_benchmark.sh
 ```
 
 Activate the environment:
@@ -250,7 +250,7 @@ echo
 HF_USERNAME="${HF_USERNAME}" \
   HF_TOKEN="${HF_TOKEN}" \
   HF_GIT_TIMEOUT=900 \
-  bash scripts/download_hf_checkpoints_via_git.sh
+  bash scripts/data/download_hf_checkpoints_via_git.sh
 
 unset HF_USERNAME
 unset HF_TOKEN
@@ -293,9 +293,9 @@ Do not continue until this verification passes.
 After SAM3 and EfficientSAM3 are in place, fetch the remaining checkpoints:
 
 ```bash
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
-bash scripts/check_storage_budget.sh 300 data checkpoints external
+bash scripts/data/download_sam2_family_checkpoints.sh
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh
+bash scripts/data/check_storage_budget.sh 300 data checkpoints external
 ```
 
 ### 3.5 Prepare Datasets And Run Smoke
@@ -309,7 +309,7 @@ PYTHON_BIN=python3.12 \
   PREPARE_DATASETS=1 \
   PREPARE_SAV_TEXT=1 \
   RUN_SMOKE=1 \
-  bash scripts/setup_5090_offline_benchmark.sh
+  bash scripts/setup/setup_5090_offline_benchmark.sh
 ```
 
 ### 3.6 Reuse After A Failed Attempt
@@ -358,7 +358,7 @@ workstation CUDA PyTorch packages from `requirements.txt`.
 
 ```bash
 source ~/venvs/effisam3_venv_ros/bin/activate
-bash scripts/setup_model_repos.sh
+bash scripts/setup/setup_model_repos.sh
 ```
 
 This creates ignored editable checkouts:
@@ -441,7 +441,7 @@ echo
 HF_USERNAME="${HF_USERNAME}" \
   HF_TOKEN="${HF_TOKEN}" \
   HF_GIT_TIMEOUT=900 \
-  bash scripts/download_hf_checkpoints_via_git.sh 2>&1 \
+  bash scripts/data/download_hf_checkpoints_via_git.sh 2>&1 \
   | tee logs/rtx5090_debug/download_hf_git_lfs.log
 
 unset HF_USERNAME
@@ -505,13 +505,13 @@ After SAM3 and EfficientSAM3 pass verification, download the remaining model
 assets:
 
 ```bash
-bash scripts/download_sam2_family_checkpoints.sh 2>&1 \
+bash scripts/data/download_sam2_family_checkpoints.sh 2>&1 \
   | tee logs/rtx5090_debug/download_sam2_family.log
 
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh 2>&1 \
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh 2>&1 \
   | tee logs/rtx5090_debug/download_yoloe_edgetam_mobilesam.log
 
-bash scripts/check_storage_budget.sh 300 data checkpoints external
+bash scripts/data/check_storage_budget.sh 300 data checkpoints external
 ```
 
 Expected key files:
@@ -539,7 +539,7 @@ checkpoints/mobilesam/mobile_sam.pt
 COCO fixed10:
 
 ```bash
-bash scripts/prepare_coco_fixed_subset.sh 10
+bash scripts/data/prepare_coco_fixed_subset.sh 10
 ```
 
 Outputs:
@@ -553,7 +553,7 @@ configs/datasets/coco_val2017_fixed10_prompts.json
 SA-V fixed10:
 
 ```bash
-bash scripts/prepare_sav_fixed10_subset.sh
+bash scripts/data/prepare_sav_fixed10_subset.sh
 ```
 
 Outputs:
@@ -621,7 +621,7 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=1 YOLO_PRESET=quick \
   OUTPUT_DIR="results/rtx5090/offline/yolo_coco/${RUN_ID}" \
   OVERLAY_DIR="overlays/rtx5090/offline/yolo_coco/${RUN_ID}" \
-  bash scripts/run_thor_yolo_coco_suite.sh
+  bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 Full YOLO sweep:
@@ -631,7 +631,7 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_WEIGHTS=1 LIMIT=0 YOLO_PRESET=all \
   OUTPUT_DIR="results/rtx5090/offline/yolo_coco/${RUN_ID}" \
   OVERLAY_DIR="overlays/rtx5090/offline/yolo_coco/${RUN_ID}" \
-  bash scripts/run_thor_yolo_coco_suite.sh
+  bash scripts/thor/run_thor_yolo_coco_suite.sh
 ```
 
 Read first:
@@ -651,7 +651,7 @@ PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=1 YOLO_PRESET=quick \
   SAM_MODELS="sam3 sam2p1_hiera_tiny mobilesam_vit_t" \
   OUTPUT_ROOT="results/rtx5090/offline/coco_all/${RUN_ID}" \
   OVERLAY_ROOT="overlays/rtx5090/offline/coco_all/${RUN_ID}" \
-  bash scripts/run_thor_coco_all_benchmarks.sh
+  bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 Full matrix:
@@ -661,7 +661,7 @@ RUN_ID="$(date +%Y%m%d-%H%M%S)"
 PREPARE_COCO=1 DOWNLOAD_YOLO=1 DOWNLOAD_SAM=1 LIMIT=0 YOLO_PRESET=all \
   OUTPUT_ROOT="results/rtx5090/offline/coco_all/${RUN_ID}" \
   OVERLAY_ROOT="overlays/rtx5090/offline/coco_all/${RUN_ID}" \
-  bash scripts/run_thor_coco_all_benchmarks.sh
+  bash scripts/thor/run_thor_coco_all_benchmarks.sh
 ```
 
 Read first:
@@ -816,7 +816,7 @@ WITH_GT=0 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="320 640 1024" \
 OUTPUT_ROOT="results/rtx5090/offline/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Short diagnostic run with PyTorch profiler:
@@ -831,7 +831,7 @@ WITH_GT=0 \
 TORCH_PROFILER=1 \
 IMGSZ_LIST="640" \
 OUTPUT_ROOT="results/rtx5090/offline/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Read:

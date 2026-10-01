@@ -408,33 +408,33 @@ Submit all three checkpoints:
 ```bash
 cd /storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/efficientsam3-benchmark
 mkdir -p logs
-sbatch scripts/pace_l40s_tinyvit_trt_encoder_smoke.sbatch
+sbatch scripts/pace/pace_l40s_tinyvit_trt_encoder_smoke.sbatch
 ```
 
 Run the FP32/TF32/FP16/BF16 and Dynamo/legacy optimization matrix with:
 
 ```bash
-sbatch scripts/pace_l40s_tinyvit_trt_optimization_matrix.sbatch
+sbatch scripts/pace/pace_l40s_tinyvit_trt_optimization_matrix.sbatch
 ```
 
 Run the seven-profile layer-wise mixed-precision matrix with:
 
 ```bash
-sbatch scripts/pace_l40s_tinyvit_trt_mixed_precision.sbatch
+sbatch scripts/pace/pace_l40s_tinyvit_trt_mixed_precision.sbatch
 ```
 
 Run the semantic FP8 sensitivity screens with:
 
 ```bash
-sbatch scripts/pace_gpu_tinyvit_trt_layer_sensitivity.sbatch
-sbatch scripts/pace_gpu_tinyvit_trt_role_sensitivity.sbatch
+sbatch scripts/pace/pace_gpu_tinyvit_trt_layer_sensitivity.sbatch
+sbatch scripts/pace/pace_gpu_tinyvit_trt_role_sensitivity.sbatch
 ```
 
 For a hand-selected precision map, repeat the semantic selector; every selected layer is
 FP8 and every other image-encoder layer remains FP16:
 
 ```bash
-python scripts/pace_tinyvit_trt_encoder_smoke.py \
+python scripts/pace/pace_tinyvit_trt_encoder_smoke.py \
   --checkpoint checkpoints/distill/tv5.pt \
   --distill-root /path/to/SAM2-Distillation-Pipeline \
   --output-dir results/pace/tinyvit_trt_layer_sensitivity/manual \
@@ -449,15 +449,15 @@ python scripts/pace_tinyvit_trt_encoder_smoke.py \
 Run the downstream SAM2-L mask-agreement smoke for one precision tier with:
 
 ```bash
-sbatch --export=ALL,TIER=fp16 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
-sbatch --export=ALL,TIER=tf32 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
-sbatch --export=ALL,TIER=fp32 scripts/pace_l40s_tinyvit_trt_mask_parity.sbatch
+sbatch --export=ALL,TIER=fp16 scripts/pace/pace_l40s_tinyvit_trt_mask_parity.sbatch
+sbatch --export=ALL,TIER=tf32 scripts/pace/pace_l40s_tinyvit_trt_mask_parity.sbatch
+sbatch --export=ALL,TIER=fp32 scripts/pace/pace_l40s_tinyvit_trt_mask_parity.sbatch
 ```
 
 The array maps tasks `0/1/2` to `tv5/tv11/tv21`. The job runs:
 
 ```bash
-python scripts/pace_tinyvit_trt_encoder_smoke.py \
+python scripts/pace/pace_tinyvit_trt_encoder_smoke.py \
   --checkpoint checkpoints/distill/tv5.pt \
   --distill-root /storage/home/hcoda1/9/eliu354/r-agarg35-0/projects/SAM2-Distillation-Pipeline \
   --output-dir results/pace/tinyvit_trt_encoder/manual_tv5 \
@@ -589,7 +589,7 @@ Reproduce the formal baseline and selected candidate on one L40S with:
 ```bash
 sbatch \
   --export=ALL,ENGINE_PATH=results/pace/tinyvit_trt_aux_streams/11374004/tv5/aux-0/encoder.fp16.engine \
-  scripts/pace_l40s_tinyvit_trt_pipeline_pair.sbatch
+  scripts/pace/pace_l40s_tinyvit_trt_pipeline_pair.sbatch
 ```
 
 Reports are written below

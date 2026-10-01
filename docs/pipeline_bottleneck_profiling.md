@@ -93,10 +93,10 @@ Prepare the fixed COCO manifest and assets as in
 `docs/thor_offline_benchmark.md`:
 
 ```bash
-bash scripts/setup_model_repos.sh
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
-bash scripts/prepare_coco_fixed_subset.sh 10
+bash scripts/setup/setup_model_repos.sh
+bash scripts/data/download_sam2_family_checkpoints.sh
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh
+bash scripts/data/prepare_coco_fixed_subset.sh 10
 ```
 
 Expected manifest:
@@ -131,7 +131,7 @@ python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m pip install -U pip
 python -m pip install -r requirements-thor.txt
@@ -161,7 +161,7 @@ Run the matrix:
 
 ```bash
 cd EfficientSAM3-Benchmark
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 RUN_ID="thor-$(date +%Y%m%d-%H%M%S)"
 LIMIT=10 \
@@ -172,7 +172,7 @@ WITH_GT=0 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="320 640 1024" \
 OUTPUT_ROOT="results/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Then run a deployment-like disk-read variant:
@@ -187,7 +187,7 @@ WITH_GT=0 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="640" \
 OUTPUT_ROOT="results/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Optional GT/postprocess-heavy variant:
@@ -202,7 +202,7 @@ WITH_GT=1 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="640" \
 OUTPUT_ROOT="results/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Primary output to compare:
@@ -261,10 +261,10 @@ PY
 Prepare the same assets:
 
 ```bash
-bash scripts/setup_model_repos.sh
-bash scripts/download_sam2_family_checkpoints.sh
-bash scripts/download_yoloe_edgetam_mobilesam_assets.sh
-bash scripts/prepare_coco_fixed_subset.sh 10
+bash scripts/setup/setup_model_repos.sh
+bash scripts/data/download_sam2_family_checkpoints.sh
+bash scripts/data/download_yoloe_edgetam_mobilesam_assets.sh
+bash scripts/data/prepare_coco_fixed_subset.sh 10
 ```
 
 Record platform state:
@@ -288,7 +288,7 @@ WITH_GT=0 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="320 640 1024" \
 OUTPUT_ROOT="results/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Run the same disk-read variant:
@@ -303,7 +303,7 @@ WITH_GT=0 \
 TORCH_PROFILER=0 \
 IMGSZ_LIST="640" \
 OUTPUT_ROOT="results/bottleneck/${RUN_ID}" \
-bash scripts/run_pipeline_bottleneck_matrix.sh
+bash scripts/thor/run_pipeline_bottleneck_matrix.sh
 ```
 
 Optional Nsight Systems trace:

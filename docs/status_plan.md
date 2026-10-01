@@ -11,7 +11,7 @@ Last updated: 2026-05-27.
 - Default recorded videos are `videos/test1.mov` and `videos/test2.mov`.
 - PACE remains the backend benchmark/profiling environment.
 - Jetson Thor is the ROS, JetPack CUDA/TensorRT, and deployment validation environment.
-- Thor uses one unified environment via `scripts/source_thor_ros_env.sh`.
+- Thor uses one unified environment via `scripts/thor/source_thor_ros_env.sh`.
 - Active PACE L40S benchmark jobs submitted on 2026-05-27:
   - `9206977`: COCO fixed10 image suite, completed successfully on `embers`.
     Outputs: `results/coco/suite/9206977/` and `overlays/coco/suite/9206977/`.
@@ -41,7 +41,7 @@ Last updated: 2026-05-27.
   - `9214205`: CPU-only SA-V salient fixed3 preparation, completed data
     extraction and review generation. The Slurm job itself exited nonzero only
     because the console entrypoint `sam-review-sav-manifest` was not installed
-    in `.venv`; `scripts/prepare_sav_salient_subset.sh` now calls
+    in `.venv`; `scripts/data/prepare_sav_salient_subset.sh` now calls
     `python -m sam_backend.sav_review`, and the review was generated manually.
     Outputs: `data/manifests/sav_val_salient_fixed3.jsonl`,
     `data/sa-v/sav_val_salient_fixed3/`, and
@@ -73,8 +73,8 @@ Last updated: 2026-05-27.
     `checkpoints/yoloe/yoloe-26m-seg.pt`,
     `checkpoints/edgetam/edgetam.pt`, and
     `checkpoints/mobilesam/mobile_sam.pt`.
-  - `scripts/check_pace_qos.sh` verifies Slurm scripts and recent jobs use
-    `QOS=embers`; `START_DATE=2026-05-01 scripts/check_pace_qos.sh` currently
+  - `scripts/pace/check_pace_qos.sh` verifies Slurm scripts and recent jobs use
+    `QOS=embers`; `START_DATE=2026-05-01 scripts/pace/check_pace_qos.sh` currently
     reports no non-embers jobs for this user.
 
 ## Document Layers
@@ -130,9 +130,9 @@ Main tools:
 - `sam_backend/profile_sav_video.py`
 - `sam_backend/summarize_results.py`
 - `sam_backend/variant_runner.py`
-- `scripts/prepare_coco_fixed_subset.sh`
-- `scripts/prepare_benchmark_datasets.sh`
-- `scripts/download_sav_valtest_subset.sh`
+- `scripts/data/prepare_coco_fixed_subset.sh`
+- `scripts/data/prepare_benchmark_datasets.sh`
+- `scripts/data/download_sav_valtest_subset.sh`
 - `docs/benchmark_dataset_protocol.md`
 
 Current known-good EfficientSAM3 example:
@@ -216,7 +216,7 @@ manifest row -> image RGB -> backend.predict(prompt)
 Commands:
 
 ```bash
-bash scripts/prepare_coco_fixed_subset.sh 10
+bash scripts/data/prepare_coco_fixed_subset.sh 10
 
 sam-profile-coco \
   --backend efficientsam3 \
@@ -247,15 +247,15 @@ Current local COCO status:
   New runs should use nested paths under
   `results/coco/<suite-or-smoke>/<run>/<model>/`.
 - Current local storage for `data + checkpoints + external` is about 13.78 GiB,
-  checked with `scripts/check_storage_budget.sh 300 data checkpoints external`.
+  checked with `scripts/data/check_storage_budget.sh 300 data checkpoints external`.
 - Official SAM3 image checkpoint is stored under `checkpoints/sam3/sam3.pt`
-  via `scripts/download_sam3_checkpoint.sh`, so the COCO suite does not rely on
+  via `scripts/data/download_sam3_checkpoint.sh`, so the COCO suite does not rely on
   an unmanaged Hugging Face cache path.
 
 PACE suite command:
 
 ```bash
-sbatch scripts/pace_l40s_coco_suite.sbatch
+sbatch scripts/pace/pace_l40s_coco_suite.sbatch
 ```
 
 Manifest selection assumptions:
@@ -329,7 +329,7 @@ Still pending:
 - SAM3-LiteText native video tracking benchmark.
 - Full EfficientSAM3 native video tracking is still checkpoint-dependent; current public image encoder checkpoints should not be treated as complete tracking checkpoints.
 - Official SA-V val/test subset extraction is handled by
-  `scripts/download_sav_valtest_subset.sh`.
+  `scripts/data/download_sav_valtest_subset.sh`.
 - SA-V val/test has masks but no semantic object category names, so current
   SA-V tracking evaluation uses point prompts. Text-prompt video tracking needs
   a separate documented text-label source.
@@ -338,14 +338,14 @@ Still pending:
   about `0.421%` of its first frame with a thin bbox; `sav_023216` object `002`
   covers about `0.683%`; `sav_018332` object `000` covers about `3.122%`.
   They are valid official GT objects but poor demo targets. Prefer
-  `bash scripts/prepare_sav_salient_subset.sh` for visual POC overlays; it
+  `bash scripts/data/prepare_sav_salient_subset.sh` for visual POC overlays; it
   writes `data/manifests/sav_val_salient_fixed3.jsonl` and leaves the current
   fixed3 manifest untouched.
 - Keep dataset/checkpoint/external storage under 300 GiB. Use
-  `scripts/check_storage_budget.sh 300 data checkpoints external` before and
+  `scripts/data/check_storage_budget.sh 300 data checkpoints external` before and
   after SA-V downloads/extraction.
 - Do not download the full SA-V archive set into this repo. Use
-  `bash scripts/download_sav_valtest_subset.sh val 3`, which downloads the
+  `bash scripts/data/download_sav_valtest_subset.sh val 3`, which downloads the
   official val tar, keeps only 3 GT videos, records the selected IDs in
   `data/sa-v/sav_val_fixed3/official_subset_manifest.json`, and removes the
   tar unless `KEEP_SAV_ARCHIVE=1`.
@@ -353,7 +353,7 @@ Still pending:
 PACE SAM2-family SA-V command:
 
 ```bash
-DOWNLOAD_SAM2_FAMILY_CHECKPOINTS=1 sbatch scripts/pace_l40s_sav_video_sam2_family.sbatch
+DOWNLOAD_SAM2_FAMILY_CHECKPOINTS=1 sbatch scripts/pace/pace_l40s_sav_video_sam2_family.sbatch
 ```
 
 ### Layer 3a: Sampled Camera-Frame Smoke
@@ -364,11 +364,11 @@ Thor camera path.
 - `sam_backend/thor_pipeline_smoke.py` now accepts a video path or OpenCV
   camera index, text prompts, point prompts, SAM3/EfficientSAM3 image backends,
   and SAM2-family point-prompt image backends.
-- `scripts/run_sampled_camera_frame_smoke.sh` samples one frame by default and
+- `scripts/thor/run_sampled_camera_frame_smoke.sh` samples one frame by default and
   runs:
   - `efficientsam3_es3p1_weak_image_weak_text` with text prompt `monitor`.
   - `efficient_sam2p1_hiera_tiny` with normalized point prompt `0.5,0.5`.
-- `scripts/pace_l40s_sampled_camera_frame_smoke.sbatch` runs the same smoke on
+- `scripts/pace/pace_l40s_sampled_camera_frame_smoke.sbatch` runs the same smoke on
   PACE L40S with `embers` QOS.
 
 Current submitted PACE job:
@@ -403,8 +403,8 @@ text prompt -> YOLOE-26M-seg instance mask/box
 Tools:
 
 - `sam_backend/profile_yoloe_edgetam.py`
-- `scripts/download_yoloe_edgetam_mobilesam_assets.sh`
-- `scripts/pace_l40s_yoloe_edgetam_poc.sbatch`
+- `scripts/data/download_yoloe_edgetam_mobilesam_assets.sh`
+- `scripts/pace/pace_l40s_yoloe_edgetam_poc.sbatch`
 
 Expected outputs:
 
@@ -439,7 +439,7 @@ Implemented as a point-prompt COCO fixed10 backend, pending GPU run.
 Tools:
 
 - `sam_backend/backends.py` backend id `mobilesam`
-- `scripts/pace_l40s_mobilesam_coco.sbatch`
+- `scripts/pace/pace_l40s_mobilesam_coco.sbatch`
 
 Expected outputs:
 

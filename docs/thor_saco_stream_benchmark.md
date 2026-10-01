@@ -61,7 +61,7 @@ export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
 unset SAM_BENCH_SCRATCH
 
-bash scripts/run_thor_saco_video_and_image_per_frame.sh
+bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 The one-command output goes to:
@@ -81,7 +81,7 @@ overlays/thor/ros_saco_stream/<run_id>/<model_id>/overlay.mp4
 For a command-only check without loading models:
 
 ```bash
-DRY_RUN=1 bash scripts/run_thor_saco_video_and_image_per_frame.sh
+DRY_RUN=1 bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 For a smaller first pass:
@@ -90,7 +90,7 @@ For a smaller first pass:
 SACO_MODELS="sam3_ref_native sam3_ref_image_per_frame sam1_vit_h_bbox_chain sam1_vit_h_image_per_frame mobilesam_vit_t_bbox_chain mobilesam_vit_t_image_per_frame" \
 ROS_MODELS="sam3_ref_native sam1_vit_h_bbox_chain mobilesam_vit_t_bbox_chain" \
 MAX_FRAMES=60 \
-bash scripts/run_thor_saco_video_and_image_per_frame.sh
+bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 Useful one-command switches:
@@ -139,7 +139,7 @@ python3 -m venv --system-site-packages ~/venvs/effisam3_venv_ros
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 
 python -m pip install -U pip
 
@@ -161,7 +161,7 @@ cd EfficientSAM3-Benchmark
 export THOR_VENV=~/venvs/effisam3_venv_ros
 export SAM3_SOURCE=~/efficientsam3/sam3
 export THOR_ROS_SETUP=/opt/ros/jazzy/setup.bash
-source scripts/source_thor_ros_env.sh
+source scripts/thor/source_thor_ros_env.sh
 ```
 
 ## 3. Use Repo-Local Asset Directories
@@ -193,7 +193,7 @@ path as `SAV_JPEG_ROOT`. The setup script will symlink it into the local
 
 ```bash
 SAV_JPEG_ROOT=/path/to/full/JPEGImages_24fps \
-  bash scripts/setup_thor_saco_stream_benchmark.sh
+  bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 The old `sav_val_fixed10` subset is useful for smoke tests, but it is not
@@ -226,7 +226,7 @@ downloads the selected SA-V frames if needed, then runs a null-backend smoke
 test with overlay output.
 
 ```bash
-bash scripts/setup_thor_saco_stream_benchmark.sh
+bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 Useful environment knobs:
@@ -259,7 +259,7 @@ overlays/thor/saco_stream/smoke/null/<source_id>/overlay.mp4
 Print commands without loading models:
 
 ```bash
-RUN_SUITE=1 DRY_RUN=1 bash scripts/setup_thor_saco_stream_benchmark.sh
+RUN_SUITE=1 DRY_RUN=1 bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 Restrict to a subset:
@@ -267,7 +267,7 @@ Restrict to a subset:
 ```bash
 SACO_MODELS="sam2p1_hiera_tiny_native sam3_ref_text_bbox_chain efficientsam3_ev_m_text_bbox_chain" \
 RUN_SUITE=1 DRY_RUN=1 \
-bash scripts/setup_thor_saco_stream_benchmark.sh
+bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 ## 6. Run The Full Offline Stream Suite
@@ -275,7 +275,7 @@ bash scripts/setup_thor_saco_stream_benchmark.sh
 Run all available models and save overlay MP4s:
 
 ```bash
-RUN_SUITE=1 DRY_RUN=0 bash scripts/setup_thor_saco_stream_benchmark.sh
+RUN_SUITE=1 DRY_RUN=0 bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 The setup script defaults to `SACO_MODE_SET=video`. To run only independent
@@ -283,20 +283,20 @@ image-per-frame models through the same setup script:
 
 ```bash
 SACO_MODE_SET=image_per_frame RUN_SUITE=1 DRY_RUN=0 \
-  bash scripts/setup_thor_saco_stream_benchmark.sh
+  bash scripts/setup/setup_thor_saco_stream_benchmark.sh
 ```
 
 Run offline video modes, offline image-per-frame modes, and the ROS video stream
 pipeline:
 
 ```bash
-bash scripts/run_thor_saco_video_and_image_per_frame.sh
+bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 Dry-run the one-command offline + ROS suite:
 
 ```bash
-DRY_RUN=1 bash scripts/run_thor_saco_video_and_image_per_frame.sh
+DRY_RUN=1 bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 The one-command script accepts the same common knobs:
@@ -320,7 +320,7 @@ Or run a smaller first pass:
 SACO_MODELS="mobilesam_vit_t_bbox_chain sam2p1_hiera_tiny_native sam3_ref_text_bbox_chain efficientsam3_ev_m_text_bbox_chain" \
 ROS_MODELS="mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native" \
 MAX_FRAMES=60 \
-bash scripts/run_thor_saco_video_and_image_per_frame.sh
+bash scripts/thor/run_thor_saco_video_and_image_per_frame.sh
 ```
 
 Important outputs:
@@ -346,7 +346,7 @@ prediction artifacts.
 Build one model-wise CSV after the offline and ROS runs finish:
 
 ```bash
-bash scripts/summarize_thor_saco_model_results.sh
+bash scripts/thor/summarize_thor_saco_model_results.sh
 ```
 
 Default output:
@@ -363,7 +363,7 @@ The wrapper auto-selects the latest directories under
 OFFLINE_RUN_ID=<offline_run_id> \
 ROS_RUN_ID=<ros_run_id> \
 OUTPUT=results/thor/saco_model_wise_summary_<run_id>.csv \
-bash scripts/summarize_thor_saco_model_results.sh
+bash scripts/thor/summarize_thor_saco_model_results.sh
 ```
 
 The model-wise CSV contains one row per model/mode, including:
@@ -465,7 +465,7 @@ It then starts one backend at a time and records result/overlay topics.
 Run the default ROS video-stream set:
 
 ```bash
-bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
+bash scripts/thor/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl
 ```
 
 The default ROS set runs every currently supported ROS video-stream model:
@@ -486,7 +486,7 @@ efficientsam3_tv_m_text_bbox_chain
 Pass an explicit subset for a faster first pass:
 
 ```bash
-bash scripts/run_thor_ros_saco_stream_suite.sh \
+bash scripts/thor/run_thor_ros_saco_stream_suite.sh \
   data/manifests/saco_veval_sav_fixed20.jsonl \
   mobilesam_vit_t_bbox_chain sam1_vit_h_bbox_chain sam3_ref_native
 ```
@@ -534,7 +534,7 @@ Run the full multi-prompt image benchmark:
 cd ~/EfficientSAM3-Benchmark
 git pull
 unset SAM_BENCH_SCRATCH
-bash scripts/run_thor_multi_prompt_image_benchmark.sh
+bash scripts/thor/run_thor_multi_prompt_image_benchmark.sh
 ```
 
 Outputs:
@@ -564,11 +564,11 @@ Examples:
 # MobileSAM point-count scaling only.
 SUITE=mobilesam \
 POINT_COUNTS=1,2,3,5,10,15 \
-bash scripts/run_thor_multi_prompt_image_benchmark.sh
+bash scripts/thor/run_thor_multi_prompt_image_benchmark.sh
 
 # SAM3 vs SAM3.1 on one repeated noun, useful for scenes with several cups.
 SUITE=sam3_text TEXT_PROMPT=cup \
-bash scripts/run_thor_multi_prompt_image_benchmark.sh
+bash scripts/thor/run_thor_multi_prompt_image_benchmark.sh
 ```
 
 Latency columns:
