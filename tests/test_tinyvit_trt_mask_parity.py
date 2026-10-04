@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).parents[1] / "scripts" / "pace_tinyvit_trt_mask_parity.py"
+SCRIPT = Path(__file__).parents[1] / "scripts/pace" / "pace_tinyvit_trt_mask_parity.py"
 SPEC = importlib.util.spec_from_file_location("tinyvit_trt_mask_parity", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None

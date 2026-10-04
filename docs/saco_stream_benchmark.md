@@ -12,7 +12,7 @@ export SAM_BENCH_SCRATCH=/storage/scratch1/9/eliu354/efficientsam3-benchmark
 Download model assets and source repos:
 
 ```bash
-bash scripts/download_saco_stream_assets.sh
+bash scripts/data/download_saco_stream_assets.sh
 ```
 
 Prepare a fixed 20-video SA-Co/VEval-SAV manifest:
@@ -52,7 +52,7 @@ For Thor recorded ROS stream timing, publish the fixed video at 30 FPS with
 `video_stream_node`, run the selected backend, and use:
 
 ```bash
-bash scripts/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl <model_id>
+bash scripts/thor/run_thor_ros_saco_stream_suite.sh data/manifests/saco_veval_sav_fixed20.jsonl <model_id>
 ```
 
 This helper prints the recorder commands for `/sam/result_json` and

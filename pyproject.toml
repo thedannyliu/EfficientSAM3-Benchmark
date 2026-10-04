@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "torch"]
 
 [project.scripts]
 sam-benchmark = "sam_backend.benchmark:main"
